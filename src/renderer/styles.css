@@ -169,3 +169,25 @@ p { margin: 0 0 8px; }
 .diagram-canvas canvas { display: block; cursor: grab; touch-action: none; }
 .diagram-canvas canvas:active { cursor: grabbing; }
 .diagram-canvas .diagram-minimap { position: absolute; right: 16px; bottom: 16px; width: 180px; height: 120px; border-radius: 6px; box-shadow: 0 2px 12px #0003; pointer-events: none; cursor: default; }
+
+/* Historial de recursos */
+.history-panel { display: flex; flex-direction: column; width: 260px; flex-shrink: 0; background: var(--bg-elev); border-left: 1px solid var(--border); overflow: hidden; }
+.history-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-muted); border-bottom: 1px solid var(--border); }
+.history-busy { text-transform: none; letter-spacing: 0; color: var(--info); }
+.history-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
+.history-actions .btn { padding: 4px 8px; font-size: 12px; }
+.history-error { margin: 8px; padding: 6px 8px; border-radius: var(--radius); color: var(--danger); border: 1px solid var(--danger); font-size: 12px; }
+.history-empty { padding: 12px; font-size: 13px; }
+.history-list { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
+.history-item { display: flex; flex-direction: column; gap: 3px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.history-item.unavailable .history-name, .history-item.unavailable .history-path { opacity: 0.6; text-decoration: line-through; }
+.history-row { display: flex; align-items: center; gap: 6px; }
+.history-name { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-path { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.history-date { font-size: 11px; color: var(--fg-muted); }
+.btn-small { padding: 2px 8px; font-size: 12px; }
+.badge-missing { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
+
+@media (max-width: 900px) {
+  .history-panel { width: 220px; }
+}

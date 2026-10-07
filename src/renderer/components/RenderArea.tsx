@@ -13,9 +13,9 @@ interface Props {
 }
 
 export function RenderArea({ project, model, selectedId, onSelect, canvasRef }: Props): JSX.Element {
-  if (!project) return <main className="render-area" />;
+  if (!project && !model) return <main className="render-area" />;
 
-  if (!project.puml) {
+  if (project && !project.puml && !model) {
     return (
       <main className="render-area">
         <h1 className="render-title">Este es el nuevo proyecto</h1>

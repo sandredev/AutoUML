@@ -1,5 +1,5 @@
 // Puente seguro. Solo importa 'electron' y TIPOS, porque el preload corre en sandbox.
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import type { AutoUmlApi, IpcChannel, MenuAction, MenuState } from '../shared/ipc';
 import type { HistoryApi } from '../shared/history';
 
@@ -22,6 +22,18 @@ const history: HistoryApi = {
 
 const api: AutoUmlApi = {
   history,
+  openDroppedPuml: (file) => {
+    let resourcePath: string;
+    try {
+      resourcePath = webUtils.getPathForFile(file as Parameters<typeof webUtils.getPathForFile>[0]);
+    } catch {
+      return Promise.resolve({ ok: false, error: 'No se pudo obtener la ruta del archivo soltado.' });
+    }
+    if (!resourcePath) {
+      return Promise.resolve({ ok: false, error: 'No se pudo obtener la ruta del archivo soltado.' });
+    }
+    return invoke('history:openPumlPath', resourcePath);
+  },
   getStorageInfo: () => invoke('storage:info'),
   listProjects: () => invoke('projects:list'),
   createProject: (name) => invoke('projects:create', name),

@@ -1,5 +1,5 @@
 // Tipos compartidos entre main, preload y renderer.
-import type { HistoryApi } from './history';
+import type { HistoryApi, OpenPumlFile } from './history';
 // El preload solo importa TIPOS de aquí, porque en modo sandbox no puede cargar otros módulos.
 
 export interface ProjectMeta {
@@ -88,6 +88,8 @@ export type IpcChannel =
 /** API expuesta en window.autouml (bridge tipado del shell Electron). */
 export interface AutoUmlApi {
   history: HistoryApi;
+  /** Obtiene y abre el archivo nativo soltado sin exponer su ruta al renderer. */
+  openDroppedPuml(file: { readonly name: string }): Promise<Result<OpenPumlFile>>;
   getStorageInfo(): Promise<StorageInfo>;
   listProjects(): Promise<Result<ProjectSummary[]>>;
   createProject(name: string): Promise<Result<ProjectInfo>>;

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MenuAction, ProjectInfo, StorageInfo } from '../shared/ipc';
+import type { OpenPumlFile } from '../shared/history';
 import { buildTree, countByCategory } from '../core/classify';
 import { parsePuml } from '../core/parser';
 import type { DiagramModel } from '../core/model';
 import { Header } from './components/Header';
+import { HistoryPanel, openDroppedFiles } from './components/HistoryPanel';
 import { IssuesPanel } from './components/IssuesPanel';
 import { RenderArea } from './components/RenderArea';
 import { Sidebar } from './components/Sidebar';
@@ -20,7 +22,7 @@ interface ModalState {
 
 export default function App() {
   const [project, setProject] = useState<ProjectInfo | null>(null);
-  const [modal, setModal] = useState<ModalState>({ open: true, dismissable: false });
+  const [modal, setModal] = useState<ModalState>({ open: true, dismissable: true });
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(280);
@@ -34,14 +36,21 @@ export default function App() {
   const [issuesOpen, setIssuesOpen] = useState(true);
   const [sourceTick, setSourceTick] = useState(0); // fuerza re-parseo en recarga
   const canvasRef = useRef<DiagramCanvasHandle | null>(null);
+  const [externalName, setExternalName] = useState<string | null>(null);
+  const [historyTick, setHistoryTick] = useState(0);
+  const dropBusy = useRef(false);
+  const docName = externalName
+    ? externalName.replace(/\.[^.]+$/, '')
+    : project?.meta.name ?? 'diagrama';
 
   useEffect(() => {
     void api.getStorageInfo().then(setStorage);
   }, []);
 
   useEffect(() => {
-    document.title = project ? `${project.meta.name} — AutoUML` : 'AutoUML';
-  }, [project]);
+    const currentName = externalName?.replace(/\.[^.]+$/, '') ?? project?.meta.name;
+    document.title = currentName ? `${currentName} — AutoUML` : 'AutoUML';
+  }, [project, externalName]);
 
   // Sincroniza qué opciones del menú nativo están habilitadas.
   useEffect(() => {
@@ -71,8 +80,49 @@ export default function App() {
     setSource(r.value);
     setDiagram(parsePuml(r.value));
     setSourceTick((t) => t + 1);
+    setExternalName(null);
     return true;
   }, []);
+
+  const handlePumlOpened = useCallback((file: OpenPumlFile) => {
+    setSource(file.source);
+    setDiagram(parsePuml(file.source));
+    setSourceTick((tick) => tick + 1);
+    setSelectedId(null);
+    setExternalName(file.entry.name);
+    setModal((current) => current.open ? { open: false, dismissable: true } : current);
+  }, []);
+
+  useEffect(() => {
+    const onDragOver = (event: DragEvent) => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    };
+    const onDrop = (event: DragEvent) => {
+      event.preventDefault();
+      if (dropBusy.current) return;
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      dropBusy.current = true;
+      void openDroppedFiles(files, api.openDroppedPuml)
+        .then((outcome) => {
+          if (outcome.status) setStatus(outcome.status);
+          if (outcome.opened) handlePumlOpened(outcome.opened);
+          if (outcome.refresh) setHistoryTick((tick) => tick + 1);
+        })
+        .catch((error: unknown) => {
+          setStatus({ kind: 'error', text: error instanceof Error ? error.message : 'No se pudo abrir el archivo soltado.' });
+        })
+        .finally(() => {
+          dropBusy.current = false;
+        });
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [handlePumlOpened]);
 
   // Carga inicial del texto cuando el proyecto pasa a tener .puml.
   const loadedFor = useRef<string | null>(null);
@@ -129,6 +179,7 @@ export default function App() {
 
   const onProjectOpened = useCallback((p: ProjectInfo) => {
     setProject(p);
+    setExternalName(null);
     setModal({ open: false, dismissable: true });
     setStatus({ kind: 'info', text: `Proyecto "${p.meta.name}" abierto.` });
   }, []);
@@ -140,16 +191,16 @@ export default function App() {
   const handleFit = useCallback(() => canvasRef.current?.fit(), []);
   const handleExport = useCallback(async () => {
     const handle = canvasRef.current;
-    if (!handle || !project) return;
+    if (!handle) return;
     const blob = await handle.exportPng();
     if (!blob) {
       setStatus({ kind: 'error', text: 'No hay diagrama para exportar.' });
       return;
     }
-    const result = await api.savePng(`${project.meta.name}.png`, new Uint8Array(await blob.arrayBuffer()));
+    const result = await api.savePng(`${docName}.png`, new Uint8Array(await blob.arrayBuffer()));
     if (!result.ok) setStatus({ kind: 'error', text: result.error });
     else if (result.value) setStatus({ kind: 'success', text: `PNG guardado en ${result.value}.` });
-  }, [project]);
+  }, [docName]);
 
   const handleSidebarSelect = useCallback((id: string) => {
     setSelectedId(id);
@@ -249,6 +300,14 @@ export default function App() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           canvasRef={canvasRef}
+        />
+        <HistoryPanel
+          api={api.history}
+          source={source}
+          suggestedName={`${docName}.puml`}
+          refreshKey={historyTick}
+          onOpened={handlePumlOpened}
+          onStatus={setStatus}
         />
       </div>
       <IssuesPanel
