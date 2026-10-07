@@ -1,0 +1,16 @@
+appId: co.edu.ingsoft.autouml
+productName: AutoUML
+asar: true
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+directories:
+  output: release
+files:
+  - dist/renderer/**/*
+  - dist-electron/**/*
+  - "!dist-electron/**/*.map"
+  - package.json
+win:
+  target: portable
+linux:
+  target: AppImage
+  category: Development

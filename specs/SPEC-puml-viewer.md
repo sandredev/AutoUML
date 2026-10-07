@@ -22,12 +22,25 @@ npm run e2e  # smoke: cargar .puml 500 entidades, pan/zoom sin freeze
 ## Project Structure
 
 ```text
-src/lib/puml-parse.ts      → subset .puml (clases) → grafo (solo si estrategia B)
-src/lib/graph-layout.ts    → layout incremental (elkjs/dagre), puras y testeables
-src/components/DiagramCanvas.tsx → canvas, viewport, minimap, overlays
-src/stores/diagramStore.ts → pumlText, grafo, viewport, selección (compartido con interacción)
-tests/puml-viewer/ + fixtures 10/100/500/1000 entidades (generados por script)
+src/core/parser.ts                    → subset .puml → DiagramModel
+src/render/PumlViewer.tsx             → componente embebible, independiente de Electron
+src/render/layout/{layout,useLayout}.ts → dagre en Web Worker
+src/render/canvas/                    → viewport, culling espacial, dibujo y selección
+src/renderer/components/Sidebar.tsx   → búsqueda, categorías y selección
+src/core/*.test.ts, src/render/**/*.test.ts → pruebas unitarias del parser, layout y canvas
+scripts/gen-puml.ts                   → fixtures sintéticas escalables
 ```
+
+### Contrato de integración actual
+
+`PumlViewer` recibe `DiagramModel | null`, selección y callbacks como props; no lee archivos ni depende de Electron. El shell lee el `.puml` mediante el bridge tipado `window.autouml`; la conversión a `DiagramModel` ocurre en renderer, y el canvas no conoce el IPC. Al completar `app-shell` y `puml-io-history`, sus métodos se ampliarán manteniendo el mismo bridge.
+
+La API pública está en `src/render/index.ts`: expone `parsePuml`, `PumlViewer`, `buildTree`, `countByCategory` y sus tipos, para que el host no importe rutas internas del renderizador.
+
+### Estado de implementación importado
+
+- Implementado: parser de paquetes, alias y relaciones; layout fuera del hilo UI; canvas con zoom/pan, selección, culling, minimapa y exportación PNG; búsqueda por nombre/alias, grupos por categoría y colapso de paquetes desde el encabezado del paquete.
+- Pendiente para cumplir este spec: contrato de actualización incremental con `java-ingest`, comprobar interacción del minimapa/collapse en Electron real y mediciones repetibles de rendimiento/memoria.
 
 ## Code Style
 
