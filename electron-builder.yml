@@ -7,6 +7,7 @@ directories:
 files:
   - dist/renderer/**/*
   - dist-electron/**/*
+  - "!dist-electron/**/*.test.js"
   - "!dist-electron/**/*.map"
   - package.json
 win:

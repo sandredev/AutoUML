@@ -1,18 +1,22 @@
 # AutoUML
 
-Aplicación de escritorio para visualizar diagramas de clases PlantUML y, en fases posteriores, generarlos desde proyectos Java y editarlos en un canvas.
+Aplicación de escritorio para abrir, inspeccionar y exportar diagramas de clases PlantUML. Incluye creación y carga de proyectos, historial de archivos recientes y registro de carpetas Java para una futura integración del análisis.
 
-## Estado
+## Funcionalidades
 
-El código importado aporta el primer visor funcional: parser de un subconjunto de PlantUML, layout en Web Worker, canvas con pan/zoom, búsqueda y selección por categoría, colapso de paquetes, minimapa y exportación PNG con diálogo nativo. El componente de visualización está separado de Electron; la API pública para el shell de AutoUML se exporta desde `src/render/index.ts`.
+- Crear y cargar proyectos AutoUML. Cada proyecto mantiene como máximo un diagrama en `diagram.puml`.
+- Abrir archivos `.puml` desde el historial o arrastrarlos a la aplicación; guardar el diagrama actual con otro nombre.
+- Navegar clases, interfaces, enums, records, anotaciones, tipos `sealed`, externos y no declarados.
+- Buscar y seleccionar tipos, plegar paquetes, recorrer diagramas grandes con minimapa y controles de zoom, y exportar el canvas a PNG.
+- Registrar una carpeta Java en el historial. El análisis del código Java todavía no está integrado.
 
-El bridge `window.autouml` ya está tipado, pero conserva por ahora los métodos del flujo de proyectos PUML importado. La integración del sidecar Java y el historial compartido siguen pendientes según los specs.
-
-## Requisitos y comandos
+## Requisitos
 
 - Node.js compatible con Vite 7 y npm.
-- Electron se descarga durante `npm ci`; la ejecución de la app requiere su binario.
-- Para generar diagramas desde Java también se requerirá JRE 17+ cuando se integre `java-ingest`.
+- Para ejecutar la aplicación en desarrollo o empaquetarla se requiere el binario de Electron, que npm instala como dependencia.
+- La integración futura de análisis Java requerirá JRE 17 o posterior.
+
+## Desarrollo y compilación
 
 ```bash
 npm ci
@@ -23,14 +27,22 @@ npm run build
 npm run dist
 ```
 
-`npm run dist` empaqueta el ejecutable portable de Windows y AppImage de Linux. El worker de layout se genera como bundle clásico para cargarlo desde el renderer empaquetado.
+`npm run dist` genera el ejecutable portable de Windows y el AppImage de Linux en `release/`. Los archivos de aplicación se empaquetan en ASAR; Vite genera el worker de layout como bundle clásico para el renderer empaquetado.
 
-## PlantUML
+## Almacenamiento de proyectos
 
-El visor reconoce declaraciones de clases, interfaces, enums, records, anotaciones y estereotipos, miembros, paquetes, alias y relaciones de herencia, implementación, asociación y dependencia. Las directivas y construcciones PlantUML fuera de ese subconjunto pueden ignorarse o aparecer como avisos; la app no ejecuta PlantUML ni necesita conexión a internet para dibujar.
+En desarrollo, los proyectos se guardan dentro de la carpeta `userData` de Electron. En una aplicación empaquetada, AutoUML intenta crear `projects/` junto al ejecutable (o junto al AppImage). Si no puede escribir allí, usa `userData/projects` y presenta un aviso. Cada proyecto contiene `project.json` y, si tiene diagrama, `diagram.puml`.
+
+## Formato PlantUML
+
+El visor reconoce declaraciones de clases, interfaces, enums, records y anotaciones, estereotipos como `<<sealed>>`, miembros, paquetes, alias y relaciones de herencia, implementación, asociación y dependencia. Las construcciones fuera de este subconjunto pueden ignorarse o mostrarse como avisos. AutoUML no ejecuta PlantUML ni necesita conexión a internet para dibujar.
 
 ## Especificaciones
 
 - [Visión global](SPEC.md)
 - [Mapa de capacidades](CAPABILITY-MAP.md)
-- [Spec del visor](specs/SPEC-puml-viewer.md)
+- [Shell de la aplicación](specs/SPEC-app-shell.md)
+- [Ingesta Java](specs/SPEC-java-ingest.md)
+- [Historial y entrada PUML](specs/SPEC-puml-io-history.md)
+- [Visor PUML](specs/SPEC-puml-viewer.md)
+- [Interacción con el canvas](specs/SPEC-canvas-interaction.md)
