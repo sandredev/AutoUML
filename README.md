@@ -12,22 +12,90 @@ Aplicación de escritorio para abrir, inspeccionar y exportar diagramas de clase
 
 ## Requisitos
 
-- Node.js compatible con Vite 7 y npm.
-- Para ejecutar la aplicación en desarrollo o empaquetarla se requiere el binario de Electron, que npm instala como dependencia.
+- Node.js 20.19+ o 22.12+ y npm ([descargar Node.js](https://nodejs.org/)).
+- Git para clonar el repositorio.
+- Conexión a internet durante `npm ci`, porque Electron se descarga como dependencia.
 - La integración futura de análisis Java requerirá JRE 17 o posterior.
 
-## Desarrollo y compilación
+## Compilar en Windows
+
+1. Instala Node.js y Git.
+2. Abre PowerShell en la carpeta del proyecto.
+3. Instala las dependencias:
 
 ```bash
 npm ci
+```
+
+4. Para ejecutar la aplicación en desarrollo:
+
+```bash
 npm run dev
+```
+
+5. Para revisar y compilar el proyecto:
+
+```bash
 npm run typecheck
 npm test
 npm run build
+```
+
+6. Para crear el ejecutable portable de Windows:
+
+```bash
 npm run dist
 ```
 
-`npm run dist` genera el ejecutable portable de Windows y el AppImage de Linux en `release/`. Los archivos de aplicación se empaquetan en ASAR; Vite genera el worker de layout como bundle clásico para el renderer empaquetado.
+El archivo `.exe` se genera en `release/`, con un nombre como `AutoUML-0.1.0-win-x64.exe`. Abre ese archivo para ejecutar la versión portable. `npm run dist` compila para el sistema operativo donde se ejecuta.
+
+## Compilar en Linux
+
+1. Instala Node.js y Git desde el gestor de paquetes de tu distribución o desde [nodejs.org](https://nodejs.org/).
+2. Abre una terminal en la carpeta del proyecto e instala las dependencias:
+
+```bash
+npm ci
+```
+
+3. Para ejecutar la aplicación en desarrollo:
+
+```bash
+npm run dev
+```
+
+4. Para revisar y compilar el proyecto:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+5. Para crear el paquete Linux:
+
+```bash
+npm run dist
+```
+
+El AppImage queda en `release/`, con un nombre como `AutoUML-0.1.0-linux-x86_64.AppImage`. Dale permiso de ejecución y ábrelo:
+
+```bash
+chmod +x release/AutoUML-0.1.0-linux-x86_64.AppImage
+./release/AutoUML-0.1.0-linux-x86_64.AppImage
+```
+
+El AppImage necesita la biblioteca FUSE 2 para ejecutarse. En Ubuntu/Debian instala `libfuse2` (en Ubuntu 24.04, `libfuse2t64`); en Arch Linux, instala `fuse2`. Si no puedes habilitar FUSE, prueba `./release/AutoUML-0.1.0-linux-x86_64.AppImage --appimage-extract-and-run`.
+
+Para generar el `.exe` de Windows desde Linux, configura Wine y ejecuta:
+
+```bash
+npx electron-builder --win portable --x64 --publish never
+```
+
+El empaquetado de Windows suele ser más sencillo al ejecutar `npm run dist` en Windows.
+
+Los paquetes usan ASAR; Vite genera el worker de layout como bundle clásico para el renderer empaquetado.
 
 ## Almacenamiento de proyectos
 
