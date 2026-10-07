@@ -31,6 +31,7 @@
     "wait-on": "^8.0.0"
   },
   "dependencies": {
-    "@dagrejs/dagre": "^1.1.4"
+    "@dagrejs/dagre": "^1.1.4",
+    "electron-store": "8.2.0"
   }
 }

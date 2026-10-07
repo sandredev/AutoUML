@@ -14,6 +14,7 @@ import {
   readPumlText,
   savePuml
 } from './projects';
+import { registerHistoryIpc } from './history';
 
 const MAX_PUML_BYTES = 50 * 1024 * 1024;
 const MAX_PNG_BYTES = 100 * 1024 * 1024;
@@ -104,6 +105,7 @@ async function loadPumlFlow(event: IpcMainInvokeEvent, name: string): Promise<Re
 }
 
 export function registerIpc(onMenuState: (state: MenuState) => void): void {
+  registerHistoryIpc();
   ipcMain.handle('storage:info', () => getStorage());
 
   ipcMain.handle('projects:list', () => {

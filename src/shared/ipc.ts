@@ -1,4 +1,5 @@
 // Tipos compartidos entre main, preload y renderer.
+import type { HistoryApi } from './history';
 // El preload solo importa TIPOS de aquí, porque en modo sandbox no puede cargar otros módulos.
 
 export interface ProjectMeta {
@@ -63,6 +64,15 @@ export interface MenuState {
 }
 
 export type IpcChannel =
+  | 'history:list'
+  | 'history:openPumlFile'
+  | 'history:openPumlPath'
+  | 'history:openJavaProject'
+  | 'history:reopen'
+  | 'history:setPinned'
+  | 'history:remove'
+  | 'history:clear'
+  | 'history:savePumlAs'
   | 'storage:info'
   | 'projects:list'
   | 'projects:create'
@@ -77,6 +87,7 @@ export type IpcChannel =
 
 /** API expuesta en window.autouml (bridge tipado del shell Electron). */
 export interface AutoUmlApi {
+  history: HistoryApi;
   getStorageInfo(): Promise<StorageInfo>;
   listProjects(): Promise<Result<ProjectSummary[]>>;
   createProject(name: string): Promise<Result<ProjectInfo>>;

@@ -1,12 +1,27 @@
 // Puente seguro. Solo importa 'electron' y TIPOS, porque el preload corre en sandbox.
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { AutoUmlApi, IpcChannel, MenuAction, MenuState } from '../shared/ipc';
+import type { HistoryApi } from '../shared/history';
 
 function invoke<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
   return ipcRenderer.invoke(channel, ...args) as Promise<T>;
 }
 
+// Keep channel strings local: sandboxed preload cannot import runtime modules from the app.
+const history: HistoryApi = {
+  list: () => invoke('history:list'),
+  openPumlFile: () => invoke('history:openPumlFile'),
+  openPumlPath: (resourcePath) => invoke('history:openPumlPath', resourcePath),
+  openJavaProject: () => invoke('history:openJavaProject'),
+  reopen: (id) => invoke('history:reopen', id),
+  setPinned: (id, pinned) => invoke('history:setPinned', id, pinned),
+  remove: (id) => invoke('history:remove', id),
+  clear: () => invoke('history:clear'),
+  savePumlAs: (source, suggestedName) => invoke('history:savePumlAs', source, suggestedName),
+};
+
 const api: AutoUmlApi = {
+  history,
   getStorageInfo: () => invoke('storage:info'),
   listProjects: () => invoke('projects:list'),
   createProject: (name) => invoke('projects:create', name),
