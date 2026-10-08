@@ -61,6 +61,7 @@ export interface MenuState {
   projectOpen: boolean;
   hasPuml: boolean;
   sidebarVisible: boolean;
+  locale: 'es' | 'en';
 }
 
 export type IpcChannel =

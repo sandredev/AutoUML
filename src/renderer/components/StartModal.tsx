@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type JSX } from 'react';
 import type { ProjectInfo, ProjectSummary } from '../../shared/ipc';
 import { MAX_PROJECT_NAME_LENGTH, validateProjectName } from '../../shared/validation';
 import { CloseIcon, FolderIcon, PlusIcon } from './Icons';
+import { useI18n } from '../i18n/I18nProvider';
 
 type View = 'choose' | 'new' | 'list';
 
@@ -13,15 +14,16 @@ interface Props {
 
 const api = window.autouml;
 
-function formatDate(iso: string): string {
+function formatDate(iso: string, locale: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
+  return d.toLocaleString(locale === 'en' ? 'en-US' : 'es-CO', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 const FOCUSABLE = 'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Element {
+  const { t, locale } = useI18n();
   const [view, setView] = useState<View>('choose');
   const [name, setName] = useState('');
   const [touched, setTouched] = useState(false);
@@ -34,6 +36,19 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
   const nameError = validateProjectName(name);
   const showNameError = touched && nameError !== null;
   const listLoaded = projects !== null;
+
+  const nameErrorText = (error: string | null): string | null => {
+    if (!error) return null;
+    if (error.startsWith('El nombre no puede estar vacío')) return t('start.validation.empty');
+    const length = error.match(/como máximo (\d+) caracteres/);
+    if (length) return t('start.validation.length', { max: length[1] ?? MAX_PROJECT_NAME_LENGTH });
+    if (error.startsWith('El nombre no puede contener /')) return t('start.validation.chars');
+    if (error.startsWith('El nombre no puede contener caracteres')) return t('start.validation.control');
+    if (error.startsWith('El nombre no puede terminar')) return t('start.validation.trailing');
+    const reserved = error.match(/^"(.+)" es un nombre reservado/);
+    if (reserved) return t('start.validation.reserved', { name: reserved[1] ?? '' });
+    return error;
+  };
 
   const goTo = (next: View) => {
     setView(next);
@@ -105,7 +120,7 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
     }
   };
 
-  const title = view === 'choose' ? 'AutoUML' : view === 'new' ? 'Nuevo proyecto' : 'Cargar proyecto';
+  const title = view === 'choose' ? 'AutoUML' : view === 'new' ? t('start.newProject') : t('start.openProject');
 
   return (
     <div
@@ -118,7 +133,7 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
         <div className="modal-header">
           <h2 id="start-modal-title">{title}</h2>
           {dismissable && (
-            <button type="button" className="icon-btn" onClick={onClose} aria-label="Cerrar" title="Cerrar (Esc)">
+            <button type="button" className="icon-btn" onClick={onClose} aria-label={t('start.close')} title={`${t('start.close')} (Esc)`}>
               <CloseIcon />
             </button>
           )}
@@ -127,17 +142,17 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
         <div className="modal-body" ref={bodyRef}>
           {view === 'choose' && (
             <>
-              <p className="modal-subtitle">Cada proyecto contiene exactamente un archivo .puml.</p>
+              <p className="modal-subtitle">{t('start.subtitle')}</p>
               <div className="choice-grid">
                 <button type="button" className="choice-btn" onClick={() => goTo('list')}>
                   <FolderIcon />
-                  <span className="choice-label">CARGAR</span>
-                  <span className="choice-hint">Abrir un proyecto existente</span>
+                  <span className="choice-label">{t('start.load')}</span>
+                  <span className="choice-hint">{t('start.openExisting')}</span>
                 </button>
                 <button type="button" className="choice-btn" onClick={() => goTo('new')}>
                   <PlusIcon />
-                  <span className="choice-label">NUEVO</span>
-                  <span className="choice-hint">Crear un proyecto vacío</span>
+                  <span className="choice-label">{t('start.new')}</span>
+                  <span className="choice-hint">{t('start.createEmpty')}</span>
                 </button>
               </div>
             </>
@@ -146,7 +161,7 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
           {view === 'new' && (
             <form onSubmit={(e) => void handleCreate(e)} noValidate>
               <label className="field-label" htmlFor="project-name">
-                Nombre del proyecto
+                {t('start.projectName')}
               </label>
               <input
                 id="project-name"
@@ -164,14 +179,14 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
                 }}
               />
               <p id="project-name-msg" className={`field-msg${showNameError || serverError ? ' error' : ''}`}>
-                {showNameError ? nameError : serverError ?? 'Se creará una carpeta con este nombre.'}
+                {showNameError ? nameErrorText(nameError) : serverError ?? t('start.createFolderHint')}
               </p>
               <div className="modal-actions">
                 <button type="button" className="btn" onClick={() => goTo('choose')} disabled={busy}>
-                  Volver
+                  {t('start.back')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={nameError !== null || busy}>
-                  {busy ? 'Creando…' : 'Crear'}
+                  {busy ? t('start.creating') : t('start.create')}
                 </button>
               </div>
             </form>
@@ -184,12 +199,12 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
                   {notice}
                 </p>
               )}
-              {!listLoaded && <p className="muted">Cargando proyectos…</p>}
+              {!listLoaded && <p className="muted">{t('start.loading')}</p>}
               {listLoaded && projects.length === 0 && (
                 <div className="empty-list">
-                  <p>No hay proyectos todavía</p>
+                  <p>{t('start.noProjects')}</p>
                   <button type="button" className="btn btn-primary" onClick={() => goTo('new')}>
-                    Crear uno nuevo
+                    {t('start.createNew')}
                   </button>
                 </div>
               )}
@@ -204,9 +219,9 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
                         onClick={() => void handleOpen(p.name)}
                       >
                         <span className="project-name">{p.name}</span>
-                        <span className="project-date">{formatDate(p.createdAt)}</span>
+                        <span className="project-date">{formatDate(p.createdAt, locale)}</span>
                         <span className={`badge${p.hasPuml ? ' badge-ok' : ''}`}>
-                          {p.hasPuml ? 'con .puml' : 'sin .puml'}
+                          {p.hasPuml ? t('start.withPuml') : t('start.withoutPuml')}
                         </span>
                       </button>
                     </li>
@@ -215,7 +230,7 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
               )}
               <div className="modal-actions">
                 <button type="button" className="btn" onClick={() => goTo('choose')} disabled={busy}>
-                  Volver
+                  {t('start.back')}
                 </button>
               </div>
             </>

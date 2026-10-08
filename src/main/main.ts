@@ -8,7 +8,7 @@ import { buildMenu } from './menu';
 import { initStorage } from './projects';
 
 let win: BrowserWindow | null = null;
-let menuState: MenuState = { projectOpen: false, hasPuml: false, sidebarVisible: true };
+let menuState: MenuState = { projectOpen: false, hasPuml: false, sidebarVisible: true, locale: 'es' };
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 

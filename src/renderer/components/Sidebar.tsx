@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type { Category, CategoryCounts, SidebarGroup } from '../../core/model';
 import type { ProjectInfo } from '../../shared/ipc';
+import { useI18n } from '../i18n/I18nProvider';
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 480;
@@ -75,6 +76,7 @@ export function Sidebar({
   selectedId,
   onSelect,
 }: Props): JSX.Element {
+  const { t } = useI18n();
   const ref = useRef<HTMLElement>(null);
   const dragging = useRef(false);
 
@@ -164,7 +166,7 @@ export function Sidebar({
 
   return (
     <aside className="sidebar" ref={ref} style={{ width }}>
-      <div className="sidebar-header">Entidades</div>
+      <div className="sidebar-header">{t('sidebar.entities')}</div>
 
       {hasDiagram ? (
           <>
@@ -174,14 +176,14 @@ export function Sidebar({
               </p>
             )}
             <p className="sidebar-total">
-              <strong>{counts?.totalInternal ?? 0}</strong> tipos internos
+              <strong>{counts?.totalInternal ?? 0}</strong> {t('sidebar.internalTypes')}
             </p>
             <input
               type="search"
               className="search-input"
-              placeholder="Buscar entidad…"
+              placeholder={t('sidebar.searchPlaceholder')}
               value={query}
-              aria-label="Buscar entidad por nombre"
+              aria-label={t('sidebar.searchLabel')}
               autoComplete="off"
               spellCheck={false}
               onChange={(e) => setQuery(e.target.value)}
@@ -189,8 +191,8 @@ export function Sidebar({
                 if (e.key === 'Escape') setQuery('');
               }}
             />
-            <nav className="tree" aria-label="Árbol de entidades">
-              {shown.length === 0 && <p className="sidebar-note muted">Sin coincidencias</p>}
+            <nav className="tree" aria-label={t('sidebar.treeLabel')}>
+              {shown.length === 0 && <p className="sidebar-note muted">{t('sidebar.noMatches')}</p>}
               {shown.map((g) => {
                 const isCollapsed = !searching && collapsed.has(g.category);
                 const limit = visible[g.category] ?? PAGE_SIZE;
@@ -207,7 +209,7 @@ export function Sidebar({
                       <span className={`cat-icon cat-${g.category}`} aria-hidden="true">
                         {LETTER[g.category]}
                       </span>
-                      <span>{g.label}</span>
+                      <span>{t(`category.${g.category}` as import('../i18n/catalog').MessageKey)}</span>
                       <span className="tree-count">{g.count}</span>
                     </button>
                     {items.map((i) => renderItem(i, g.category))}
@@ -219,7 +221,7 @@ export function Sidebar({
                           setVisible((prev) => ({ ...prev, [g.category]: (prev[g.category] ?? PAGE_SIZE) + PAGE_SIZE }))
                         }
                       >
-                        Mostrar {rest} más
+                        {t('sidebar.showMore', { count: rest })}
                       </button>
                     )}
                   </div>
@@ -233,13 +235,13 @@ export function Sidebar({
               {puml.originalFileName}
             </p>
             <p className="muted">
-              {puml.lines} líneas · {formatSize(puml.sizeBytes)}
+              {puml.lines} {t('sidebar.lines')} · {formatSize(puml.sizeBytes)}
             </p>
           </div>
         ) : fileLabel ? (
-          <p className="sidebar-note muted">{fileLabel}: sin entidades para mostrar</p>
+          <p className="sidebar-note muted">{fileLabel}: {t('sidebar.noEntities')}</p>
       ) : (
-        <p className="sidebar-note muted">Carga un .puml para ver las entidades</p>
+        <p className="sidebar-note muted">{t('sidebar.loadHint')}</p>
       )}
 
       <div
@@ -249,7 +251,7 @@ export function Sidebar({
         aria-valuenow={width}
         aria-valuemin={MIN_WIDTH}
         aria-valuemax={MAX_WIDTH}
-        title="Arrastra para cambiar el ancho; doble clic para restablecer"
+        title={t('sidebar.resizeHint')}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

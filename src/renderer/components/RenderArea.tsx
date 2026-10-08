@@ -3,6 +3,7 @@ import type { DiagramModel } from '../../core/model';
 import type { ProjectInfo } from '../../shared/ipc';
 import { PumlViewer } from '../../render/PumlViewer';
 import type { DiagramCanvasHandle } from '../../render/canvas/DiagramCanvas';
+import { useI18n } from '../i18n/I18nProvider';
 
 interface Props {
   project: ProjectInfo | null;
@@ -13,13 +14,14 @@ interface Props {
 }
 
 export function RenderArea({ project, model, selectedId, onSelect, canvasRef }: Props): JSX.Element {
+  const { t } = useI18n();
   if (!project && !model) return <main className="render-area" />;
 
   if (project && !project.puml && !model) {
     return (
       <main className="render-area">
-        <h1 className="render-title">Este es el nuevo proyecto</h1>
-        <p className="render-meta">Usa Cargar PUML (Ctrl+O) para empezar</p>
+        <h1 className="render-title">{t('render.newProject')}</h1>
+        <p className="render-meta">{t('render.startHint')}</p>
       </main>
     );
   }

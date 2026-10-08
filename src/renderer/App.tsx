@@ -12,6 +12,9 @@ import { Sidebar } from './components/Sidebar';
 import { StartModal } from './components/StartModal';
 import { StatusBar, type Status } from './components/StatusBar';
 import type { DiagramCanvasHandle } from '../render/canvas/DiagramCanvas';
+import { SettingsDialog } from './components/SettingsDialog';
+import { useTheme } from './components/useTheme';
+import { useI18n } from './i18n/I18nProvider';
 
 const api = window.autouml;
 
@@ -21,6 +24,9 @@ interface ModalState {
 }
 
 export default function App() {
+  const { t, locale } = useI18n();
+  const { mode: themeMode, setMode: setThemeMode } = useTheme();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [modal, setModal] = useState<ModalState>({ open: true, dismissable: true });
   const [storage, setStorage] = useState<StorageInfo | null>(null);
@@ -41,7 +47,7 @@ export default function App() {
   const dropBusy = useRef(false);
   const docName = externalName
     ? externalName.replace(/\.[^.]+$/, '')
-    : project?.meta.name ?? 'diagrama';
+    : project?.meta.name ?? t('app.diagram');
 
   useEffect(() => {
     void api.getStorageInfo().then(setStorage);
@@ -52,6 +58,17 @@ export default function App() {
     document.title = currentName ? `${currentName} — AutoUML` : 'AutoUML';
   }, [project, externalName]);
 
+  useEffect(() => {
+    const onSettingsShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === ',') {
+        event.preventDefault();
+        setSettingsOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onSettingsShortcut);
+    return () => window.removeEventListener('keydown', onSettingsShortcut);
+  }, []);
+
   // Sincroniza qué opciones del menú nativo están habilitadas.
   // hasPuml también cuenta el diagrama externo soltado (sin proyecto) para zoom/fit/export/sidebar.
   useEffect(() => {
@@ -59,8 +76,9 @@ export default function App() {
       projectOpen: project !== null,
       hasPuml: project?.puml != null || diagram !== null,
       sidebarVisible,
+      locale,
     });
-  }, [project, diagram, sidebarVisible]);
+  }, [project, diagram, sidebarVisible, locale]);
 
   // Los mensajes que no son de error se ocultan solos.
   useEffect(() => {
@@ -104,14 +122,14 @@ export default function App() {
       if (dropBusy.current) return;
       const files = Array.from(event.dataTransfer?.files ?? []);
       dropBusy.current = true;
-      void openDroppedFiles(files, api.openDroppedPuml)
+      void openDroppedFiles(files, api.openDroppedPuml, t)
         .then((outcome) => {
           if (outcome.status) setStatus(outcome.status);
           if (outcome.opened) handlePumlOpened(outcome.opened);
           if (outcome.refresh) setHistoryTick((tick) => tick + 1);
         })
         .catch((error: unknown) => {
-          setStatus({ kind: 'error', text: error instanceof Error ? error.message : 'No se pudo abrir el archivo soltado.' });
+          setStatus({ kind: 'error', text: error instanceof Error ? error.message : t('status.dropFailed') });
         })
         .finally(() => {
           dropBusy.current = false;
@@ -123,7 +141,7 @@ export default function App() {
       window.removeEventListener('dragover', onDragOver);
       window.removeEventListener('drop', onDrop);
     };
-  }, [handlePumlOpened]);
+  }, [handlePumlOpened, t]);
 
   // Carga inicial del texto cuando el proyecto pasa a tener .puml.
   // No borra un diagrama externo soltado: ese vive sin proyecto.
@@ -151,12 +169,12 @@ export default function App() {
       if (!r.ok) setStatus({ kind: 'error', text: r.error });
       else if (r.value.status === 'loaded') {
         setProject(r.value.project);
-        setStatus({ kind: 'success', text: `Se cargó "${r.value.project.puml?.originalFileName ?? ''}".` });
+        setStatus({ kind: 'success', text: t('status.loaded', { name: r.value.project.puml?.originalFileName ?? '' }) });
       }
     } finally {
       setBusy(false);
     }
-  }, [project, busy]);
+  }, [project, busy, t]);
 
   const handleReload = useCallback(async () => {
     if (!project?.puml || busy) return;
@@ -169,8 +187,8 @@ export default function App() {
         const ok = await loadSource(project.meta.name);
         setStatus(
           ok
-            ? { kind: 'success', text: 'Se recargó diagram.puml desde el disco.' }
-            : { kind: 'error', text: 'No se pudo leer diagram.puml tras la recarga.' },
+            ? { kind: 'success', text: t('status.reloaded') }
+            : { kind: 'error', text: t('status.reloadFailed') },
         );
       } else {
         setStatus({ kind: 'error', text: r.error });
@@ -178,14 +196,14 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [project, busy, loadSource]);
+  }, [project, busy, loadSource, t]);
 
   const onProjectOpened = useCallback((p: ProjectInfo) => {
     setProject(p);
     setExternalName(null);
     setModal({ open: false, dismissable: true });
-    setStatus({ kind: 'info', text: `Proyecto "${p.meta.name}" abierto.` });
-  }, []);
+    setStatus({ kind: 'info', text: t('status.projectOpened', { name: p.meta.name }) });
+  }, [t]);
 
   const toggleSidebar = useCallback(() => setSidebarVisible((v) => !v), []);
 
@@ -197,13 +215,13 @@ export default function App() {
     if (!handle) return;
     const blob = await handle.exportPng();
     if (!blob) {
-      setStatus({ kind: 'error', text: 'No hay diagrama para exportar.' });
+      setStatus({ kind: 'error', text: t('status.noDiagramToExport') });
       return;
     }
     const result = await api.savePng(`${docName}.png`, new Uint8Array(await blob.arrayBuffer()));
     if (!result.ok) setStatus({ kind: 'error', text: result.error });
-    else if (result.value) setStatus({ kind: 'success', text: `PNG guardado en ${result.value}.` });
-  }, [docName]);
+    else if (result.value) setStatus({ kind: 'success', text: t('status.pngSaved', { path: result.value }) });
+  }, [docName, t]);
 
   const handleSidebarSelect = useCallback((id: string) => {
     setSelectedId(id);
@@ -224,8 +242,8 @@ export default function App() {
     if (!diagram) return null;
     const totalTypes = diagram.types.length; // internos + externos + sin declarar
     const warnings = diagram.issues.filter((i) => i.severity === 'warning').length;
-    return `${totalTypes} tipos · ${diagram.relationships.length} relaciones · ${warnings} advertencias`;
-  }, [diagram]);
+    return t('status.summary', { types: totalTypes, relationships: diagram.relationships.length, warnings });
+  }, [diagram, t]);
 
   // Despachador de las acciones del menú nativo (los atajos llegan por aquí).
   // toggle-sidebar y acciones de vista también funcionan con un .puml externo sin proyecto.
@@ -252,7 +270,7 @@ export default function App() {
           break;
         case 'copy-project-name':
           if (!project) return;
-          setStatus({ kind: 'info', text: `Se copió "${project.meta.name}" al portapapeles.` });
+          setStatus({ kind: 'info', text: t('status.copied', { name: project.meta.name }) });
           break;
         case 'zoom-in':
           handleZoomIn();
@@ -268,7 +286,7 @@ export default function App() {
           break;
       }
     };
-  }, [project, diagram, modal.open, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport]);
+  }, [project, diagram, modal.open, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport, t]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 
@@ -279,6 +297,8 @@ export default function App() {
       {storage?.warning && <div className="banner banner-warning">⚠ {storage.warning}</div>}
       <Header
         projectName={headerName}
+        settingsOpen={settingsOpen}
+        onOpenSettings={() => setSettingsOpen(true)}
         canLoad={project !== null && !busy}
         canReload={project?.puml != null && !busy}
         sidebarVisible={sidebarVisible}
@@ -334,6 +354,7 @@ export default function App() {
           onOpened={onProjectOpened}
         />
       )}
+      {settingsOpen && <SettingsDialog themeMode={themeMode} onThemeChange={setThemeMode} onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
