@@ -35,6 +35,7 @@ interface Props {
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
 const MAX_EXPORT_SIDE = 16384;
 const DRAG_THRESHOLD = 4;
+const FIT_PADDING = 16;
 
 function errorText(err: unknown): string {
   if (err instanceof Error) return err.message || err.name;
@@ -53,6 +54,11 @@ function readTheme(el: HTMLElement): Theme {
     border: v('--border', '#d0d7de'),
     accent: v('--accent', '#0969da'),
     cat,
+    card: v('--uml-card', '#F1F1F1'),
+    cardBorder: v('--uml-card-border', '#181818'),
+    cardFg: v('--uml-card-fg', '#000000'),
+    edge: v('--uml-edge', '#181818'),
+    pkg: v('--uml-pkg', '#555b62'),
   };
 }
 
@@ -69,6 +75,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const themeRef = useRef<Theme | null>(null);
   const rafRef = useRef(0);
   // Arrastre: 'pan' mueve la vista; 'node' mueve una tarjeta (nodeId).
+  // true mientras la vista sea la del último "encuadrar": entonces un cambio de tamaño vuelve a encuadrar.
+  // Se pone en false cuando el usuario hace zoom o mueve la vista.
+  const autoFitRef = useRef(true);
   const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean; nodeId: string | null } | null>(null);
   const paintErrorRef = useRef<string | null>(null);
   const [collapsedPackages, setCollapsedPackages] = useState<Set<string>>(() => new Set());
@@ -154,7 +163,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const fit = useCallback(() => {
     const size = sizeRef.current;
     if (!canPaint(size)) return;
-    setView(fitToBounds(latest.current.layout.bounds, size.w, size.h));
+    // Margen pequeño: la vista completa aprovecha casi todo el lienzo (más zoom = más detalle legible).
+    setView(fitToBounds(latest.current.layout.bounds, size.w, size.h, FIT_PADDING));
+    autoFitRef.current = true;
   }, [setView]);
 
   const focusNodeInView = useCallback((id: string): boolean => {
@@ -162,6 +173,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const { w, h } = sizeRef.current;
     if (!b || w <= 0 || h <= 0) return false;
     const scale = Math.max(viewRef.current.scale, 0.8);
+    autoFitRef.current = false;
     setView({ scale, tx: w / 2 - (b.x + b.w / 2) * scale, ty: h / 2 - (b.y + b.h / 2) * scale });
     return true;
   }, [setView]);
@@ -169,6 +181,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const zoomBy = useCallback(
     (factor: number) => {
       const { w, h } = sizeRef.current;
+      autoFitRef.current = false;
       setView(zoomAt(viewRef.current, factor, w / 2, h / 2));
     },
     [setView],
@@ -249,7 +262,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       canvas.height = Math.max(1, Math.floor(h * dpr));
       canvas.style.width = w + 'px';
       canvas.style.height = h + 'px';
-      if (first && w > 0 && h > 0) fit();
+      // Si la vista no la ha tocado el usuario, se vuelve a encuadrar: el panel puede crecer después del
+      // primer encuadre (paneles laterales, barra de herramientas) y el diagrama quedaba pequeño y corrido.
+      if ((first || autoFitRef.current) && w > 0 && h > 0) fit();
       else schedule();
     };
     apply();
@@ -275,15 +290,22 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     schedule();
   }, [selectedId, model, schedule]);
 
-  // Tema claro/oscuro.
+  // Tema claro/oscuro: el del sistema Y el elegido en la app (atributo data-theme en <html>).
+  // Antes solo se escuchaba el del sistema, así que al cambiar el tema en la app el lienzo
+  // se quedaba con los colores del tema anterior (oscuro en modo claro y viceversa).
   useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = (): void => {
       themeRef.current = null;
       schedule();
     };
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    const mo = new MutationObserver(onChange);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style', 'class'] });
+    return () => {
+      mq.removeEventListener('change', onChange);
+      mo.disconnect();
+    };
   }, [schedule]);
 
   useEffect(
@@ -312,6 +334,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
+      autoFitRef.current = false;
       setView(zoomAt(viewRef.current, factor, e.clientX - rect.left, e.clientY - rect.top));
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -346,6 +369,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       setOverrides((prev) => moveBy(prev, id, dx / s, dy / s));
       return;
     }
+    autoFitRef.current = false;
     setView(panBy(viewRef.current, dx, dy));
   };
 

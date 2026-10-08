@@ -8,6 +8,9 @@
   --cat-sealed: #8250df; --cat-abstract: #bf8700; --cat-interface: #0969da; --cat-enum: #1a7f37;
   --cat-record: #0e8a8a; --cat-annotation: #bc4c00; --cat-class: #57606a; --cat-external: #9a6700; --cat-undeclared: #cf222e;
   --radius: 6px;
+  /* Diagrama estilo PlantUML (modo claro) */
+  --uml-card: #F1F1F1; --uml-card-border: #181818; --uml-card-fg: #000000;
+  --uml-edge: #181818; --uml-pkg: #555b62;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
   --mono: ui-monospace, Consolas, "Liberation Mono", monospace;
 }
@@ -20,6 +23,8 @@
     --warning-bg: #3a2e00; --warning-fg: #ffd866;
     --cat-sealed: #b085f5; --cat-abstract: #e3b341; --cat-interface: #58a6ff; --cat-enum: #3fb950;
     --cat-record: #39c5bb; --cat-annotation: #f0883e; --cat-class: #8b949e; --cat-external: #d29922; --cat-undeclared: #f85149;
+    --uml-card: #2f3237; --uml-card-border: #8b929a; --uml-card-fg: #e6e6e6;
+    --uml-edge: #a7adb4; --uml-pkg: #9aa0a6;
   }
 }
 :root[data-theme="dark"] {
@@ -31,6 +36,8 @@
   --warning-bg: #3a2e00; --warning-fg: #ffd866;
   --cat-sealed: #b085f5; --cat-abstract: #e3b341; --cat-interface: #58a6ff; --cat-enum: #3fb950;
   --cat-record: #39c5bb; --cat-annotation: #f0883e; --cat-class: #8b949e; --cat-external: #d29922; --cat-undeclared: #f85149;
+  --uml-card: #2f3237; --uml-card-border: #8b929a; --uml-card-fg: #e6e6e6;
+  --uml-edge: #a7adb4; --uml-pkg: #9aa0a6;
 }
 :root[data-theme="light"] { color-scheme: light; }
 

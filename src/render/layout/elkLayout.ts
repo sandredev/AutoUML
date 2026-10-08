@@ -1,11 +1,9 @@
 // src/render/layout/elkLayout.ts — layout con ELK (layered + ortogonal) y respaldo dagre.
 // Usa elk.bundled.js directamente (sin worker anidado): fiable en Electron file:// + ASAR.
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api';
-import type { DiagramModel, RelType, TypeNode } from '../../core/model';
+import type { DiagramModel, RelType } from '../../core/model';
 import type { EdgePath, LayoutOptions, LayoutResult, NodeBox, PackageBox } from '../types';
-import { computeLayout } from './layout';
-import { cardContentOf, makeMeasurer, measureCardBox } from './cardModel';
-import { DEFAULT_DETAIL } from '../style/contract';
+import { computeLayout, measureNode } from './layout';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { withElkEnv } from './elkEnv';
 
@@ -50,20 +48,15 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
   const summary = opts?.summary ?? model.summaryMode;
   const rankSep = opts?.rankSep ?? DEFAULT_RANK_SEP;
   const nodeSep = opts?.nodeSep ?? DEFAULT_NODE_SEP;
-  const detail = opts?.detail ?? DEFAULT_DETAIL;
 
   const typeIds = new Set(model.types.map((t) => t.id));
   const pkgOf = new Map<string, string>();
   for (const p of model.packages) for (const id of p.typeIds) if (typeIds.has(id)) pkgOf.set(id, p.name);
   const hasPackages = pkgOf.size > 0;
 
-  const measure = makeMeasurer();
-  const measureNode = (t: TypeNode): { w: number; h: number } =>
-    measureCardBox(cardContentOf(t, detail, summary), measure);
-
   const leaf = new Map<string, ElkNode>();
   for (const t of model.types) {
-    const m = measureNode(t);
+    const m = measureNode(t, summary);
     leaf.set(t.id, { id: t.id, width: m.w, height: m.h });
   }
 

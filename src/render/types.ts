@@ -1,6 +1,5 @@
 // src/render/types.ts
 import type { RelType } from '../core/model';
-import type { CardGeometry, DetailOptions } from './style/contract';
 
 export interface NodeBox {
   id: string;          // TypeNode.id
@@ -10,8 +9,6 @@ export interface NodeBox {
   label?: string;
   subtitle?: string;
   packageName?: string;
-  /** Geometría interior de la tarjeta (la calcula el layout con measureCard). Ausente en nodos agregados. */
-  geometry?: CardGeometry;
 }
 
 export interface EdgePath {
@@ -33,8 +30,6 @@ export interface PackageBox {
   name: string;
   x: number; y: number; w: number; h: number;
   layer?: string;
-  /** Ancho de la pestaña con el nombre (la calcula el layout). */
-  tabW?: number;
 }
 
 export interface LayoutResult {
@@ -51,12 +46,6 @@ export interface LayoutOptions {
   /** Separación entre niveles y entre nodos hermanos, en unidades de mundo. */
   rankSep?: number; // por defecto 80
   nodeSep?: number; // por defecto 40
-  /** Qué miembros mostrar/medir. Por defecto DEFAULT_DETAIL. Debe ser el mismo que reciba el dibujo. */
-  detail?: DetailOptions;
-  /** Dirección del layout. Por defecto 'TB'. */
-  direction?: 'TB' | 'LR';
-  /** true (por defecto si hay <= 400 tipos) = los paquetes son clusters que agrupan sus nodos sin solaparse. */
-  clusters?: boolean;
 }
 
 export interface ViewState {
