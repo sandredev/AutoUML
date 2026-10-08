@@ -49,7 +49,8 @@ function orderGroups(groups: SidebarGroup[]): SidebarGroup[] {
 }
 
 interface Props {
-  project: ProjectInfo;
+  project: ProjectInfo | null;
+  externalName?: string | null;
   width: number;
   onResize: (w: number) => void;
   groups?: SidebarGroup[];
@@ -66,6 +67,7 @@ function formatSize(bytes: number): string {
 
 export function Sidebar({
   project,
+  externalName,
   width,
   onResize,
   groups,
@@ -156,16 +158,21 @@ export function Sidebar({
     );
   };
 
-  const { puml } = project;
+  const { puml } = project ?? { puml: null };
   const hasDiagram = counts !== null && counts !== undefined && ordered.length > 0;
+  const fileLabel = puml?.originalFileName ?? externalName ?? null;
 
   return (
     <aside className="sidebar" ref={ref} style={{ width }}>
       <div className="sidebar-header">Entidades</div>
 
-      {puml ? (
-        hasDiagram ? (
+      {hasDiagram ? (
           <>
+            {fileLabel && (
+              <p className="sidebar-file sidebar-total" title={fileLabel}>
+                {fileLabel}
+              </p>
+            )}
             <p className="sidebar-total">
               <strong>{counts?.totalInternal ?? 0}</strong> tipos internos
             </p>
@@ -220,7 +227,7 @@ export function Sidebar({
               })}
             </nav>
           </>
-        ) : (
+        ) : puml ? (
           <div className="sidebar-note">
             <p className="sidebar-file" title={puml.originalFileName}>
               {puml.originalFileName}
@@ -229,7 +236,8 @@ export function Sidebar({
               {puml.lines} líneas · {formatSize(puml.sizeBytes)}
             </p>
           </div>
-        )
+        ) : fileLabel ? (
+          <p className="sidebar-note muted">{fileLabel}: sin entidades para mostrar</p>
       ) : (
         <p className="sidebar-note muted">Carga un .puml para ver las entidades</p>
       )}
