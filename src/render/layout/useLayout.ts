@@ -1,6 +1,7 @@
 // src/render/layout/useLayout.ts — calcula el layout en un Worker.
 import { useEffect, useRef, useState } from 'react';
 import type { DiagramModel } from '../../core/model';
+import type { DetailOptions } from '../style/contract';
 import type { LayoutOptions, LayoutResult } from '../types';
 import type { LayoutRequest, LayoutResponse } from './layout.worker';
 // `?worker` hace que Vite empaquete el worker con worker.format (iife), en dev y en build.
@@ -19,6 +20,10 @@ export function useLayout(model: DiagramModel | null, opts?: LayoutOptions): Lay
   const summary = opts?.summary;
   const rankSep = opts?.rankSep;
   const nodeSep = opts?.nodeSep;
+  const direction = opts?.direction;
+  const clusters = opts?.clusters;
+  // Clave estable: el objeto detail puede cambiar de identidad sin cambiar de valor.
+  const detailKey = opts?.detail ? JSON.stringify(opts.detail) : '';
 
   useEffect(() => {
     let w: Worker;
@@ -32,7 +37,7 @@ export function useLayout(model: DiagramModel | null, opts?: LayoutOptions): Lay
     workerRef.current = w;
     w.onmessage = (e: MessageEvent<LayoutResponse>) => {
       const d = e.data;
-      if (d.id !== reqId.current) return; // respuesta obsoleta
+      if (d.id !== reqId.current) return;
       setState(d.ok ? { layout: d.result, loading: false, error: null } : { layout: null, loading: false, error: d.error });
     };
     w.onerror = (e: ErrorEvent) => {
@@ -56,10 +61,13 @@ export function useLayout(model: DiagramModel | null, opts?: LayoutOptions): Lay
     if (summary !== undefined) o.summary = summary;
     if (rankSep !== undefined) o.rankSep = rankSep;
     if (nodeSep !== undefined) o.nodeSep = nodeSep;
+    if (direction !== undefined) o.direction = direction;
+    if (clusters !== undefined) o.clusters = clusters;
+    if (detailKey !== '') o.detail = JSON.parse(detailKey) as DetailOptions;
     setState((s) => ({ ...s, loading: true, error: null }));
     const req: LayoutRequest = { id, model, opts: o };
     w.postMessage(req);
-  }, [model, summary, rankSep, nodeSep]);
+  }, [model, summary, rankSep, nodeSep, direction, clusters, detailKey]);
 
   return state;
 }

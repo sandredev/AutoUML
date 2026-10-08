@@ -1,0 +1,71 @@
+/* src/render/viewer.css — estilos propios del visor (panel Vista, foco del lienzo y minimapa). */
+.view-options-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border, #d0d7de);
+  background: var(--bg-elev, #ffffff);
+  color: var(--fg, #1f2328);
+  font-size: 12px;
+}
+
+.view-options-title {
+  font-weight: 600;
+  color: var(--fg-muted, #656d76);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+.view-options-field,
+.view-options-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.view-options-field select {
+  font: inherit;
+  padding: 2px 6px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 4px;
+  background: var(--bg, #ffffff);
+  color: inherit;
+}
+
+.view-options-check input:disabled + span {
+  opacity: 0.5;
+}
+
+.view-options-reset {
+  margin-left: auto;
+  font: inherit;
+  padding: 2px 10px;
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.view-options-reset:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.diagram-canvas:focus {
+  outline: none;
+}
+
+.diagram-canvas:focus-visible {
+  outline: 2px solid var(--accent, #0969da);
+  outline-offset: -2px;
+}
+
+.diagram-minimap {
+  cursor: crosshair;
+  touch-action: none;
+}
