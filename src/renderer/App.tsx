@@ -11,6 +11,7 @@ import { RenderArea } from './components/RenderArea';
 import { Sidebar } from './components/Sidebar';
 import { StartModal } from './components/StartModal';
 import { StatusBar, type Status } from './components/StatusBar';
+import { useTheme } from './components/useTheme';
 import type { DiagramCanvasHandle } from '../render/canvas/DiagramCanvas';
 
 const api = window.autouml;
@@ -28,6 +29,7 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
+  const { mode: themeMode, cycle: cycleTheme } = useTheme();
 
   // Sesión 3
   const [source, setSource] = useState<string | null>(null);
@@ -273,6 +275,8 @@ export default function App() {
         canLoad={project !== null && !busy}
         canReload={project?.puml != null && !busy}
         sidebarVisible={sidebarVisible}
+        themeMode={themeMode}
+        onCycleTheme={cycleTheme}
         onLoad={() => void handleLoad()}
         onReload={() => void handleReload()}
         canView={diagram !== null && diagram.types.length > 0}

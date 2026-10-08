@@ -1,5 +1,5 @@
-:root {
-  color-scheme: light dark;
+:root, :root[data-theme='light'] {
+  color-scheme: light;
   --bg: #f6f7f9; --bg-elev: #ffffff; --bg-sunken: #eceef2;
   --fg: #1f2328; --fg-muted: #656d76; --border: #d0d7de;
   --accent: #0969da; --accent-fg: #ffffff; --selected: #ddf4ff;
@@ -11,8 +11,21 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
   --mono: ui-monospace, Consolas, "Liberation Mono", monospace;
 }
+/* Forzado manual desde el header (issue #1). */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #1e1f22; --bg-elev: #2b2d31; --bg-sunken: #17181a;
+  --fg: #e6e6e6; --fg-muted: #9aa0a6; --border: #3c3f44;
+  --accent: #4c9aff; --selected: #1f3a5a;
+  --danger: #f85149; --success: #3fb950; --info: #58a6ff;
+  --warning-bg: #3a2e00; --warning-fg: #ffd866;
+  --cat-sealed: #b085f5; --cat-abstract: #e3b341; --cat-interface: #58a6ff; --cat-enum: #3fb950;
+  --cat-record: #39c5bb; --cat-annotation: #f0883e; --cat-class: #8b949e; --cat-external: #d29922; --cat-undeclared: #f85149;
+}
+/* Sistema: solo cuando no hay forzado manual. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]), :root[data-theme='system'] {
+    color-scheme: dark;
     --bg: #1e1f22; --bg-elev: #2b2d31; --bg-sunken: #17181a;
     --fg: #e6e6e6; --fg-muted: #9aa0a6; --border: #3c3f44;
     --accent: #4c9aff; --selected: #1f3a5a;

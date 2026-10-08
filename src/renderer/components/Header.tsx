@@ -1,11 +1,14 @@
 import type { JSX, ReactNode } from 'react';
-import { ExportIcon, FitIcon, LoadIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
+import { ExportIcon, FitIcon, LoadIcon, MoonIcon, ReloadIcon, SidebarIcon, SunIcon, SystemIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
+import type { ThemeMode } from './useTheme';
 
 interface Props {
   projectName: string | null;
   canLoad: boolean;
   canReload: boolean;
   sidebarVisible: boolean;
+  themeMode: ThemeMode;
+  onCycleTheme: () => void;
   onLoad: () => void;
   onReload: () => void;
   canView: boolean;
@@ -45,6 +48,8 @@ export function Header({
   canLoad,
   canReload,
   sidebarVisible,
+  themeMode,
+  onCycleTheme,
   onLoad,
   onReload,
   canView,
@@ -54,6 +59,8 @@ export function Header({
   onFit,
   onExport,
 }: Props): JSX.Element {
+  const themeIcon = themeMode === 'light' ? <SunIcon /> : themeMode === 'dark' ? <MoonIcon /> : <SystemIcon />;
+  const themeLabel = themeMode === 'light' ? 'Tema claro' : themeMode === 'dark' ? 'Tema oscuro' : 'Tema del sistema';
   return (
     <header className="header">
       <button
@@ -82,6 +89,16 @@ export function Header({
         <ToolButton label="Zoom −" shortcut="Ctrl+-" icon={<ZoomOutIcon />} disabled={!canView} onClick={onZoomOut} />
         <ToolButton label="Ajustar a pantalla" shortcut="Ctrl+0" icon={<FitIcon />} disabled={!canView} onClick={onFit} />
         <ToolButton label="Exportar PNG" shortcut="Ctrl+E" icon={<ExportIcon />} disabled={!canView} onClick={onExport} />
+        <span className="toolbar-sep" aria-hidden="true" />
+        <button
+          type="button"
+          className="tool-btn"
+          title={`${themeLabel}: clic para cambiar (Sistema → Claro → Oscuro)`}
+          aria-label={`${themeLabel}: clic para cambiar de tema`}
+          onClick={onCycleTheme}
+        >
+          {themeIcon}
+        </button>
       </div>
     </header>
   );

@@ -222,7 +222,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     schedule();
   }, [selectedId, model, schedule]);
 
-  // Tema claro/oscuro.
+  // Tema claro/oscuro: del sistema o forzado manual (data-theme, issue #1).
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = (): void => {
@@ -230,7 +230,12 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       schedule();
     };
     mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    const observer = new MutationObserver(onChange);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
+    return () => {
+      mq.removeEventListener('change', onChange);
+      observer.disconnect();
+    };
   }, [schedule]);
 
   useEffect(
