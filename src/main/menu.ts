@@ -3,6 +3,10 @@ import type { MenuAction, MenuState } from '../shared/ipc';
 import { getCurrentProjectName } from './projects';
 
 interface MenuCopy {
+  file: string;
+  edit: string;
+  view: string;
+  help: string;
   newProject: string;
   openProject: string;
   loadPuml: string;
@@ -24,6 +28,10 @@ interface MenuCopy {
 
 const menuCopy: Record<MenuState['locale'], MenuCopy> = {
   es: {
+    file: 'Archivo',
+    edit: 'Editar',
+    view: 'Ver',
+    help: 'Ayuda',
     newProject: 'Nuevo proyecto…',
     openProject: 'Abrir proyecto…',
     loadPuml: 'Cargar PUML…',
@@ -43,6 +51,10 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     aboutDetail: 'Visualizador de diagramas de clases PlantUML — INGSOFT.\nUn proyecto = un archivo .puml.',
   },
   en: {
+    file: 'File',
+    edit: 'Edit',
+    view: 'View',
+    help: 'Help',
     newProject: 'New project…',
     openProject: 'Open project…',
     loadPuml: 'Load PUML…',
@@ -75,7 +87,7 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
 
   const template: MenuItemConstructorOptions[] = [
     {
-      label: '&File',
+      label: `&${labels.file}`,
       submenu: [
         { label: labels.newProject, accelerator: 'CmdOrCtrl+N', click: send('new-project') },
         { label: labels.openProject, accelerator: 'CmdOrCtrl+Shift+O', click: send('open-project') },
@@ -88,7 +100,7 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
       ],
     },
     {
-      label: '&Edit',
+      label: `&${labels.edit}`,
       submenu: [
         { label: labels.replacePuml, enabled: state.projectOpen, click: send('replace-puml') },
         {
@@ -108,7 +120,7 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
       ],
     },
     {
-      label: '&View',
+      label: `&${labels.view}`,
       submenu: [
         { label: labels.zoomIn, accelerator: 'CmdOrCtrl+=', enabled: state.hasPuml, click: send('zoom-in') },
         { label: labels.zoomOut, accelerator: 'CmdOrCtrl+-', enabled: state.hasPuml, click: send('zoom-out') },
@@ -126,7 +138,7 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
       ],
     },
     {
-      label: '&Help',
+      label: `&${labels.help}`,
       submenu: [
         {
           label: labels.about,
