@@ -3,3 +3,6 @@ dist/
 dist-electron/
 release/
 *.log
+
+# IDE (JetBrains)
+.idea/
