@@ -60,6 +60,7 @@ export default function App() {
   const [dropPhase, setDropPhase] = useState<DropPhase>('idle');
   const dragDepth = useRef(0);
   const tRef = useRef(t);
+  const handleRelayoutRef = useRef<() => void>(() => undefined);
 
   // Confirmación de cierre.
   const [closePromptOpen, setClosePromptOpen] = useState(false);
@@ -95,6 +96,10 @@ export default function App() {
       if ((event.ctrlKey || event.metaKey) && event.key === ',') {
         event.preventDefault();
         setSettingsOpen(true);
+      }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'L' || event.key === 'l')) {
+        event.preventDefault();
+        handleRelayoutRef.current();
       }
     };
     window.addEventListener('keydown', onSettingsShortcut);
@@ -303,6 +308,13 @@ export default function App() {
   const handleZoomIn = useCallback(() => canvasRef.current?.zoomIn(), []);
   const handleZoomOut = useCallback(() => canvasRef.current?.zoomOut(), []);
   const handleFit = useCallback(() => canvasRef.current?.fit(), []);
+  const handleRelayout = useCallback(() => {
+    if (!canvasRef.current) return;
+    canvasRef.current.resetPositions();
+    canvasRef.current.fit();
+    setStatus({ kind: 'info', text: t('status.relayout') });
+  }, [t]);
+  handleRelayoutRef.current = handleRelayout;
   const handleExport = useCallback(async () => {
     const handle = canvasRef.current;
     if (!handle) return;
@@ -510,6 +522,7 @@ export default function App() {
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onFit={handleFit}
+        onRelayout={handleRelayout}
         onExport={() => void handleExport()}
       />
       <div className="workspace" aria-busy={dropPhase === 'opening'}>

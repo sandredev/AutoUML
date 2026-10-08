@@ -53,7 +53,7 @@ export function collapsePackages(
 
   const nodeForType = new Map<string, string>();
   for (const node of layout.nodes) {
-    const pkg = packageByType.get(node.id);
+    const pkg = node.packageName ?? packageByType.get(node.id);
     nodeForType.set(node.id, pkg && aggregateBoxes.has(pkg) ? `${PACKAGE_NODE_PREFIX}${pkg}` : node.id);
   }
   const displayedNodes = layout.nodes.filter((node) => nodeForType.get(node.id) === node.id);
