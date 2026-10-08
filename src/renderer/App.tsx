@@ -13,6 +13,7 @@ import { StartModal } from './components/StartModal';
 import { StatusBar, type Status } from './components/StatusBar';
 import type { DiagramCanvasHandle } from '../render/canvas/DiagramCanvas';
 import { SettingsDialog } from './components/SettingsDialog';
+import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { useTheme } from './components/useTheme';
 import { useI18n } from './i18n/I18nProvider';
 
@@ -38,16 +39,31 @@ export default function App() {
   // Sesión 3
   const [source, setSource] = useState<string | null>(null);
   const [diagram, setDiagram] = useState<DiagramModel | null>(null);
+  const loadedFor = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [issuesOpen, setIssuesOpen] = useState(true);
-  const [sourceTick, setSourceTick] = useState(0); // fuerza re-parseo en recarga
+  // Fuerza re-parseo en recarga.
+  const [sourceTick, setSourceTick] = useState(0);
   const canvasRef = useRef<DiagramCanvasHandle | null>(null);
   const [externalName, setExternalName] = useState<string | null>(null);
   const [historyTick, setHistoryTick] = useState(0);
   const dropBusy = useRef(false);
+
+  // Confirmación de cierre.
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
+  const [closeSaving, setCloseSaving] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [closeSaveProjectPending, setCloseSaveProjectPending] = useState(false);
+  const closeSaveSourceRef = useRef<string | null>(null);
+  const diagramRef = useRef<DiagramModel | null>(null);
+
   const docName = externalName
     ? externalName.replace(/\.[^.]+$/, '')
     : project?.meta.name ?? t('app.diagram');
+
+  useEffect(() => {
+    diagramRef.current = diagram;
+  }, [diagram]);
 
   useEffect(() => {
     void api.getStorageInfo().then(setStorage);
@@ -55,7 +71,7 @@ export default function App() {
 
   useEffect(() => {
     const currentName = externalName?.replace(/\.[^.]+$/, '') ?? project?.meta.name;
-    document.title = currentName ? `${currentName} — AutoUML` : 'AutoUML';
+    document.title = currentName ? currentName + ' — AutoUML' : 'AutoUML';
   }, [project, externalName]);
 
   useEffect(() => {
@@ -68,6 +84,17 @@ export default function App() {
     window.addEventListener('keydown', onSettingsShortcut);
     return () => window.removeEventListener('keydown', onSettingsShortcut);
   }, []);
+
+  // Solicitud de cierre desde main: ACK inmediato y, solo si hay diagrama, se pregunta.
+  useEffect(() => api.onCloseRequested(() => {
+    api.confirmClose('acknowledged');
+    if (diagramRef.current === null) {
+      api.confirmClose('close');
+      return;
+    }
+    setCloseError(null);
+    setClosePromptOpen(true);
+  }), []);
 
   // Sincroniza qué opciones del menú nativo están habilitadas.
   // hasPuml también cuenta el diagrama externo soltado (sin proyecto) para zoom/fit/export/sidebar.
@@ -88,7 +115,7 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [status]);
 
-  /** Lee el .puml del disco y lo parsea en el renderer. No tumba la app si falla. */
+  // Lee el .puml del disco y lo parsea en el renderer. No tumba la app si falla.
   const loadSource = useCallback(async (projectName: string): Promise<boolean> => {
     const r = await api.readPuml(projectName);
     if (!r.ok) {
@@ -146,7 +173,6 @@ export default function App() {
 
   // Carga inicial del texto cuando el proyecto pasa a tener .puml.
   // No borra un diagrama externo soltado: ese vive sin proyecto.
-  const loadedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!project?.puml) {
       loadedFor.current = null;
@@ -156,7 +182,7 @@ export default function App() {
       setSelectedId(null);
       return;
     }
-    const key = `${project.meta.name}:${project.meta.pumlLoadedAt ?? ''}`;
+    const key = project.meta.name + ':' + (project.meta.pumlLoadedAt ?? '');
     if (loadedFor.current === key) return;
     loadedFor.current = key;
     void loadSource(project.meta.name);
@@ -219,10 +245,106 @@ export default function App() {
       setStatus({ kind: 'error', text: t('status.noDiagramToExport') });
       return;
     }
-    const result = await api.savePng(`${docName}.png`, new Uint8Array(await blob.arrayBuffer()));
+    const result = await api.savePng(docName + '.png', new Uint8Array(await blob.arrayBuffer()));
     if (!result.ok) setStatus({ kind: 'error', text: result.error });
     else if (result.value) setStatus({ kind: 'success', text: t('status.pngSaved', { path: result.value }) });
   }, [docName, t]);
+
+  const saveCloseSourceToProject = useCallback(async (target: ProjectInfo, text: string) => {
+    const keepDisplayedDiagram = () => {
+      setProject(target);
+      if (externalName) {
+        loadedFor.current = target.puml ? target.meta.name + ':' + (target.meta.pumlLoadedAt ?? '') : null;
+        setSource(text);
+        setDiagram(parsePuml(text));
+      } else {
+        setExternalName(null);
+      }
+    };
+    setCloseSaving(true);
+    setCloseError(null);
+    try {
+      const r = await api.savePumlToProject(target.meta.name, text);
+      if (!r.ok) {
+        setCloseError(r.error);
+        keepDisplayedDiagram();
+        setClosePromptOpen(true);
+        return;
+      }
+      if (r.value.status === 'cancelled') {
+        keepDisplayedDiagram();
+        setCloseError(t('close.replaceCancelled'));
+        setClosePromptOpen(true);
+        return;
+      }
+      setProject(r.value.project);
+      setExternalName(null);
+      setClosePromptOpen(false);
+      api.confirmClose('close');
+    } catch (error: unknown) {
+      keepDisplayedDiagram();
+      setCloseError(error instanceof Error ? error.message : t('close.saveFailed'));
+      setClosePromptOpen(true);
+    } finally {
+      setCloseSaving(false);
+    }
+  }, [externalName, t]);
+
+  // Guarda el diagrama como diagram.puml en el proyecto. Si aún no hay proyecto,
+  // primero permite elegir uno existente o crear uno nuevo.
+  const handleCloseSave = useCallback(() => {
+    if (closeSaving) return;
+    if (source === null) {
+      setCloseError(t('history.noCurrentPuml'));
+      return;
+    }
+    if (!project) {
+      closeSaveSourceRef.current = source;
+      setCloseSaveProjectPending(true);
+      setClosePromptOpen(false);
+      setModal({ open: true, dismissable: true });
+      return;
+    }
+    void saveCloseSourceToProject(project, source);
+  }, [closeSaving, source, project, saveCloseSourceToProject, t]);
+
+  const handleStartModalOpened = useCallback((opened: ProjectInfo) => {
+    if (!closeSaveProjectPending) {
+      onProjectOpened(opened);
+      return;
+    }
+    const text = closeSaveSourceRef.current;
+    closeSaveSourceRef.current = null;
+    setCloseSaveProjectPending(false);
+    setModal({ open: false, dismissable: true });
+    setClosePromptOpen(true);
+    if (text === null) {
+      setProject(opened);
+      setCloseError(t('close.saveFailed'));
+      setClosePromptOpen(true);
+      return;
+    }
+    void saveCloseSourceToProject(opened, text);
+  }, [closeSaveProjectPending, onProjectOpened, saveCloseSourceToProject, t]);
+
+  const handleStartModalClose = useCallback(() => {
+    setModal({ open: false, dismissable: true });
+    if (!closeSaveProjectPending) return;
+    closeSaveSourceRef.current = null;
+    setCloseSaveProjectPending(false);
+    setClosePromptOpen(true);
+  }, [closeSaveProjectPending]);
+
+  const handleCloseDiscard = useCallback(() => {
+    setClosePromptOpen(false);
+    api.confirmClose('close');
+  }, []);
+
+  const handleCloseCancel = useCallback(() => {
+    setClosePromptOpen(false);
+    setCloseError(null);
+    api.confirmClose('cancel');
+  }, []);
 
   const handleSidebarSelect = useCallback((id: string) => {
     setSelectedId(id);
@@ -241,7 +363,8 @@ export default function App() {
 
   const summary = useMemo(() => {
     if (!diagram) return null;
-    const totalTypes = diagram.types.length; // internos + externos + sin declarar
+    // Internos + externos + sin declarar.
+    const totalTypes = diagram.types.length;
     const warnings = diagram.issues.filter((i) => i.severity === 'warning').length;
     return t('status.summary', { types: totalTypes, relationships: diagram.relationships.length, warnings });
   }, [diagram, t]);
@@ -251,6 +374,7 @@ export default function App() {
   const actionRef = useRef<(a: MenuAction) => void>(() => undefined);
   useEffect(() => {
     actionRef.current = (action) => {
+      if (closePromptOpen) return;
       if (action === 'new-project' || action === 'open-project') {
         setModal({ open: true, dismissable: project !== null || diagram !== null });
         return;
@@ -299,7 +423,7 @@ export default function App() {
           break;
       }
     };
-  }, [project, diagram, modal.open, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport, setThemeMode, setLocale, t]);
+  }, [project, diagram, modal.open, closePromptOpen, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport, setThemeMode, setLocale, t]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 
@@ -345,7 +469,7 @@ export default function App() {
         <HistoryPanel
           api={api.history}
           source={source}
-          suggestedName={`${docName}.puml`}
+          suggestedName={docName + '.puml'}
           refreshKey={historyTick}
           onOpened={handlePumlOpened}
           onStatus={setStatus}
@@ -361,11 +485,20 @@ export default function App() {
       {modal.open && (
         <StartModal
           dismissable={modal.dismissable}
-          onClose={() => setModal({ open: false, dismissable: true })}
-          onOpened={onProjectOpened}
+          onClose={handleStartModalClose}
+          onOpened={handleStartModalOpened}
         />
       )}
       {settingsOpen && <SettingsDialog themeMode={themeMode} onThemeChange={setThemeMode} onClose={() => setSettingsOpen(false)} />}
+      {closePromptOpen && (
+        <CloseConfirmModal
+          saving={closeSaving}
+          error={closeError}
+          onSave={() => void handleCloseSave()}
+          onDiscard={handleCloseDiscard}
+          onCancel={handleCloseCancel}
+        />
+      )}
     </div>
   );
 }

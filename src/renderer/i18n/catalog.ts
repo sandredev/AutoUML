@@ -1,4 +1,3 @@
-
 // Catálogo central de traducciones (issue #1). Español es la referencia y el fallback.
 export type Locale = 'es' | 'en';
 
@@ -129,6 +128,14 @@ const es = {
   'category.class': 'Clases',
   'category.external': 'Externos',
   'category.undeclared': 'Sin declarar',
+  'close.title': '¿Cerrar AutoUML?',
+  'close.message': 'Puedes guardar el diagrama como diagram.puml dentro de un proyecto antes de cerrar.',
+  'close.save': 'Guardar en proyecto…',
+  'close.saving': 'Guardando…',
+  'close.discard': 'Cerrar sin guardar',
+  'close.cancel': 'Cancelar',
+  'close.saveFailed': 'No se pudo guardar. La aplicación sigue abierta.',
+  'close.replaceCancelled': 'No se reemplazó el .puml del proyecto. La aplicación sigue abierta.',
 } as const;
 
 export type MessageKey = keyof typeof es;
@@ -258,6 +265,14 @@ const en: Catalog = {
   'category.class': 'Classes',
   'category.external': 'External types',
   'category.undeclared': 'Undeclared',
+  'close.title': 'Close AutoUML?',
+  'close.message': 'You can save the diagram as diagram.puml in a project before closing.',
+  'close.save': 'Save to project…',
+  'close.saving': 'Saving…',
+  'close.discard': 'Close without saving',
+  'close.cancel': 'Cancel',
+  'close.saveFailed': 'Could not save. The app is still open.',
+  'close.replaceCancelled': 'The project .puml was not replaced. The app is still open.',
 };
 
 const catalogs: Record<Locale, Partial<Catalog>> = { es, en };

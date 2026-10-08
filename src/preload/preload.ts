@@ -1,6 +1,6 @@
 // Puente seguro. Solo importa 'electron' y TIPOS, porque el preload corre en sandbox.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { AutoUmlApi, IpcChannel, MenuAction, MenuState } from '../shared/ipc';
+import type { AutoUmlApi, CloseDecision, IpcChannel, MenuAction, MenuState } from '../shared/ipc';
 import type { HistoryApi } from '../shared/history';
 
 function invoke<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
@@ -41,6 +41,7 @@ const api: AutoUmlApi = {
   getCurrentProject: () => invoke('projects:current'),
   readPuml: (name) => invoke('puml:read', name),
   loadPuml: (name) => invoke('puml:load', name),
+  savePumlToProject: (name, source) => invoke('puml:save-to-project', name, source),
   reloadPuml: (name) => invoke('puml:reload', name),
   savePng: (fileName, bytes) => invoke('export:save-png', fileName, bytes),
   updateMenuState: (state: MenuState) => {
@@ -54,6 +55,19 @@ const api: AutoUmlApi = {
     return () => {
       ipcRenderer.removeListener(channel, listener);
     };
+  },
+  onCloseRequested: (callback) => {
+    const channel: IpcChannel = 'app:close-requested';
+    const listener = () => callback();
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+    };
+  },
+  confirmClose: (decision: CloseDecision) => {
+    if (decision !== 'acknowledged' && decision !== 'close' && decision !== 'cancel') return;
+    const channel: IpcChannel = 'app:confirm-close';
+    ipcRenderer.send(channel, decision);
   }
 };
 
