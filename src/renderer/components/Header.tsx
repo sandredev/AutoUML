@@ -1,6 +1,6 @@
 
 import type { JSX, ReactNode } from 'react';
-import { ExportIcon, FitIcon, LoadIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
+import { ExportIcon, FitIcon, LoadIcon, RelayoutIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
 import { useI18n } from '../i18n/I18nProvider';
 import { withShortcut } from '../i18n/catalog';
 import './settings.css';
@@ -17,6 +17,7 @@ interface Props {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
+  onRelayout: () => void;
   onExport: () => void;
 }
 
@@ -49,6 +50,7 @@ export function Header({
   onZoomIn,
   onZoomOut,
   onFit,
+  onRelayout,
   onExport,
 }: Props): JSX.Element {
   const { t } = useI18n();
@@ -80,6 +82,7 @@ export function Header({
         <ToolButton label={t('header.zoomIn')} shortcut="Ctrl+=" icon={<ZoomInIcon />} disabled={!canView} onClick={onZoomIn} />
         <ToolButton label={t('header.zoomOut')} shortcut="Ctrl+-" icon={<ZoomOutIcon />} disabled={!canView} onClick={onZoomOut} />
         <ToolButton label={t('header.fit')} shortcut="Ctrl+0" icon={<FitIcon />} disabled={!canView} onClick={onFit} />
+        <ToolButton label={t('header.relayout')} shortcut="Ctrl+Shift+L" icon={<RelayoutIcon />} disabled={!canView} onClick={onRelayout} />
         <ToolButton label={t('header.export')} shortcut="Ctrl+E" icon={<ExportIcon />} disabled={!canView} onClick={onExport} />
       </div>
     </header>

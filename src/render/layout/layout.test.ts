@@ -43,6 +43,40 @@ const touches = (b: NodeBox, x: number, y: number, eps = 0.5): boolean =>
   x >= b.x - eps && x <= b.x + b.w + eps && y >= b.y - eps && y <= b.y + b.h + eps &&
   (Math.abs(x - b.x) < eps || Math.abs(x - b.x - b.w) < eps || Math.abs(y - b.y) < eps || Math.abs(y - b.y - b.h) < eps);
 
+// ¿El segmento atraviesa el interior de la caja? (rozar el borde no cuenta).
+function crosses(ax: number, ay: number, bx: number, by: number, b: { x: number; y: number; w: number; h: number }): boolean {
+  const x0 = b.x + 1;
+  const y0 = b.y + 1;
+  const x1 = b.x + b.w - 1;
+  const y1 = b.y + b.h - 1;
+  if (x0 >= x1 || y0 >= y1) return false;
+  if (Math.max(ax, bx) < x0 || Math.min(ax, bx) > x1) return false;
+  if (Math.max(ay, by) < y0 || Math.min(ay, by) > y1) return false;
+  if (ax > x0 && ax < x1 && ay > y0 && ay < y1) return true;
+  if (bx > x0 && bx < x1 && by > y0 && by < y1) return true;
+  const orient = (px: number, py: number, qx: number, qy: number, rx: number, ry: number): number => {
+    const v = (qx - px) * (ry - py) - (qy - py) * (rx - px);
+    return v > 0 ? 1 : v < 0 ? -1 : 0;
+  };
+  const xseg = (cx: number, cy: number, dx: number, dy: number, ex: number, ey: number, fx: number, fy: number): boolean => {
+    if (Math.max(cx, dx) < Math.min(ex, fx) || Math.max(ex, fx) < Math.min(cx, dx)) return false;
+    if (Math.max(cy, dy) < Math.min(ey, fy) || Math.max(ey, fy) < Math.min(cy, dy)) return false;
+    return orient(cx, cy, dx, dy, ex, ey) !== orient(cx, cy, dx, dy, fx, fy)
+      && orient(ex, ey, fx, fy, cx, cy) !== orient(ex, ey, fx, fy, dx, dy);
+  };
+  return xseg(ax, ay, bx, by, x0, y0, x1, y0)
+    || xseg(ax, ay, bx, by, x1, y0, x1, y1)
+    || xseg(ax, ay, bx, by, x1, y1, x0, y1)
+    || xseg(ax, ay, bx, by, x0, y1, x0, y0);
+}
+
+function edgeCrossesBox(pts: number[], b: { x: number; y: number; w: number; h: number }): boolean {
+  for (let i = 0; i + 3 < pts.length; i += 2) {
+    if (crosses(pts[i]!, pts[i + 1]!, pts[i + 2]!, pts[i + 3]!, b)) return true;
+  }
+  return false;
+}
+
 describe('computeLayout', () => {
   it('el padre queda por encima del hijo', () => {
     const L = computeLayout(model([type('Hijo'), type('Padre', 'x.dom', 'abstract'), type('I', 'x.dom', 'interface')],
@@ -82,6 +116,43 @@ describe('computeLayout', () => {
         expect(n.y + n.h).toBeLessThanOrEqual(p.y + p.h);
       }
     }
+  });
+
+  it('las aristas entre paquetes no atraviesan terceros paquetes', () => {
+    const m = model(
+      [type('A1', 'p.a'), type('A2', 'p.a'), type('B1', 'p.b'), type('B2', 'p.b'), type('C1', 'p.c'), type('C2', 'p.c')],
+      [rel('A1', 'C1'), rel('A2', 'B1'), rel('B2', 'C2'), rel('A1', 'B2', 'EXTENDS')],
+    );
+    const L = computeLayout(m);
+    const pkgOf = new Map(L.nodes.map((n) => [n.id, n.packageName ?? '']));
+    const boxOf = new Map(L.packages.map((p) => [p.name, p]));
+    for (const e of L.edges) {
+      const pa = pkgOf.get(e.source) ?? '';
+      const pb = pkgOf.get(e.target) ?? '';
+      if (pa === pb) continue;
+      for (const p of L.packages) {
+        if (p.name === pa || p.name === pb) continue;
+        expect(edgeCrossesBox(e.points, p), `${e.source}->${e.target} cruza ${p.name}`).toBe(false);
+      }
+      // Toca los bordes de sus dos paquetes (sale por uno y entra por el otro).
+      const boxA = boxOf.get(pa)!;
+      const boxB = boxOf.get(pb)!;
+      const nearBorder = (b: { x: number; y: number; w: number; h: number }): boolean =>
+        e.points.some((_, i) => i % 2 === 0 && touches({ ...b, id: '' } as NodeBox, e.points[i]!, e.points[i + 1]!, 2));
+      expect(nearBorder(boxA), `${e.source}->${e.target} no toca ${pa}`).toBe(true);
+      expect(nearBorder(boxB), `${e.source}->${e.target} no toca ${pb}`).toBe(true);
+    }
+  });
+
+  it('las aristas paralelas del mismo par se separan en carriles', () => {
+    const m = model(
+      [type('A1', 'p.a'), type('A2', 'p.a'), type('C1', 'p.c'), type('C2', 'p.c')],
+      [rel('A1', 'C1'), rel('A2', 'C2')],
+    );
+    const L = computeLayout(m);
+    const [e1, e2] = L.edges;
+    expect(L.edges).toHaveLength(2);
+    expect(JSON.stringify(e1!.points)).not.toBe(JSON.stringify(e2!.points));
   });
 
   it('grafo vacío', () => {

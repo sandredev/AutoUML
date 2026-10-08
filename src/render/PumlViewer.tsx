@@ -1,7 +1,9 @@
-import type { JSX, RefObject } from 'react';
+import { useMemo, useState, type JSX, type RefObject } from 'react';
 import type { DiagramModel } from '../core/model';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
 import { useLayout } from './layout/useLayout';
+import { ViewOptionsBar } from './ViewOptionsBar';
+import { applyViewOptions, loadViewOptions, saveViewOptions, toLayoutOptions, type ViewOptions } from './viewOptions';
 
 /**
  * Electron-independent view for the puml-viewer capability. The host owns
@@ -23,8 +25,19 @@ export function PumlViewer({
   canvasRef,
   className = '',
 }: PumlViewerProps): JSX.Element {
-  const { layout, loading, error } = useLayout(model);
+  const [viewOptions, setViewOptions] = useState<ViewOptions>(() => loadViewOptions());
+  const viewModel = useMemo(() => (model ? applyViewOptions(model, viewOptions) : null), [model, viewOptions]);
+  const viewLayoutOptions = useMemo(
+    () => (viewModel ? toLayoutOptions(viewOptions, viewModel) : undefined),
+    [viewOptions, viewModel],
+  );
+  const { layout, loading, error } = useLayout(viewModel, viewLayoutOptions);
   const classes = `puml-viewer ${className}`.trim();
+
+  const handleViewOptionsChange = (next: ViewOptions): void => {
+    setViewOptions(next);
+    saveViewOptions(next);
+  };
 
   if (error) {
     return (
@@ -35,7 +48,7 @@ export function PumlViewer({
     );
   }
 
-  if (!model || loading || !layout) {
+  if (!viewModel || loading || !layout) {
     return (
       <section className={classes}>
         <p className="render-meta" role="status">Calculando diagrama…</p>
@@ -54,9 +67,10 @@ export function PumlViewer({
 
   return (
     <section className={`${classes} has-canvas`}>
+      <ViewOptionsBar value={viewOptions} onChange={handleViewOptionsChange} disabled={loading} />
       <DiagramCanvas
         ref={canvasRef}
-        model={model}
+        model={viewModel}
         layout={layout}
         selectedId={selectedId}
         onSelect={onSelect}
