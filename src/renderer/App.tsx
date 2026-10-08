@@ -24,7 +24,7 @@ interface ModalState {
 }
 
 export default function App() {
-  const { t, locale } = useI18n();
+  const { t, locale, setLocale } = useI18n();
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [project, setProject] = useState<ProjectInfo | null>(null);
@@ -77,8 +77,9 @@ export default function App() {
       hasPuml: project?.puml != null || diagram !== null,
       sidebarVisible,
       locale,
+      themeMode,
     });
-  }, [project, diagram, sidebarVisible, locale]);
+  }, [project, diagram, sidebarVisible, locale, themeMode]);
 
   // Los mensajes que no son de error se ocultan solos.
   useEffect(() => {
@@ -259,6 +260,18 @@ export default function App() {
         toggleSidebar();
         return;
       }
+      if (action === 'settings-more') {
+        setSettingsOpen(true);
+        return;
+      }
+      if (action === 'theme-system' || action === 'theme-light' || action === 'theme-dark') {
+        setThemeMode(action.slice('theme-'.length) as 'system' | 'light' | 'dark');
+        return;
+      }
+      if (action === 'locale-es' || action === 'locale-en') {
+        setLocale(action === 'locale-es' ? 'es' : 'en');
+        return;
+      }
       if (modal.open || (!project && !diagram)) return;
       switch (action) {
         case 'load-puml':
@@ -286,7 +299,7 @@ export default function App() {
           break;
       }
     };
-  }, [project, diagram, modal.open, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport, t]);
+  }, [project, diagram, modal.open, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport, setThemeMode, setLocale, t]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 
@@ -297,8 +310,6 @@ export default function App() {
       {storage?.warning && <div className="banner banner-warning">⚠ {storage.warning}</div>}
       <Header
         projectName={headerName}
-        settingsOpen={settingsOpen}
-        onOpenSettings={() => setSettingsOpen(true)}
         canLoad={project !== null && !busy}
         canReload={project?.puml != null && !busy}
         sidebarVisible={sidebarVisible}

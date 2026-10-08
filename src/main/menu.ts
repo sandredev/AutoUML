@@ -6,6 +6,7 @@ interface MenuCopy {
   file: string;
   edit: string;
   view: string;
+  configuration: string;
   help: string;
   newProject: string;
   openProject: string;
@@ -22,6 +23,14 @@ interface MenuCopy {
   fit: string;
   showSidebar: string;
   devTools: string;
+  theme: string;
+  themeSystem: string;
+  themeLight: string;
+  themeDark: string;
+  language: string;
+  languageEs: string;
+  languageEn: string;
+  moreOptions: string;
   about: string;
   aboutDetail: string;
 }
@@ -31,6 +40,7 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     file: 'Archivo',
     edit: 'Editar',
     view: 'Ver',
+    configuration: 'Configuración',
     help: 'Ayuda',
     newProject: 'Nuevo proyecto…',
     openProject: 'Abrir proyecto…',
@@ -47,6 +57,14 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     fit: 'Ajustar a pantalla',
     showSidebar: 'Mostrar panel lateral',
     devTools: 'Herramientas de desarrollo',
+    theme: 'Tema',
+    themeSystem: 'Sistema',
+    themeLight: 'Claro',
+    themeDark: 'Oscuro',
+    language: 'Idioma',
+    languageEs: 'Español',
+    languageEn: 'English',
+    moreOptions: 'Más opciones…',
     about: 'Acerca de AutoUML',
     aboutDetail: 'Visualizador de diagramas de clases PlantUML — INGSOFT.\nUn proyecto = un archivo .puml.',
   },
@@ -54,6 +72,7 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     file: 'File',
     edit: 'Edit',
     view: 'View',
+    configuration: 'Settings',
     help: 'Help',
     newProject: 'New project…',
     openProject: 'Open project…',
@@ -70,6 +89,14 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     fit: 'Fit to screen',
     showSidebar: 'Show side panel',
     devTools: 'Developer tools',
+    theme: 'Theme',
+    themeSystem: 'System',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+    language: 'Language',
+    languageEs: 'Spanish',
+    languageEn: 'English',
+    moreOptions: 'More options…',
     about: 'About AutoUML',
     aboutDetail: 'PlantUML class diagram viewer — INGSOFT.\nOne project = one .puml file.',
   },
@@ -135,6 +162,28 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
           click: send('toggle-sidebar'),
         },
         ...viewDev,
+      ],
+    },
+    {
+      label: `&${labels.configuration}`,
+      submenu: [
+        {
+          label: labels.theme,
+          submenu: [
+            { label: labels.themeSystem, type: 'radio', checked: state.themeMode === 'system', click: send('theme-system') },
+            { label: labels.themeLight, type: 'radio', checked: state.themeMode === 'light', click: send('theme-light') },
+            { label: labels.themeDark, type: 'radio', checked: state.themeMode === 'dark', click: send('theme-dark') },
+          ],
+        },
+        {
+          label: labels.language,
+          submenu: [
+            { label: labels.languageEs, type: 'radio', checked: state.locale === 'es', click: send('locale-es') },
+            { label: labels.languageEn, type: 'radio', checked: state.locale === 'en', click: send('locale-en') },
+          ],
+        },
+        { type: 'separator' },
+        { label: labels.moreOptions, accelerator: 'CmdOrCtrl+,', click: send('settings-more') },
       ],
     },
     {

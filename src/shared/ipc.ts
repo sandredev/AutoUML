@@ -55,13 +55,20 @@ export type MenuAction =
   | 'zoom-out'
   | 'fit'
   | 'export'
-  | 'toggle-sidebar';
+  | 'toggle-sidebar'
+  | 'theme-system'
+  | 'theme-light'
+  | 'theme-dark'
+  | 'locale-es'
+  | 'locale-en'
+  | 'settings-more';
 
 export interface MenuState {
   projectOpen: boolean;
   hasPuml: boolean;
   sidebarVisible: boolean;
   locale: 'es' | 'en';
+  themeMode: 'system' | 'light' | 'dark';
 }
 
 export type IpcChannel =

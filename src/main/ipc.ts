@@ -39,7 +39,8 @@ function isMenuState(v: unknown): v is MenuState {
   return typeof s.projectOpen === 'boolean'
     && typeof s.hasPuml === 'boolean'
     && typeof s.sidebarVisible === 'boolean'
-    && (s.locale === 'es' || s.locale === 'en');
+    && (s.locale === 'es' || s.locale === 'en')
+    && (s.themeMode === 'system' || s.themeMode === 'light' || s.themeMode === 'dark');
 }
 
 async function messageBox(win: BrowserWindow | null, opts: MessageBoxOptions) {
