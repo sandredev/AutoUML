@@ -36,7 +36,11 @@ function asName(value: unknown): string {
 function isMenuState(v: unknown): v is MenuState {
   if (typeof v !== 'object' || v === null) return false;
   const s = v as Record<string, unknown>;
-  return typeof s.projectOpen === 'boolean' && typeof s.hasPuml === 'boolean' && typeof s.sidebarVisible === 'boolean';
+  return typeof s.projectOpen === 'boolean'
+    && typeof s.hasPuml === 'boolean'
+    && typeof s.sidebarVisible === 'boolean'
+    && (s.locale === 'es' || s.locale === 'en')
+    && (s.themeMode === 'system' || s.themeMode === 'light' || s.themeMode === 'dark');
 }
 
 async function messageBox(win: BrowserWindow | null, opts: MessageBoxOptions) {
