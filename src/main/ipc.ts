@@ -2,7 +2,7 @@
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, type MessageBoxOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { LoadOutcome, MenuState, ProjectInfo, Result } from '../shared/ipc';
+import type { LoadOutcome, MenuState, ProjectInfo, Result, SavePumlOutcome } from '../shared/ipc';
 import { hasPumlExtension, PUML_EXTENSIONS, validatePumlMarkers } from '../shared/validation';
 import {
   createProject,
@@ -12,7 +12,8 @@ import {
   openProject,
   readProject,
   readPumlText,
-  savePuml
+  savePuml,
+  savePumlText
 } from './projects';
 import { registerHistoryIpc } from './history';
 
@@ -142,6 +143,37 @@ export function registerIpc(onMenuState: (state: MenuState) => void): void {
       return await loadPumlFlow(e, asName(name));
     } catch (err) {
       return fail(err);
+    }
+  });
+
+  ipcMain.handle('puml:save-to-project', async (event, rawName: unknown, rawSource: unknown): Promise<Result<SavePumlOutcome>> => {
+    try {
+      const name = asName(rawName);
+      if (typeof rawSource !== 'string') throw new Error('El contenido PUML es inválido.');
+      const source = rawSource.replace(/^\uFEFF/, '');
+      if (Buffer.byteLength(source, 'utf8') > MAX_PUML_BYTES) {
+        throw new Error('El archivo supera el límite de 50 MB.');
+      }
+      const errors = validatePumlMarkers(source);
+      if (errors.length > 0) throw new Error(`El .puml no es válido. No se guardó en el proyecto. ${errors.join(' ')}`);
+      const project = readProject(name);
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (project.puml && readPumlText(name) !== source) {
+        const answer = await messageBox(win, {
+          type: 'warning',
+          title: 'Reemplazar PUML',
+          message: `El proyecto "${project.meta.name}" ya tiene un .puml (${project.puml.originalFileName}).`,
+          detail: '¿Reemplazarlo por el diagrama actual? El archivo anterior se perderá; los diagramas nunca se mezclan.',
+          buttons: ['Reemplazar', 'Cancelar'],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true
+        });
+        if (answer.response !== 0) return ok({ status: 'cancelled' });
+      }
+      return ok({ status: 'saved', project: savePumlText(name, source) });
+    } catch (e) {
+      return fail(e);
     }
   });
 

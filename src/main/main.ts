@@ -2,6 +2,7 @@ import { app, BrowserWindow, nativeTheme, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { MenuState } from '../shared/ipc';
+import { attachCloseFlow, registerCloseFlow } from './closeFlow';
 import { registerIpc } from './ipc';
 import { ensureLinuxDesktopEntry } from './linuxDesktop';
 import { buildMenu } from './menu';
@@ -16,7 +17,7 @@ if (!hasSingleInstanceLock) {
   app.quit();
 }
 
-/** Icono de la ventana (issue #2). En dev y empaquetado vive en build/ relativo a la app. */
+// Icono de la ventana (issue #2). En dev y empaquetado vive en build/ relativo a la app.
 function resolveWindowIcon(): string | undefined {
   const candidate = path.join(__dirname, '../../build/icon.png');
   try {
@@ -45,6 +46,7 @@ function createWindow(): void {
   });
 
   buildMenu(win, menuState);
+  attachCloseFlow(win);
   win.once('ready-to-show', () => win?.show());
 
   // Sin ventanas emergentes ni navegación fuera de la app.
@@ -79,6 +81,7 @@ if (hasSingleInstanceLock) {
   void app.whenReady().then(() => {
     ensureLinuxDesktopEntry();
     initStorage();
+    registerCloseFlow();
     registerIpc((state) => {
       menuState = state;
       if (win) buildMenu(win, state);

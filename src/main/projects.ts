@@ -203,6 +203,20 @@ export function savePuml(rawName: string, sourcePath: string): ProjectInfo {
   return readProject(project.meta.name);
 }
 
+/** Guarda el texto actual del renderer como diagram.puml y lo asigna al proyecto. */
+export function savePumlText(rawName: string, source: string): ProjectInfo {
+  const project = readProject(rawName);
+  const target = path.join(project.dir, PUML_FILE);
+  atomicWrite(target, source.replace(/^\uFEFF/, ''));
+  writeMeta(project.dir, {
+    ...project.meta,
+    pumlFile: PUML_FILE,
+    originalFileName: project.puml?.originalFileName ?? `${project.meta.name}.puml`,
+    pumlLoadedAt: new Date().toISOString()
+  });
+  return readProject(project.meta.name);
+}
+
 export function readPumlText(rawName: string): string {
   const project = readProject(rawName);
   if (!project.meta.pumlFile) throw new Error('Este proyecto todavía no tiene un .puml cargado.');
