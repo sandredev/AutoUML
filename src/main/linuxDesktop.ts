@@ -31,9 +31,10 @@ export function ensureLinuxDesktopEntry(): void {
       ''
     ].join('\n');
 
-    if (!fs.existsSync(iconPath)) {
+    const iconData = fs.readFileSync(source);
+    if (!fs.existsSync(iconPath) || !fs.readFileSync(iconPath).equals(iconData)) {
       fs.mkdirSync(path.dirname(iconPath), { recursive: true });
-      fs.copyFileSync(source, iconPath);
+      fs.writeFileSync(iconPath, iconData);
     }
     if (!fs.existsSync(desktopPath) || fs.readFileSync(desktopPath, 'utf8') !== entry) {
       fs.mkdirSync(path.dirname(desktopPath), { recursive: true });
