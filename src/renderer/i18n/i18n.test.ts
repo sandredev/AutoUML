@@ -56,6 +56,12 @@ describe('i18n (issue #1)', () => {
     expect(withShortcut('Settings', 'Ctrl+,')).toBe('Settings (Ctrl+,)');
   });
 
+  it('traduce los estados del overlay de drag and drop', () => {
+    expect(translate('es', 'drop.prompt')).toBe('Suelta el diagrama para abrirlo');
+    expect(translate('es', 'drop.hint', { extensions: '.puml, .pu' })).toBe('Formatos aceptados: .puml, .pu');
+    expect(translate('en', 'drop.opening')).toBe('Opening diagram…');
+  });
+
   it('filtra categorías por título u opción, sin acentos', () => {
     const tEs = (k: Parameters<typeof translate>[1]) => translate('es', k);
     expect(filterCategories('', tEs).length).toBe(3);

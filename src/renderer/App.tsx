@@ -14,6 +14,7 @@ import { StatusBar, type Status } from './components/StatusBar';
 import type { DiagramCanvasHandle } from '../render/canvas/DiagramCanvas';
 import { SettingsDialog } from './components/SettingsDialog';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
+import { DropOverlay, type DropPhase } from './components/DropOverlay';
 import { useTheme } from './components/useTheme';
 import { useI18n } from './i18n/I18nProvider';
 
@@ -22,6 +23,12 @@ const api = window.autouml;
 interface ModalState {
   open: boolean;
   dismissable: boolean;
+}
+
+function hasFiles(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types;
+  if (!types) return false;
+  return Array.from(types).includes('Files');
 }
 
 export default function App() {
@@ -49,6 +56,11 @@ export default function App() {
   const [historyTick, setHistoryTick] = useState(0);
   const dropBusy = useRef(false);
 
+  // Feedback visual de drag and drop.
+  const [dropPhase, setDropPhase] = useState<DropPhase>('idle');
+  const dragDepth = useRef(0);
+  const tRef = useRef(t);
+
   // Confirmación de cierre.
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [closeSaving, setCloseSaving] = useState(false);
@@ -60,6 +72,10 @@ export default function App() {
   const docName = externalName
     ? externalName.replace(/\.[^.]+$/, '')
     : project?.meta.name ?? t('app.diagram');
+
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
 
   useEffect(() => {
     diagramRef.current = diagram;
@@ -140,36 +156,86 @@ export default function App() {
     setModal((current) => current.open ? { open: false, dismissable: true } : current);
   }, []);
 
+  // Ruta global única de drop. El overlay solo refleja la fase; nunca recibe eventos.
   useEffect(() => {
+    let mounted = true;
+
+    const resetDrag = () => {
+      dragDepth.current = 0;
+      if (mounted && !dropBusy.current) setDropPhase('idle');
+    };
+
+    const onDragEnter = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      dragDepth.current += 1;
+      if (!dropBusy.current) setDropPhase('dragging');
+    };
     const onDragOver = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
     };
+    const onDragLeave = (event: DragEvent) => {
+      // relatedTarget null = el puntero salió de la ventana.
+      if (event.relatedTarget === null) {
+        resetDrag();
+        return;
+      }
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+    };
+    const onDragEnd = () => resetDrag();
+    const onBlur = () => resetDrag();
+
     const onDrop = (event: DragEvent) => {
-      event.preventDefault();
-      if (dropBusy.current) return;
       const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length === 0 && !hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      dragDepth.current = 0;
+      if (dropBusy.current) return;
+      if (files.length === 0) {
+        setDropPhase('idle');
+        return;
+      }
+      const translateNow = tRef.current;
       dropBusy.current = true;
-      void openDroppedFiles(files, api.openDroppedPuml, t)
+      setDropPhase('opening');
+      void openDroppedFiles(files, api.openDroppedPuml, translateNow)
         .then((outcome) => {
+          if (!mounted) return;
           if (outcome.status) setStatus(outcome.status);
           if (outcome.opened) handlePumlOpened(outcome.opened);
           if (outcome.refresh) setHistoryTick((tick) => tick + 1);
         })
         .catch((error: unknown) => {
-          setStatus({ kind: 'error', text: error instanceof Error ? error.message : t('status.dropFailed') });
+          if (!mounted) return;
+          setStatus({ kind: 'error', text: error instanceof Error ? error.message : translateNow('status.dropFailed') });
         })
         .finally(() => {
           dropBusy.current = false;
+          dragDepth.current = 0;
+          if (mounted) setDropPhase('idle');
         });
     };
+
+    window.addEventListener('dragenter', onDragEnter);
     window.addEventListener('dragover', onDragOver);
+    window.addEventListener('dragleave', onDragLeave);
+    window.addEventListener('dragend', onDragEnd);
     window.addEventListener('drop', onDrop);
+    window.addEventListener('blur', onBlur);
     return () => {
+      mounted = false;
+      dragDepth.current = 0;
+      window.removeEventListener('dragenter', onDragEnter);
       window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('dragleave', onDragLeave);
+      window.removeEventListener('dragend', onDragEnd);
       window.removeEventListener('drop', onDrop);
+      window.removeEventListener('blur', onBlur);
     };
-  }, [handlePumlOpened, t]);
+  }, [handlePumlOpened]);
 
   // Carga inicial del texto cuando el proyecto pasa a tener .puml.
   // No borra un diagrama externo soltado: ese vive sin proyecto.
@@ -446,7 +512,7 @@ export default function App() {
         onFit={handleFit}
         onExport={() => void handleExport()}
       />
-      <div className="workspace">
+      <div className="workspace" aria-busy={dropPhase === 'opening'}>
         {sidebarVisible && (project || diagram) && (
           <Sidebar
             project={project}
@@ -474,6 +540,7 @@ export default function App() {
           onOpened={handlePumlOpened}
           onStatus={setStatus}
         />
+        <DropOverlay phase={dropPhase} />
       </div>
       <IssuesPanel
         issues={diagram?.issues ?? []}

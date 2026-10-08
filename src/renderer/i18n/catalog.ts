@@ -136,6 +136,9 @@ const es = {
   'close.cancel': 'Cancelar',
   'close.saveFailed': 'No se pudo guardar. La aplicación sigue abierta.',
   'close.replaceCancelled': 'No se reemplazó el .puml del proyecto. La aplicación sigue abierta.',
+  'drop.prompt': 'Suelta el diagrama para abrirlo',
+  'drop.hint': 'Formatos aceptados: {extensions}',
+  'drop.opening': 'Abriendo diagrama…',
 } as const;
 
 export type MessageKey = keyof typeof es;
@@ -273,6 +276,9 @@ const en: Catalog = {
   'close.cancel': 'Cancel',
   'close.saveFailed': 'Could not save. The app is still open.',
   'close.replaceCancelled': 'The project .puml was not replaced. The app is still open.',
+  'drop.prompt': 'Drop the diagram to open it',
+  'drop.hint': 'Accepted formats: {extensions}',
+  'drop.opening': 'Opening diagram…',
 };
 
 const catalogs: Record<Locale, Partial<Catalog>> = { es, en };
