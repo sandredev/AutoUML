@@ -1,6 +1,7 @@
 // src/render/canvas/draw.ts — dibujo del diagrama en Canvas 2D (sin React).
 import type { Category, DiagramModel, ParameterModel, RelType, TypeNode } from '../../core/model';
 import type { EdgePath, LayoutResult, NodeBox, ViewState } from '../types';
+import { CORNER_RADIUS, labelAnchor, lastSegment, roundedCorners, simplify } from './edgePath';
 import { queryEdges, queryNodes, type SpatialIndex } from './spatial';
 import { visibleWorldRect } from './viewport';
 
@@ -107,11 +108,35 @@ function tracePath(ctx: CanvasRenderingContext2D, pts: number[]): void {
   for (let k = 2; k + 1 < pts.length; k += 2) ctx.lineTo(pts[k] ?? 0, pts[k + 1] ?? 0);
 }
 
+// Puntos simplificados por arista (sin repetidos ni colineales); se recalculan si cambia el array.
+const simpleCache = new WeakMap<number[], number[]>();
+function simplePoints(e: EdgePath): number[] {
+  let p = simpleCache.get(e.points);
+  if (!p) {
+    p = simplify(e.points);
+    simpleCache.set(e.points, p);
+  }
+  return p;
+}
+
+/** Aristas ortogonales (ELK): tramos rectos con esquinas apenas redondeadas. Las demás, tal cual. */
+function traceEdge(ctx: CanvasRenderingContext2D, e: EdgePath): void {
+  if (e.routing !== 'orthogonal') {
+    tracePath(ctx, e.points);
+    return;
+  }
+  for (const o of roundedCorners(simplePoints(e), CORNER_RADIUS)) {
+    if (o.op === 'move') ctx.moveTo(o.x, o.y);
+    else if (o.op === 'line') ctx.lineTo(o.x, o.y);
+    else ctx.arcTo(o.x1, o.y1, o.x2, o.y2, o.r);
+  }
+}
+
 function drawHead(ctx: CanvasRenderingContext2D, e: EdgePath, bg: string): void {
-  const n = e.points.length;
-  if (n < 4) return;
-  const ex = e.points[n - 2] ?? 0, ey = e.points[n - 1] ?? 0;
-  const px = e.points[n - 4] ?? 0, py = e.points[n - 3] ?? 0;
+  // La flecha se alinea con el último tramo real (sin puntos repetidos al final).
+  const seg = lastSegment(e.routing === 'orthogonal' ? simplePoints(e) : e.points);
+  if (!seg) return;
+  const [px, py, ex, ey] = seg;
   const len = Math.hypot(ex - px, ey - py) || 1;
   const ux = (ex - px) / len, uy = (ey - py) / len;
   const bx = ex - ux * ARROW, by = ey - uy * ARROW;
@@ -130,10 +155,10 @@ function drawHead(ctx: CanvasRenderingContext2D, e: EdgePath, bg: string): void 
 
 function drawLabel(ctx: CanvasRenderingContext2D, e: EdgePath, color: string): void {
   if (!e.label) return;
-  const m = e.points.length / 2;
-  const k = Math.max(0, Math.floor((m - 1) / 2));
-  const x = ((e.points[k * 2] ?? 0) + (e.points[k * 2 + 2] ?? 0)) / 2;
-  const y = ((e.points[k * 2 + 1] ?? 0) + (e.points[k * 2 + 3] ?? 0)) / 2;
+  // Etiqueta en el centro del tramo más largo: en rutas ortogonales es el más legible.
+  const at = labelAnchor(e.routing === 'orthogonal' ? simplePoints(e) : e.points);
+  if (!at) return;
+  const { x, y } = at;
   ctx.font = FONT_SMALL;
   ctx.fillStyle = color;
   ctx.textAlign = 'center';
@@ -254,7 +279,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       ctx.lineWidth = hot ? 2 * px : px;
       ctx.setLineDash(isDashed(e.type) ? dash : NO_DASH);
       ctx.beginPath();
-      tracePath(ctx, e.points);
+      traceEdge(ctx, e);
       ctx.stroke();
       if (detail) {
         drawHead(ctx, e, theme.bg);

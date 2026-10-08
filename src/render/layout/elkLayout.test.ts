@@ -63,3 +63,66 @@ describe('runLayoutWithFallback', () => {
     expect(r.fallback).toContain('20');
   });
 });
+
+function pkgModel(): DiagramModel {
+  const tp = (id: string, p: string): TypeNode => ({ ...t(id), packageName: p });
+  return {
+    types: [tp('A', 'p1'), tp('B', 'p1'), tp('C', 'p2'), tp('D', 'p2'), t('E')],
+    relationships: [
+      { source: 'B', target: 'A', type: 'EXTENDS', line: 1 },
+      { source: 'C', target: 'A', type: 'ASSOCIATION', line: 2 },
+      { source: 'D', target: 'C', type: 'IMPLEMENTS', line: 3 },
+      { source: 'E', target: 'D', type: 'DEPENDENCY', line: 4 },
+    ],
+    packages: [
+      { name: 'p1', typeIds: ['A', 'B'] },
+      { name: 'p2', typeIds: ['C', 'D'] },
+    ],
+    summaryMode: false,
+    issues: [],
+  };
+}
+
+/** Distancia de un punto al borde/interior de una caja (0 = toca la caja). */
+function distTo(n: { x: number; y: number; w: number; h: number }, x: number, y: number): number {
+  const dx = Math.max(n.x - x, 0, x - (n.x + n.w));
+  const dy = Math.max(n.y - y, 0, y - (n.y + n.h));
+  return Math.hypot(dx, dy);
+}
+
+describe('computeElkLayout con paquetes', () => {
+  it('las aristas (también las internas de un paquete) empiezan y terminan en sus tarjetas', async () => {
+    const r = await computeElkLayout(pkgModel());
+    const byId = new Map(r.nodes.map((n) => [n.id, n] as const));
+    expect(r.edges.length).toBe(4);
+    for (const e of r.edges) {
+      const p = e.points;
+      const s = byId.get(e.source);
+      const d = byId.get(e.target);
+      expect(s && d).toBeTruthy();
+      if (!s || !d) continue;
+      expect(distTo(s, p[0] as number, p[1] as number)).toBeLessThan(1);
+      expect(distTo(d, p[p.length - 2] as number, p[p.length - 1] as number)).toBeLessThan(1);
+    }
+  });
+
+  it('bounds contiene nodos, paquetes y todos los puntos de las aristas', async () => {
+    const r = await computeElkLayout(pkgModel());
+    const b = r.bounds;
+    const inside = (x: number, y: number): boolean =>
+      x >= b.x - 0.5 && y >= b.y - 0.5 && x <= b.x + b.w + 0.5 && y <= b.y + b.h + 0.5;
+    for (const n of [...r.nodes, ...r.packages]) {
+      expect(inside(n.x, n.y) && inside(n.x + n.w, n.y + n.h)).toBe(true);
+    }
+    for (const e of r.edges) {
+      for (let i = 0; i < e.points.length; i += 2) expect(inside(e.points[i] as number, e.points[i + 1] as number)).toBe(true);
+    }
+  });
+
+  it('padre arriba también entre paquetes y con implementaciones', async () => {
+    const r = await computeElkLayout(pkgModel());
+    const y = (id: string): number => r.nodes.find((n) => n.id === id)?.y ?? NaN;
+    expect(y('A')).toBeLessThan(y('B'));
+    expect(y('C')).toBeLessThan(y('D'));
+  });
+});

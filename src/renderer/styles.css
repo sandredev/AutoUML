@@ -175,10 +175,15 @@ p { margin: 0 0 8px; }
 /* Sesión 5: lienzo del diagrama */
 .render-area.has-canvas { padding: 0; align-items: stretch; justify-content: stretch; overflow: hidden; text-align: left; }
 .puml-viewer { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.puml-viewer-bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px 4px 12px; background: var(--bg-elev); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.puml-viewer-bar-info { flex: 1; min-width: 0; font-size: 12px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.puml-viewer-reset { padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); font-size: 13px; }
+.puml-viewer-reset:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .puml-viewer.has-canvas { align-items: stretch; justify-content: stretch; overflow: hidden; text-align: left; }
 .diagram-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .diagram-canvas canvas { display: block; cursor: grab; touch-action: none; }
 .diagram-canvas canvas:active { cursor: grabbing; }
+.diagram-canvas.is-dragging-node canvas, .diagram-canvas.is-dragging-node canvas:active { cursor: move; }
 .diagram-canvas .diagram-minimap { position: absolute; right: 16px; bottom: 16px; width: 180px; height: 120px; border-radius: 6px; box-shadow: 0 2px 12px #0003; pointer-events: none; cursor: default; }
 
 /* Historial de recursos */

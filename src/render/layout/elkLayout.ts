@@ -1,16 +1,41 @@
 // src/render/layout/elkLayout.ts — layout con ELK (layered + ortogonal) y respaldo dagre.
 // Usa elk.bundled.js directamente (sin worker anidado): fiable en Electron file:// + ASAR.
-import ELK from 'elkjs/lib/elk.bundled.js';
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api';
 import type { DiagramModel, RelType } from '../../core/model';
 import type { EdgePath, LayoutOptions, LayoutResult, NodeBox, PackageBox } from '../types';
 import { computeLayout, measureNode } from './layout';
+import ELK from 'elkjs/lib/elk.bundled.js';
+import { withElkEnv } from './elkEnv';
 
 const DEFAULT_RANK_SEP = 80;
 const DEFAULT_NODE_SEP = 40;
 const PKG_PREFIX = 'pkg::';
+// Margen interior de los paquetes: arriba deja sitio al nombre del paquete.
+const PKG_PADDING = '[top=30,left=16,bottom=16,right=16]';
 
-const elk = new ELK();
+/** Opciones de ELK por tipo de relación. */
+function edgeOptions(hierarchy: boolean): Record<string, string> {
+  return hierarchy
+    ? {
+        // Herencia/implementación: mandan en el orden vertical (padre arriba).
+        'elk.layered.priority.direction': '10',
+        'elk.layered.priority.shortness': '5',
+        'elk.layered.priority.straightness': '5',
+      }
+    : {
+        // Asociación/dependencia: no fijan capas, pero se intenta que sean cortas.
+        'elk.layered.priority.direction': '0',
+        'elk.layered.priority.shortness': '1',
+        'elk.layered.priority.straightness': '1',
+      };
+}
+
+// Se crea perezosamente y dentro de withElkEnv: ver elkEnv.ts (si no, en el Worker siempre falla).
+let elkEngine: InstanceType<typeof ELK> | null = null;
+function getElk(): InstanceType<typeof ELK> {
+  elkEngine ??= withElkEnv(() => new ELK());
+  return elkEngine;
+}
 
 function isHierarchy(t: RelType): boolean {
   return t === 'EXTENDS' || t === 'IMPLEMENTS';
@@ -42,14 +67,14 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
     rootChildren.push({
       id: PKG_PREFIX + p.name,
       children: kids,
-      layoutOptions: { 'elk.padding': '[top=28,left=12,bottom=12,right=12]' },
+      layoutOptions: { 'elk.padding': PKG_PADDING },
     });
   }
   for (const t of model.types) if (!pkgOf.has(t.id)) { const n = leaf.get(t.id); if (n) rootChildren.push(n); }
 
   // Herencia: se invierte (padre → hijo) para que el padre quede arriba en TB.
   const edges: ElkExtendedEdge[] = [];
-  const meta: { reversed: boolean; rel: DiagramModel['relationships'][number] }[] = [];
+  const meta = new Map<string, { reversed: boolean; rel: DiagramModel['relationships'][number] }>();
   model.relationships.forEach((r, i) => {
     if (!typeIds.has(r.source) || !typeIds.has(r.target) || r.source === r.target) return;
     const reversed = isHierarchy(r.type);
@@ -57,9 +82,9 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
       id: 'e' + i,
       sources: [reversed ? r.target : r.source],
       targets: [reversed ? r.source : r.target],
-      layoutOptions: reversed ? { 'elk.layered.priority.direction': '10' } : { 'elk.layered.priority.direction': '0' },
+      layoutOptions: edgeOptions(reversed),
     });
-    meta.push({ reversed, rel: r });
+    meta.set('e' + i, { reversed, rel: r });
   });
 
   const graph: ElkNode = {
@@ -68,15 +93,36 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
       'elk.algorithm': 'layered',
       'elk.direction': 'DOWN',
       'elk.edgeRouting': 'ORTHOGONAL',
+      // Coordenadas de aristas absolutas: con INCLUDE_CHILDREN, ELK mueve las aristas internas a su paquete
+      // y por defecto devolvería sus puntos relativos a ese contenedor (aristas desplazadas).
+      'elk.json.edgeCoords': 'ROOT',
+      // Separaciones derivadas de las opciones de vista.
       'elk.spacing.nodeNode': String(nodeSep),
+      'elk.spacing.edgeNode': String(Math.max(12, Math.round(nodeSep / 2))),
+      'elk.spacing.edgeEdge': '8',
+      'elk.spacing.componentComponent': String(nodeSep * 2),
       'elk.layered.spacing.nodeNodeBetweenLayers': String(rankSep),
+      'elk.layered.spacing.edgeNodeBetweenLayers': '16',
+      'elk.layered.spacing.edgeEdgeBetweenLayers': '8',
+      // Menos cruces y aristas más cortas.
+      'elk.layered.layering.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.nodePlacement.favorStraightEdges': 'true',
+      'elk.layered.thoroughness': '10',
+      // Quita el espacio vacío que deja el ruteo entre capas.
+      'elk.layered.compaction.postCompaction.strategy': 'EDGE_LENGTH',
+      'elk.layered.compaction.connectedComponents': 'true',
+      'elk.separateConnectedComponents': 'true',
+      'elk.layered.unnecessaryBendpoints': 'false',
       ...(hasPackages ? { 'elk.hierarchyHandling': 'INCLUDE_CHILDREN' } : {}),
     },
     children: rootChildren,
     edges,
   };
 
-  const out = await elk.layout(graph);
+  const out = await getElk().layout(graph);
 
   const nodes: NodeBox[] = [];
   const packages: PackageBox[] = [];
@@ -109,8 +155,9 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
   walk(out, 0, 0);
 
   const outEdges: EdgePath[] = [];
-  (out.edges ?? []).forEach((e, i) => {
-    const m = meta[i];
+  // Se empareja por id (no por índice): ELK puede reordenar o reubicar aristas en la salida.
+  (out.edges ?? []).forEach((e) => {
+    const m = meta.get(e.id);
     if (!m) return;
     const pts: number[] = [];
     for (const s of e.sections ?? []) {
@@ -120,12 +167,12 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
     }
     if (pts.length < 4) return;
     const points = m.reversed ? reversePoints(pts) : pts;
-    const ep: EdgePath = { source: m.rel.source, target: m.rel.target, type: m.rel.type, points };
+    const ep: EdgePath = { source: m.rel.source, target: m.rel.target, type: m.rel.type, points, routing: 'orthogonal' };
     if (m.rel.label !== undefined) ep.label = m.rel.label;
     outEdges.push(ep);
   });
 
-  return { nodes, edges: outEdges, packages, bounds: computeBounds(nodes, packages) };
+  return { nodes, edges: outEdges, packages, bounds: computeBounds(nodes, packages, outEdges) };
 }
 
 function reversePoints(p: number[]): number[] {
@@ -134,13 +181,23 @@ function reversePoints(p: number[]): number[] {
   return r;
 }
 
-function computeBounds(nodes: NodeBox[], packages: PackageBox[]): LayoutResult['bounds'] {
+// Incluye los puntos de las aristas: ELK puede rodear paquetes por fuera de las cajas,
+// y si no se cuentan, fit()/minimapa recortan esas aristas.
+function computeBounds(nodes: NodeBox[], packages: PackageBox[], edges: EdgePath[]): LayoutResult['bounds'] {
   const boxes = [...nodes, ...packages];
   if (boxes.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const b of boxes) {
     x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y);
     x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h);
+  }
+  for (const e of edges) {
+    for (let i = 0; i + 1 < e.points.length; i += 2) {
+      const x = e.points[i] as number;
+      const y = e.points[i + 1] as number;
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y);
+      x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    }
   }
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }

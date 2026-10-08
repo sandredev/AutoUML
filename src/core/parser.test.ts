@@ -121,3 +121,25 @@ describe('validatePuml', () => {
     expect(validatePuml('@startuml\n@enduml')).toEqual([]);
   });
 });
+
+describe('parsePuml — tipos de flecha', () => {
+  const cases: [string, string, string, string][] = [
+    ['-->', 'A', 'B', 'ASSOCIATION'],
+    ['..>', 'A', 'B', 'DEPENDENCY'],
+    ['<--', 'B', 'A', 'ASSOCIATION'],
+    ['<..', 'B', 'A', 'DEPENDENCY'],
+    ['--|>', 'A', 'B', 'EXTENDS'],
+    ['..|>', 'A', 'B', 'IMPLEMENTS'],
+    ['<|--', 'B', 'A', 'EXTENDS'],
+    ['<|..', 'B', 'A', 'IMPLEMENTS'],
+    ['-up->', 'A', 'B', 'ASSOCIATION'],
+    ['.down.>', 'A', 'B', 'DEPENDENCY'],
+  ];
+  for (const [arrow, source, target, type] of cases) {
+    it(`A ${arrow} B → ${source}→${target} ${type}`, () => {
+      const m = parsePuml(`@startuml\nclass A\nclass B\nA ${arrow} B\n@enduml`);
+      expect(m.relationships).toHaveLength(1);
+      expect(m.relationships[0]).toMatchObject({ source, target, type });
+    });
+  }
+});

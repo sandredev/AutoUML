@@ -18,6 +18,12 @@ export interface EdgePath {
   label?: string;
   /** Polilínea en unidades de mundo: [x0,y0,x1,y1,...]; el último punto toca al destino (aquí va la flecha). */
   points: number[];
+  /**
+   * Cómo se calculó la ruta. 'orthogonal' (ELK): solo tramos horizontales/verticales, se dibuja con
+   * esquinas redondeadas. Sin valor o 'polyline' (dagre): se dibuja tal cual.
+   * Opcional para no romper los layouts ni los tests existentes.
+   */
+  routing?: 'orthogonal' | 'polyline';
 }
 
 export interface PackageBox {

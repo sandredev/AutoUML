@@ -38,7 +38,8 @@ const RE_REL_KW = /^("[^"]+"|[^\s":]+)\s+(extends|implements)\s+("[^"]+"|[^\s":]
 const RE_REL =
   /^("[^"]+"|[^\s":]+)\s+(?:"[^"]*"\s+)?(\S+)\s+(?:"[^"]*"\s+)?("[^"]+"|[^\s":]+)\s*(?::\s*(.*?))?\s*$/u;
 const RE_ARROW =
-  /^(<\|?|\*|o|\+|#|x|\^)?[-.](?:[-.]*(?:\[[^\]]*\])?(?:left|right|up|down|le|ri|do|l|r|u|d)?[-.]*)(\|>|>|\*|o|\+|#|x|\^)?$/u;
+  // Grupos: 1 = cabeza, 2 = cuerpo (guiones/puntos, para distinguir línea continua o punteada), 3 = punta.
+  /^(<\|?|\*|o|\+|#|x|\^)?([-.][-.]*(?:\[[^\]]*\])?(?:left|right|up|down|le|ri|do|l|r|u|d)?[-.]*)(\|>|>|\*|o|\+|#|x|\^)?$/u;
 const RE_DIRECTIVE =
   /^(?:skinparam\b|set\s|title\b|hide\b|show\b|scale\b|left\s+to\s+right|top\s+to\s+bottom|header\b|footer\b|caption\b|allowmixing\b|together\b|!|@startuml\b|@enduml\b)/iu;
 const RE_HIDE_MEMBERS = /^hide\s+members\b/iu;

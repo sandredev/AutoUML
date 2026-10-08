@@ -6,6 +6,7 @@ import type { LayoutResult, ViewState } from '../types';
 import { drawDiagram, type Theme } from './draw';
 import { collapsePackages, hitTestPackageHeader, PACKAGE_NODE_PREFIX } from './collapse';
 import { drawMinimap } from './minimap';
+import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
 import { canPaint, fitToBounds, panBy, screenToWorld, zoomAt } from './viewport';
 
@@ -15,6 +16,10 @@ export interface DiagramCanvasHandle {
   fit(): void;
   focusNode(id: string): void;
   exportPng(): Promise<Blob | null>;
+  /** Devuelve las tarjetas movidas a mano a la posición que calculó el layout. */
+  resetPositions(): void;
+  /** true si hay alguna tarjeta movida a mano. */
+  hasManualPositions(): boolean;
 }
 
 interface Props {
@@ -23,6 +28,8 @@ interface Props {
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
   onViewChange?: (v: ViewState) => void;
+  /** Se llama cuando cambia si hay tarjetas movidas a mano (para habilitar "Restablecer"). */
+  onManualPositionsChange?: (has: boolean) => void;
 }
 
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
@@ -50,7 +57,7 @@ function readTheme(el: HTMLElement): Theme {
 }
 
 export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function DiagramCanvas(
-  { model, layout, selectedId = null, onSelect, onViewChange },
+  { model, layout, selectedId = null, onSelect, onViewChange, onManualPositionsChange },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -61,17 +68,33 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const sizeRef = useRef({ w: 0, h: 0 });
   const themeRef = useRef<Theme | null>(null);
   const rafRef = useRef(0);
-  const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+  // Arrastre: 'pan' mueve la vista; 'node' mueve una tarjeta (nodeId).
+  const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean; nodeId: string | null } | null>(null);
   const paintErrorRef = useRef<string | null>(null);
   const [collapsedPackages, setCollapsedPackages] = useState<Set<string>>(() => new Set());
   const [paintError, setPaintError] = useState<string | null>(null);
+  const [overrides, setOverrides] = useState<Overrides>(EMPTY_OVERRIDES);
+  const [draggingNode, setDraggingNode] = useState(false);
 
-  const visibleLayout = useMemo(() => collapsePackages(model, layout, collapsedPackages), [model, layout, collapsedPackages]);
+  // Un layout nuevo (recalculado) descarta las posiciones manuales.
+  const [overridesFor, setOverridesFor] = useState(layout);
+  if (overridesFor !== layout) {
+    setOverridesFor(layout);
+    setOverrides(EMPTY_OVERRIDES);
+  }
+
+  const movedLayout = useMemo(() => applyOverrides(layout, overrides), [layout, overrides]);
+  const visibleLayout = useMemo(() => collapsePackages(model, movedLayout, collapsedPackages), [model, movedLayout, collapsedPackages]);
   const index = useMemo(() => buildIndex(visibleLayout), [visibleLayout]);
 
   // Siempre las últimas props para los callbacks estables.
-  const latest = useRef({ model, layout: visibleLayout, index, selectedId, onSelect, onViewChange, collapsedPackages });
-  latest.current = { model, layout: visibleLayout, index, selectedId, onSelect, onViewChange, collapsedPackages };
+  const latest = useRef({ model, layout: visibleLayout, index, selectedId, onSelect, onViewChange, collapsedPackages, overrides });
+  latest.current = { model, layout: visibleLayout, index, selectedId, onSelect, onViewChange, collapsedPackages, overrides };
+
+  const manual = hasOverrides(overrides);
+  useEffect(() => {
+    onManualPositionsChange?.(manual);
+  }, [manual, onManualPositionsChange]);
 
   // Muestra el error de dibujo en pantalla; no repite el estado si no cambia.
   const reportPaint = useCallback((msg: string | null) => {
@@ -196,6 +219,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         });
         return new Promise<Blob | null>((resolve) => off.toBlob((blob) => resolve(blob), 'image/png'));
       },
+      resetPositions: () => setOverrides(EMPTY_OVERRIDES),
+      hasManualPositions: () => hasOverrides(latest.current.overrides),
     }),
     [zoomBy, fit, setView, focusNodeInView],
   );
@@ -233,12 +258,17 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     return () => ro.disconnect();
   }, [fit, schedule]);
 
-  // Nuevo layout ⇒ ajustar.
+  // Nuevo layout o paquetes contraídos ⇒ ajustar. (Mover tarjetas NO reencuadra la vista.)
   useEffect(() => {
     fit();
     const pending = pendingFocusRef.current;
     if (pending && focusNodeInView(pending)) pendingFocusRef.current = null;
-  }, [visibleLayout, fit, focusNodeInView]);
+  }, [layout, collapsedPackages, fit, focusNodeInView]);
+
+  // Tarjetas movidas ⇒ repintar.
+  useEffect(() => {
+    schedule();
+  }, [visibleLayout, schedule]);
 
   // Selección o modelo cambian ⇒ repintar.
   useEffect(() => {
@@ -291,7 +321,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    // Sobre una tarjeta (no un paquete contraído ni la franja del nombre de un paquete) se arrastra la tarjeta.
+    const rect = e.currentTarget.getBoundingClientRect();
+    const p = screenToWorld(viewRef.current, e.clientX - rect.left, e.clientY - rect.top);
+    const L = latest.current;
+    const hit = hitTestNode(L.index, L.layout, p.x, p.y);
+    const nodeId = hit !== null && !hit.startsWith(PACKAGE_NODE_PREFIX) ? hit : null;
+    dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, nodeId };
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
@@ -300,9 +336,16 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    if (!d.moved && d.nodeId !== null) setDraggingNode(true);
     d.moved = true;
     d.x = e.clientX;
     d.y = e.clientY;
+    if (d.nodeId !== null) {
+      const s = viewRef.current.scale || 1;
+      const id = d.nodeId;
+      setOverrides((prev) => moveBy(prev, id, dx / s, dy / s));
+      return;
+    }
     setView(panBy(viewRef.current, dx, dy));
   };
 
@@ -310,6 +353,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const d = dragRef.current;
     if (!d || d.id !== e.pointerId) return;
     dragRef.current = null;
+    setDraggingNode(false);
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     if (d.moved) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -336,10 +380,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   };
 
   return (
-    <div ref={wrapRef} className="diagram-canvas">
+    <div ref={wrapRef} className={draggingNode ? 'diagram-canvas is-dragging-node' : 'diagram-canvas'}>
       <canvas
         ref={canvasRef}
-        aria-label="Diagrama de clases. Arrastra para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo."
+        aria-label="Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo."
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
