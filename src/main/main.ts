@@ -1,7 +1,9 @@
 import { app, BrowserWindow, nativeTheme, shell } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { MenuState } from '../shared/ipc';
 import { registerIpc } from './ipc';
+import { ensureLinuxDesktopEntry } from './linuxDesktop';
 import { buildMenu } from './menu';
 import { initStorage } from './projects';
 
@@ -14,6 +16,16 @@ if (!hasSingleInstanceLock) {
   app.quit();
 }
 
+/** Icono de la ventana (issue #2). En dev y empaquetado vive en build/ relativo a la app. */
+function resolveWindowIcon(): string | undefined {
+  const candidate = path.join(__dirname, '../../build/icon.png');
+  try {
+    return fs.existsSync(candidate) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -22,6 +34,7 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     title: 'AutoUML',
+    icon: resolveWindowIcon(),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1f22' : '#f6f7f9',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
@@ -64,6 +77,7 @@ if (hasSingleInstanceLock) {
   });
 
   void app.whenReady().then(() => {
+    ensureLinuxDesktopEntry();
     initStorage();
     registerIpc((state) => {
       menuState = state;
