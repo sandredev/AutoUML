@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { MenuState } from '../shared/ipc';
 import { registerIpc } from './ipc';
+import { ensureLinuxDesktopEntry } from './linuxDesktop';
 import { buildMenu } from './menu';
 import { initStorage } from './projects';
 
@@ -76,6 +77,7 @@ if (hasSingleInstanceLock) {
   });
 
   void app.whenReady().then(() => {
+    ensureLinuxDesktopEntry();
     initStorage();
     registerIpc((state) => {
       menuState = state;
