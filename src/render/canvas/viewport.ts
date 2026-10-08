@@ -8,6 +8,11 @@ export const MAX_SCALE = 4;
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
+/** true si el lienzo tiene un tamaño dibujable. */
+export function canPaint(size: { w: number; h: number }): boolean {
+  return Number.isFinite(size.w) && Number.isFinite(size.h) && size.w > 0 && size.h > 0;
+}
+
 export function worldToScreen(v: ViewState, x: number, y: number): { x: number; y: number } {
   return { x: x * v.scale + v.tx, y: y * v.scale + v.ty };
 }

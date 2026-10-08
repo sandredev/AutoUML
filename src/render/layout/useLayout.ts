@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { DiagramModel } from '../../core/model';
 import type { LayoutOptions, LayoutResult } from '../types';
 import type { LayoutRequest, LayoutResponse } from './layout.worker';
+// `?worker` hace que Vite empaquete el worker con worker.format (iife), en dev y en build.
+import LayoutWorker from './layout.worker?worker';
 
 export interface LayoutState {
   layout: LayoutResult | null;
@@ -19,7 +21,14 @@ export function useLayout(model: DiagramModel | null, opts?: LayoutOptions): Lay
   const nodeSep = opts?.nodeSep;
 
   useEffect(() => {
-    const w = new Worker(new URL('./layout.worker.ts', import.meta.url));
+    let w: Worker;
+    try {
+      w = new LayoutWorker();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setState({ layout: null, loading: false, error: 'No se pudo iniciar el Worker de layout: ' + msg });
+      return;
+    }
     workerRef.current = w;
     w.onmessage = (e: MessageEvent<LayoutResponse>) => {
       const d = e.data;
@@ -31,7 +40,7 @@ export function useLayout(model: DiagramModel | null, opts?: LayoutOptions): Lay
     };
     return () => {
       w.terminate();
-      workerRef.current = null;
+      if (workerRef.current === w) workerRef.current = null;
     };
   }, []);
 
