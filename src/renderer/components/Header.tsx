@@ -1,6 +1,6 @@
 
 import type { JSX, ReactNode } from 'react';
-import { ExportIcon, FitIcon, GearIcon, LoadIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
+import { ExportIcon, FitIcon, LoadIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
 import { useI18n } from '../i18n/I18nProvider';
 import { withShortcut } from '../i18n/catalog';
 import './settings.css';
@@ -10,8 +10,6 @@ interface Props {
   canLoad: boolean;
   canReload: boolean;
   sidebarVisible: boolean;
-  settingsOpen: boolean;
-  onOpenSettings: () => void;
   onLoad: () => void;
   onReload: () => void;
   canView: boolean;
@@ -44,8 +42,6 @@ export function Header({
   canLoad,
   canReload,
   sidebarVisible,
-  settingsOpen,
-  onOpenSettings,
   onLoad,
   onReload,
   canView,
@@ -57,7 +53,6 @@ export function Header({
 }: Props): JSX.Element {
   const { t } = useI18n();
   const sidebarTitle = withShortcut(sidebarVisible ? t('header.sidebarHide') : t('header.sidebarShow'), 'Ctrl+B');
-  const settingsText = withShortcut(t('header.settings'), 'Ctrl+,');
   return (
     <header className="header">
       <button
@@ -86,18 +81,6 @@ export function Header({
         <ToolButton label={t('header.zoomOut')} shortcut="Ctrl+-" icon={<ZoomOutIcon />} disabled={!canView} onClick={onZoomOut} />
         <ToolButton label={t('header.fit')} shortcut="Ctrl+0" icon={<FitIcon />} disabled={!canView} onClick={onFit} />
         <ToolButton label={t('header.export')} shortcut="Ctrl+E" icon={<ExportIcon />} disabled={!canView} onClick={onExport} />
-        <span className="toolbar-sep" aria-hidden="true" />
-        <button
-          type="button"
-          className={settingsOpen ? 'tool-btn active' : 'tool-btn'}
-          title={settingsText}
-          aria-label={settingsText}
-          aria-haspopup="dialog"
-          aria-expanded={settingsOpen}
-          onClick={onOpenSettings}
-        >
-          <GearIcon />
-        </button>
       </div>
     </header>
   );
