@@ -7,7 +7,7 @@ import { drawDiagram, type Theme } from './draw';
 import { collapsePackages, hitTestPackageHeader, PACKAGE_NODE_PREFIX } from './collapse';
 import { drawMinimap } from './minimap';
 import { buildIndex, hitTestNode } from './spatial';
-import { fitToBounds, panBy, screenToWorld, zoomAt } from './viewport';
+import { canPaint, fitToBounds, panBy, screenToWorld, zoomAt } from './viewport';
 
 export interface DiagramCanvasHandle {
   zoomIn(): void;
@@ -28,6 +28,11 @@ interface Props {
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
 const MAX_EXPORT_SIDE = 16384;
 const DRAG_THRESHOLD = 4;
+
+function errorText(err: unknown): string {
+  if (err instanceof Error) return err.message || err.name;
+  return String(err);
+}
 
 function readTheme(el: HTMLElement): Theme {
   const cs = getComputedStyle(el);
@@ -57,7 +62,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const themeRef = useRef<Theme | null>(null);
   const rafRef = useRef(0);
   const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+  const paintErrorRef = useRef<string | null>(null);
   const [collapsedPackages, setCollapsedPackages] = useState<Set<string>>(() => new Set());
+  const [paintError, setPaintError] = useState<string | null>(null);
 
   const visibleLayout = useMemo(() => collapsePackages(model, layout, collapsedPackages), [model, layout, collapsedPackages]);
   const index = useMemo(() => buildIndex(visibleLayout), [visibleLayout]);
@@ -66,31 +73,47 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const latest = useRef({ model, layout: visibleLayout, index, selectedId, onSelect, onViewChange, collapsedPackages });
   latest.current = { model, layout: visibleLayout, index, selectedId, onSelect, onViewChange, collapsedPackages };
 
+  // Muestra el error de dibujo en pantalla; no repite el estado si no cambia.
+  const reportPaint = useCallback((msg: string | null) => {
+    if (paintErrorRef.current === msg) return;
+    paintErrorRef.current = msg;
+    setPaintError(msg);
+  }, []);
+
   const paint = useCallback(() => {
     rafRef.current = 0;
     const canvas = canvasRef.current;
     const wrap = wrapRef.current;
     if (!canvas || !wrap) return;
-    const { w, h } = sizeRef.current;
-    if (w <= 0 || h <= 0) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    themeRef.current ??= readTheme(wrap);
-    const L = latest.current;
-    drawDiagram(ctx, {
-      model: L.model,
-      layout: L.layout,
-      index: L.index,
-      view: viewRef.current,
-      viewW: w,
-      viewH: h,
-      dpr: window.devicePixelRatio || 1,
-      selectedId: L.selectedId,
-      theme: themeRef.current,
-    });
-    const minimap = minimapRef.current;
-    if (minimap) drawMinimap(minimap, L.model, L.layout, viewRef.current, w, h, themeRef.current);
-  }, []);
+    const size = sizeRef.current;
+    if (!canPaint(size)) return;
+    try {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reportPaint('No se pudo obtener el contexto 2D del lienzo.');
+        return;
+      }
+      themeRef.current ??= readTheme(wrap);
+      const L = latest.current;
+      drawDiagram(ctx, {
+        model: L.model,
+        layout: L.layout,
+        index: L.index,
+        view: viewRef.current,
+        viewW: size.w,
+        viewH: size.h,
+        dpr: window.devicePixelRatio || 1,
+        selectedId: L.selectedId,
+        theme: themeRef.current,
+      });
+      const minimap = minimapRef.current;
+      if (minimap) drawMinimap(minimap, L.model, L.layout, viewRef.current, size.w, size.h, themeRef.current);
+      reportPaint(null);
+    } catch (err) {
+      console.error('[DiagramCanvas] Error al dibujar', err);
+      reportPaint(errorText(err));
+    }
+  }, [reportPaint]);
 
   const schedule = useCallback(() => {
     if (rafRef.current === 0) rafRef.current = requestAnimationFrame(paint);
@@ -106,9 +129,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   );
 
   const fit = useCallback(() => {
-    const { w, h } = sizeRef.current;
-    if (w <= 0 || h <= 0) return;
-    setView(fitToBounds(latest.current.layout.bounds, w, h));
+    const size = sizeRef.current;
+    if (!canPaint(size)) return;
+    setView(fitToBounds(latest.current.layout.bounds, size.w, size.h));
   }, [setView]);
 
   const focusNodeInView = useCallback((id: string): boolean => {
@@ -194,13 +217,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const apply = (): void => {
       const w = Math.max(0, Math.floor(wrap.clientWidth));
       const h = Math.max(0, Math.floor(wrap.clientHeight));
-      const first = sizeRef.current.w === 0;
+      const first = !canPaint(sizeRef.current);
       sizeRef.current = { w, h };
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.max(1, Math.floor(w * dpr));
       canvas.height = Math.max(1, Math.floor(h * dpr));
-      canvas.style.width = `${w}px`;
-      canvas.style.height = `${h}px`;
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
       if (first && w > 0 && h > 0) fit();
       else schedule();
     };
@@ -236,6 +259,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   useEffect(
     () => () => {
       if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current);
+      // Libera el marcador: con StrictMode el efecto se desmonta y se vuelve a montar,
+      // y un rafRef distinto de 0 bloquea schedule() y nada vuelve a pintarse.
+      rafRef.current = 0;
     },
     [],
   );
@@ -321,6 +347,15 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onDoubleClick={onDoubleClick}
       />
       <canvas ref={minimapRef} className="diagram-minimap" aria-label="Minimapa del diagrama" />
+      {paintError !== null && (
+        <p
+          className="render-meta diagram-paint-error"
+          role="alert"
+          style={{ position: 'absolute', top: 8, left: 8, right: 8, margin: 0, padding: '6px 10px', background: 'var(--bg-elev, #fff)', border: '1px solid var(--border, #d0d7de)', color: 'var(--danger, #cf222e)' }}
+        >
+          {'No se pudo dibujar el diagrama: ' + paintError}
+        </p>
+      )}
     </div>
   );
 });

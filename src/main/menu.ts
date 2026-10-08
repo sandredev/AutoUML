@@ -58,7 +58,7 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
           type: 'checkbox',
           accelerator: 'CmdOrCtrl+B',
           checked: state.sidebarVisible,
-          enabled: state.projectOpen,
+          enabled: state.projectOpen || state.hasPuml,
           click: send('toggle-sidebar')
         },
         ...viewDev

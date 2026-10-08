@@ -53,13 +53,14 @@ export default function App() {
   }, [project, externalName]);
 
   // Sincroniza qué opciones del menú nativo están habilitadas.
+  // hasPuml también cuenta el diagrama externo soltado (sin proyecto) para zoom/fit/export/sidebar.
   useEffect(() => {
     api.updateMenuState({
       projectOpen: project !== null,
-      hasPuml: project?.puml != null,
+      hasPuml: project?.puml != null || diagram !== null,
       sidebarVisible,
     });
-  }, [project, sidebarVisible]);
+  }, [project, diagram, sidebarVisible]);
 
   // Los mensajes que no son de error se ocultan solos.
   useEffect(() => {
@@ -125,10 +126,12 @@ export default function App() {
   }, [handlePumlOpened]);
 
   // Carga inicial del texto cuando el proyecto pasa a tener .puml.
+  // No borra un diagrama externo soltado: ese vive sin proyecto.
   const loadedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!project?.puml) {
       loadedFor.current = null;
+      if (externalName) return;
       setSource(null);
       setDiagram(null);
       setSelectedId(null);
@@ -138,7 +141,7 @@ export default function App() {
     if (loadedFor.current === key) return;
     loadedFor.current = key;
     void loadSource(project.meta.name);
-  }, [project, loadSource]);
+  }, [project, externalName, loadSource]);
 
   const handleLoad = useCallback(async () => {
     if (!project || busy) return;
@@ -225,14 +228,20 @@ export default function App() {
   }, [diagram]);
 
   // Despachador de las acciones del menú nativo (los atajos llegan por aquí).
+  // toggle-sidebar y acciones de vista también funcionan con un .puml externo sin proyecto.
   const actionRef = useRef<(a: MenuAction) => void>(() => undefined);
   useEffect(() => {
     actionRef.current = (action) => {
       if (action === 'new-project' || action === 'open-project') {
-        setModal({ open: true, dismissable: project !== null });
+        setModal({ open: true, dismissable: project !== null || diagram !== null });
         return;
       }
-      if (modal.open || !project) return;
+      if (action === 'toggle-sidebar') {
+        if (modal.open) return;
+        toggleSidebar();
+        return;
+      }
+      if (modal.open || (!project && !diagram)) return;
       switch (action) {
         case 'load-puml':
         case 'replace-puml':
@@ -241,10 +250,8 @@ export default function App() {
         case 'reload-puml':
           void handleReload();
           break;
-        case 'toggle-sidebar':
-          toggleSidebar();
-          break;
         case 'copy-project-name':
+          if (!project) return;
           setStatus({ kind: 'info', text: `Se copió "${project.meta.name}" al portapapeles.` });
           break;
         case 'zoom-in':
@@ -261,15 +268,17 @@ export default function App() {
           break;
       }
     };
-  }, [project, modal.open, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport]);
+  }, [project, diagram, modal.open, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
+
+  const headerName = project?.meta.name ?? externalName?.replace(/\.[^.]+$/, '') ?? null;
 
   return (
     <div className="app">
       {storage?.warning && <div className="banner banner-warning">⚠ {storage.warning}</div>}
       <Header
-        projectName={project?.meta.name ?? null}
+        projectName={headerName}
         canLoad={project !== null && !busy}
         canReload={project?.puml != null && !busy}
         sidebarVisible={sidebarVisible}
@@ -283,9 +292,10 @@ export default function App() {
         onExport={() => void handleExport()}
       />
       <div className="workspace">
-        {sidebarVisible && project && (
+        {sidebarVisible && (project || diagram) && (
           <Sidebar
             project={project}
+            externalName={externalName}
             width={sidebarWidth}
             onResize={setSidebarWidth}
             groups={groups}
