@@ -1,4 +1,4 @@
-// src/render/layout/useLayout.ts — calcula el layout en un Worker.
+// src/render/layout/useLayout.ts — calcula el layout en un Worker (ELK con respaldo dagre).
 import { useEffect, useRef, useState } from 'react';
 import type { DiagramModel } from '../../core/model';
 import type { LayoutOptions, LayoutResult } from '../types';
@@ -10,6 +10,9 @@ export interface LayoutState {
   layout: LayoutResult | null;
   loading: boolean;
   error: string | null;
+  engine?: 'elk' | 'dagre';
+  fallback?: string;
+  ms?: number;
 }
 
 export function useLayout(model: DiagramModel | null, opts?: LayoutOptions): LayoutState {
@@ -33,7 +36,17 @@ export function useLayout(model: DiagramModel | null, opts?: LayoutOptions): Lay
     w.onmessage = (e: MessageEvent<LayoutResponse>) => {
       const d = e.data;
       if (d.id !== reqId.current) return; // respuesta obsoleta
-      setState(d.ok ? { layout: d.result, loading: false, error: null } : { layout: null, loading: false, error: d.error });
+      if (!d.ok) {
+        setState({ layout: null, loading: false, error: d.error });
+        return;
+      }
+      if (import.meta.env.DEV) {
+        console.debug('[layout] engine=%s ms=%d', d.engine, d.ms);
+        if (d.fallback) console.warn('[layout] ' + d.fallback);
+      }
+      const next: LayoutState = { layout: d.result, loading: false, error: null, engine: d.engine, ms: d.ms };
+      if (d.fallback !== undefined) next.fallback = d.fallback;
+      setState(next);
     };
     w.onerror = (e: ErrorEvent) => {
       setState({ layout: null, loading: false, error: e.message || 'Error en el cálculo del layout' });
