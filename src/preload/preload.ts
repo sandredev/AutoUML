@@ -1,6 +1,6 @@
 // Puente seguro. Solo importa 'electron' y TIPOS, porque el preload corre en sandbox.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { AutoUmlApi, CloseDecision, IpcChannel, MenuAction, MenuState } from '../shared/ipc';
+import type { AutoUmlApi, CloseDecision, IpcChannel, MenuAction, MenuCommand, MenuState } from '../shared/ipc';
 import type { HistoryApi } from '../shared/history';
 
 function invoke<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
@@ -47,6 +47,14 @@ const api: AutoUmlApi = {
   updateMenuState: (state: MenuState) => {
     const channel: IpcChannel = 'menu:update-state';
     ipcRenderer.send(channel, state);
+  },
+  runMenuCommand: (command: MenuCommand) => {
+    const channel: IpcChannel = 'menu:command';
+    ipcRenderer.send(channel, command);
+  },
+  setWindowControlsColors: (background: string, symbols: string) => {
+    const channel: IpcChannel = 'window:controls-colors';
+    ipcRenderer.send(channel, background, symbols);
   },
   onMenuAction: (callback) => {
     const channel: IpcChannel = 'menu:action';

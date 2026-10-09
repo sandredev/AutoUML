@@ -82,14 +82,6 @@ export function CloseConfirmModal({ saving, error, onSave, onDiscard, onCancel }
             {saving ? t('close.saving') : t('close.save')}
           </button>
           <button
-            type="button"
-            className="close-confirm__btn close-confirm__btn--danger"
-            onClick={onDiscard}
-            disabled={saving}
-          >
-            {t('close.discard')}
-          </button>
-          <button
             ref={cancelRef}
             type="button"
             className="close-confirm__btn"
@@ -97,6 +89,14 @@ export function CloseConfirmModal({ saving, error, onSave, onDiscard, onCancel }
             disabled={saving}
           >
             {t('close.cancel')}
+          </button>
+          <button
+            type="button"
+            className="close-confirm__btn close-confirm__btn--danger"
+            onClick={onDiscard}
+            disabled={saving}
+          >
+            {t('close.discard')}
           </button>
         </div>
       </div>

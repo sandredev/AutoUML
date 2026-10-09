@@ -1,6 +1,9 @@
 import { app, BrowserWindow, clipboard, dialog, Menu, type MenuItemConstructorOptions } from 'electron';
-import type { MenuAction, MenuState } from '../shared/ipc';
+import type { MenuAction, MenuCommand, MenuState } from '../shared/ipc';
+import { THEME_MODES, type ThemeMode } from '../shared/themes';
 import { getCurrentProjectName } from './projects';
+
+let currentLocale: MenuState['locale'] = 'es';
 
 interface MenuCopy {
   file: string;
@@ -24,9 +27,7 @@ interface MenuCopy {
   showSidebar: string;
   devTools: string;
   theme: string;
-  themeSystem: string;
-  themeLight: string;
-  themeDark: string;
+  themes: Record<ThemeMode, string>;
   language: string;
   languageEs: string;
   languageEn: string;
@@ -58,9 +59,7 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     showSidebar: 'Mostrar panel lateral',
     devTools: 'Herramientas de desarrollo',
     theme: 'Tema',
-    themeSystem: 'Sistema',
-    themeLight: 'Claro',
-    themeDark: 'Oscuro',
+    themes: { system: 'Sistema', light: 'Claro', dark: 'Oscuro', midnight: 'Medianoche', ember: 'Brasa', sunrise: 'Amanecer', contrast: 'Alto contraste' },
     language: 'Idioma',
     languageEs: 'Español',
     languageEn: 'English',
@@ -90,9 +89,7 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     showSidebar: 'Show side panel',
     devTools: 'Developer tools',
     theme: 'Theme',
-    themeSystem: 'System',
-    themeLight: 'Light',
-    themeDark: 'Dark',
+    themes: { system: 'System', light: 'Light', dark: 'Dark', midnight: 'Midnight', ember: 'Ember', sunrise: 'Sunrise', contrast: 'High contrast' },
     language: 'Language',
     languageEs: 'Spanish',
     languageEn: 'English',
@@ -102,7 +99,43 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
   },
 };
 
+// Acciones que solo main puede ejecutar; las pide el menú dibujado en el renderer (y el menú nativo oculto).
+export function runMenuCommand(win: BrowserWindow, command: MenuCommand): void {
+  const labels = menuCopy[currentLocale];
+  switch (command) {
+    case 'quit':
+      app.quit();
+      break;
+    case 'copy':
+      win.webContents.copy();
+      break;
+    case 'select-all':
+      win.webContents.selectAll();
+      break;
+    case 'dev-tools':
+      if (!app.isPackaged) win.webContents.toggleDevTools();
+      break;
+    case 'about':
+      void dialog.showMessageBox(win, {
+        type: 'info',
+        title: labels.about,
+        message: `AutoUML ${app.getVersion()}`,
+        detail: labels.aboutDetail,
+      });
+      break;
+    case 'copy-project-name': {
+      const name = getCurrentProjectName();
+      if (name && !win.isDestroyed()) {
+        clipboard.writeText(name);
+        win.webContents.send('menu:action', 'copy-project-name' satisfies MenuAction);
+      }
+      break;
+    }
+  }
+}
+
 export function buildMenu(win: BrowserWindow, state: MenuState): void {
+  currentLocale = state.locale;
   const labels = menuCopy[state.locale];
   const send = (action: MenuAction) => () => {
     if (!win.isDestroyed()) win.webContents.send('menu:action', action);
@@ -130,17 +163,7 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
       label: `&${labels.edit}`,
       submenu: [
         { label: labels.replacePuml, enabled: state.projectOpen, click: send('replace-puml') },
-        {
-          label: labels.copyProjectName,
-          enabled: state.projectOpen,
-          click: () => {
-            const name = getCurrentProjectName();
-            if (name) {
-              clipboard.writeText(name);
-              send('copy-project-name')();
-            }
-          },
-        },
+        { label: labels.copyProjectName, enabled: state.projectOpen, click: () => runMenuCommand(win, 'copy-project-name') },
         { type: 'separator' },
         { label: labels.copy, role: 'copy' },
         { label: labels.selectAll, role: 'selectAll' },
@@ -169,11 +192,12 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
       submenu: [
         {
           label: labels.theme,
-          submenu: [
-            { label: labels.themeSystem, type: 'radio', checked: state.themeMode === 'system', click: send('theme-system') },
-            { label: labels.themeLight, type: 'radio', checked: state.themeMode === 'light', click: send('theme-light') },
-            { label: labels.themeDark, type: 'radio', checked: state.themeMode === 'dark', click: send('theme-dark') },
-          ],
+          submenu: THEME_MODES.map((mode): MenuItemConstructorOptions => ({
+            label: labels.themes[mode],
+            type: 'radio',
+            checked: state.themeMode === mode,
+            click: send(`theme-${mode}`),
+          })),
         },
         {
           label: labels.language,
@@ -189,20 +213,12 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
     {
       label: `&${labels.help}`,
       submenu: [
-        {
-          label: labels.about,
-          click: () => {
-            void dialog.showMessageBox(win, {
-              type: 'info',
-              title: labels.about,
-              message: `AutoUML ${app.getVersion()}`,
-              detail: labels.aboutDetail,
-            });
-          },
-        },
+        { label: labels.about, click: () => runMenuCommand(win, 'about') },
       ],
     },
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  // La barra nativa se oculta: el renderer dibuja los títulos en su cabecera. Los atajos siguen activos.
+  win.setMenuBarVisibility(false);
 }

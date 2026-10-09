@@ -36,7 +36,12 @@ function createWindow(): void {
     show: false,
     title: 'AutoUML',
     icon: resolveWindowIcon(),
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1f22' : '#f6f7f9',
+    // Sin barra de título nativa; los controles de ventana quedan como overlay sobre la cabecera.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: nativeTheme.shouldUseDarkColors
+      ? { color: '#1b1c26', symbolColor: '#e6e7ee', height: 32 }
+      : { color: '#f4f5f8', symbolColor: '#1e2033', height: 32 },
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1c26' : '#f4f5f8',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,

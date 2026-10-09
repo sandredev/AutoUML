@@ -139,7 +139,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         theme: themeRef.current,
       });
       const minimap = minimapRef.current;
-      if (minimap) drawMinimap(minimap, L.model, L.layout, viewRef.current, size.w, size.h, themeRef.current);
+      if (minimap) drawMinimap(minimap, L.layout, viewRef.current, size.w, size.h, themeRef.current);
       reportPaint(null);
     } catch (err) {
       console.error('[DiagramCanvas] Error al dibujar', err);

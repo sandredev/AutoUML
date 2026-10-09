@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { JSX, RefObject } from 'react';
 import type { DiagramModel } from '../core/model';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
@@ -16,6 +16,8 @@ export interface PumlViewerProps {
   onSelect?: (id: string | null) => void;
   canvasRef?: RefObject<DiagramCanvasHandle | null>;
   className?: string;
+  /** Notifica cuando el layout empieza o termina de calcularse (la intro de carga lo usa). */
+  onLayoutLoadingChange?: (loading: boolean) => void;
 }
 
 export function PumlViewer({
@@ -24,10 +26,15 @@ export function PumlViewer({
   onSelect,
   canvasRef,
   className = '',
+  onLayoutLoadingChange,
 }: PumlViewerProps): JSX.Element {
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
   const { layout, layoutModel, loading, error, fallback } = useLayout(model, view.options, view.layoutVersion);
+  useEffect(() => {
+    onLayoutLoadingChange?.(loading);
+  }, [loading, onLayoutLoadingChange]);
+  useEffect(() => () => onLayoutLoadingChange?.(false), [onLayoutLoadingChange]);
   const classes = `puml-viewer ${className}`.trim();
 
   // Si el host no pasa un ref, se usa uno propio para poder restablecer.

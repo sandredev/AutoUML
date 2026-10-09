@@ -1,7 +1,7 @@
 
 import { useEffect, useMemo, useRef, useState, type JSX, type KeyboardEvent, type MouseEvent } from 'react';
-import { CloseIcon, InfoIcon, LanguageIcon, MoonIcon, PaletteIcon, SearchIcon, SunIcon, SystemIcon } from './Icons';
-import type { ThemeMode } from './useTheme';
+import { CloseIcon, InfoIcon, LanguageIcon, PaletteIcon, SearchIcon, SystemIcon } from './Icons';
+import { themeSwatches, type ThemeMode } from './useTheme';
 import { useI18n } from '../i18n/I18nProvider';
 import type { Locale, MessageKey } from '../i18n/catalog';
 import { filterCategories, pickActive, type SettingsCategory } from './settingsModel';
@@ -18,6 +18,10 @@ const themeOptions: { mode: ThemeMode; label: MessageKey }[] = [
   { mode: 'system', label: 'settings.themeSystem' },
   { mode: 'light', label: 'settings.themeLight' },
   { mode: 'dark', label: 'settings.themeDark' },
+  { mode: 'midnight', label: 'settings.themeMidnight' },
+  { mode: 'ember', label: 'settings.themeEmber' },
+  { mode: 'sunrise', label: 'settings.themeSunrise' },
+  { mode: 'contrast', label: 'settings.themeContrast' },
 ];
 
 const localeOptions: { locale: Locale; label: MessageKey }[] = [
@@ -29,12 +33,6 @@ function categoryIcon(id: SettingsCategory): JSX.Element {
   if (id === 'appearance') return <PaletteIcon />;
   if (id === 'language') return <LanguageIcon />;
   return <InfoIcon />;
-}
-
-function themeIcon(mode: ThemeMode): JSX.Element {
-  if (mode === 'light') return <SunIcon />;
-  if (mode === 'dark') return <MoonIcon />;
-  return <SystemIcon />;
 }
 
 export function SettingsDialog({ themeMode, onThemeChange, onClose }: Props): JSX.Element {
@@ -146,18 +144,24 @@ export function SettingsDialog({ themeMode, onThemeChange, onClose }: Props): JS
                 <h3 className="settings-crumb">{t('settings.appearance')}</h3>
                 <fieldset className="settings-group">
                   <legend>{t('settings.themeLabel')}</legend>
-                  <div className="settings-segment" role="radiogroup" aria-label={t('settings.themeLabel')}>
+                  <div className="theme-grid" role="radiogroup" aria-label={t('settings.themeLabel')}>
                     {themeOptions.map((o) => (
                       <button
                         key={o.mode}
                         type="button"
                         role="radio"
                         aria-checked={themeMode === o.mode}
-                        className={themeMode === o.mode ? 'segment-btn selected' : 'segment-btn'}
+                        className={themeMode === o.mode ? 'theme-card selected' : 'theme-card'}
                         onClick={() => onThemeChange(o.mode)}
                       >
-                        {themeIcon(o.mode)}
-                        <span>{t(o.label)}</span>
+                        <span className="theme-preview" aria-hidden="true">
+                          {o.mode === 'system' ? (
+                            <SystemIcon />
+                          ) : (
+                            themeSwatches[o.mode].map((color, i) => <span key={i} style={{ background: color }} />)
+                          )}
+                        </span>
+                        <span className="theme-name">{t(o.label)}</span>
                       </button>
                     ))}
                   </div>

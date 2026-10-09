@@ -1,24 +1,10 @@
-// src/render/canvas/minimap.ts — minimapa en papel blanco con colores de insignia.
-import type { Category, DiagramModel } from '../../core/model';
+// src/render/canvas/minimap.ts — minimapa con los colores del tema activo.
 import type { LayoutResult, ViewState } from '../types';
 import { visibleWorldRect } from './viewport';
 import type { Theme } from './draw';
-import { PACKAGE_NODE_PREFIX } from './collapse';
-
-const categoryCache = new WeakMap<DiagramModel, Map<string, Category>>();
-
-function categoriesOf(model: DiagramModel): Map<string, Category> {
-  let categories = categoryCache.get(model);
-  if (!categories) {
-    categories = new Map(model.types.map((type) => [type.id, type.category]));
-    categoryCache.set(model, categories);
-  }
-  return categories;
-}
 
 export function drawMinimap(
   canvas: HTMLCanvasElement,
-  model: DiagramModel,
   layout: LayoutResult,
   view: ViewState,
   viewW: number,
@@ -38,7 +24,7 @@ export function drawMinimap(
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalAlpha = 1;
-  ctx.fillStyle = '#ffffff';
+  ctx.fillStyle = theme.bg;
   ctx.fillRect(0, 0, width, height);
   ctx.strokeStyle = theme.border;
   ctx.lineWidth = 1;
@@ -49,18 +35,23 @@ export function drawMinimap(
   const ox = (width - layout.bounds.w * scale) / 2 - layout.bounds.x * scale;
   const oy = (height - layout.bounds.h * scale) / 2 - layout.bounds.y * scale;
 
-  ctx.strokeStyle = '#181818';
+  ctx.strokeStyle = theme.pkg;
   ctx.globalAlpha = 0.6;
   for (const pkg of layout.packages) {
     ctx.strokeRect(ox + pkg.x * scale, oy + pkg.y * scale, pkg.w * scale, pkg.h * scale);
   }
 
-  const categoryById = categoriesOf(model);
   ctx.globalAlpha = 0.9;
   for (const node of layout.nodes) {
-    const aggregate = node.id.startsWith(PACKAGE_NODE_PREFIX);
-    ctx.fillStyle = aggregate ? '#cccccc' : theme.cat[categoryById.get(node.id) ?? 'class'];
-    ctx.fillRect(ox + node.x * scale, oy + node.y * scale, Math.max(1, node.w * scale), Math.max(1, node.h * scale));
+    const x = ox + node.x * scale;
+    const y = oy + node.y * scale;
+    const w = Math.max(1, node.w * scale);
+    const h = Math.max(1, node.h * scale);
+    ctx.fillStyle = theme.card;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = theme.cardBorder;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, w, h);
   }
 
   const visible = visibleWorldRect(view, viewW, viewH);

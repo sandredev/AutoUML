@@ -1,5 +1,7 @@
 
 import type { JSX, ReactNode } from 'react';
+import type { MenuAction, MenuState } from '../../shared/ipc';
+import { AppMenuBar } from './AppMenuBar';
 import { ExportIcon, FitIcon, LoadIcon, RelayoutIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
 import { useI18n } from '../i18n/I18nProvider';
 import { withShortcut } from '../i18n/catalog';
@@ -19,6 +21,8 @@ interface Props {
   onFit: () => void;
   onRelayout: () => void;
   onExport: () => void;
+  menuState: MenuState;
+  onMenuAction: (action: MenuAction) => void;
 }
 
 interface ToolProps {
@@ -52,10 +56,14 @@ export function Header({
   onFit,
   onRelayout,
   onExport,
+  menuState,
+  onMenuAction,
 }: Props): JSX.Element {
   const { t } = useI18n();
   const sidebarTitle = withShortcut(sidebarVisible ? t('header.sidebarHide') : t('header.sidebarShow'), 'Ctrl+B');
   return (
+    <>
+      <AppMenuBar state={menuState} onAction={onMenuAction} />
     <header className="header">
       <button
         type="button"
@@ -70,6 +78,7 @@ export function Header({
       </button>
 
       <div className="header-title" title={projectName ?? undefined}>
+        <img className="app-logo" src="./favicon.png" alt="" aria-hidden="true" />
         <span className="app-name">AutoUML</span>
         <span className="sep">/</span>
         <span className={projectName ? 'project-title' : 'project-title muted'}>{projectName ?? t('app.noProject')}</span>
@@ -86,5 +95,6 @@ export function Header({
         <ToolButton label={t('header.export')} shortcut="Ctrl+E" icon={<ExportIcon />} disabled={!canView} onClick={onExport} />
       </div>
     </header>
+    </>
   );
 }
