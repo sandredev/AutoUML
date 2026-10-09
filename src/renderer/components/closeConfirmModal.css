@@ -43,13 +43,15 @@
 
 .close-confirm__actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 8px;
 }
 
 .close-confirm__btn {
-  padding: 7px 14px;
+  padding: 7px 12px;
+  white-space: nowrap;
+  flex: 0 0 auto;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg);
