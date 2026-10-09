@@ -1,24 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
+import { THEME_SCHEME, isThemeMode, type ThemeId, type ThemeMode } from '../../shared/themes';
 
-export type ThemeMode = 'system' | 'light' | 'dark';
-export type EffectiveTheme = 'light' | 'dark';
+export type { ThemeId, ThemeMode };
 
 const STORAGE_KEY = 'autouml-theme';
 
+/** Colores de vista previa (fondo, superficie, acento) para el selector de temas. */
+export const themeSwatches: Record<ThemeId, readonly [string, string, string]> = {
+  light: ['#f4f5f8', '#ffffff', '#d9441f'],
+  dark: ['#1b1c26', '#232433', '#ff6a45'],
+  midnight: ['#171829', '#1e2033', '#f5d33b'],
+  ember: ['#1c1613', '#261d19', '#ff5f3c'],
+  sunrise: ['#fbf5ec', '#fffdf8', '#e0481f'],
+  contrast: ['#000000', '#0a0a0f', '#f5d33b'],
+};
+
 export function parseThemeMode(raw: unknown): ThemeMode {
-  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : 'system';
+  return isThemeMode(raw) ? raw : 'system';
 }
 
-export function nextThemeMode(mode: ThemeMode): ThemeMode {
-  if (mode === 'system') return 'light';
-  if (mode === 'light') return 'dark';
-  return 'system';
-}
-
-export function resolveEffectiveTheme(mode: ThemeMode, prefersDark: boolean): EffectiveTheme {
-  if (mode === 'light') return 'light';
-  if (mode === 'dark') return 'dark';
-  return prefersDark ? 'dark' : 'light';
+export function resolveThemeId(mode: ThemeMode, prefersDark: boolean): ThemeId {
+  if (mode === 'system') return prefersDark ? 'dark' : 'light';
+  return mode;
 }
 
 function readStoredMode(): ThemeMode {
@@ -34,24 +37,30 @@ function prefersDarkNow(): boolean {
     ? window.matchMedia('(prefers-color-scheme: dark)').matches
     : false;
 }
+/** Pinta los botones nativos de ventana con los colores de la barra de menús del tema activo. */
+function syncWindowControls(root: HTMLElement): void {
+  const styles = getComputedStyle(root);
+  const background = styles.getPropertyValue('--bg-chrome').trim();
+  const symbols = styles.getPropertyValue('--fg').trim();
+  window.autouml?.setWindowControlsColors(background, symbols);
+}
 
 export function useTheme() {
   const [mode, setModeState] = useState<ThemeMode>(() => readStoredMode());
-  const [effective, setEffective] = useState<EffectiveTheme>(() => resolveEffectiveTheme(readStoredMode(), prefersDarkNow()));
 
   useEffect(() => {
     const root = document.documentElement;
-    const apply = (current: ThemeMode, dark: boolean): void => {
-      const next = resolveEffectiveTheme(current, dark);
-      setEffective(next);
-      if (current === 'system') root.removeAttribute('data-theme');
-      else root.dataset.theme = current;
-      root.style.colorScheme = next;
+    const apply = (dark: boolean): void => {
+      const id = resolveThemeId(mode, dark);
+      // data-theme siempre lleva el tema ya resuelto: el CSS y el lienzo (MutationObserver) solo miran ese atributo.
+      root.dataset.theme = id;
+      root.style.colorScheme = THEME_SCHEME[id];
+      syncWindowControls(root);
     };
-    apply(mode, prefersDarkNow());
-    if (typeof window.matchMedia !== 'function') return;
+    apply(prefersDarkNow());
+    if (mode !== 'system' || typeof window.matchMedia !== 'function') return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (event: MediaQueryListEvent): void => apply(mode, event.matches);
+    const onChange = (event: MediaQueryListEvent): void => apply(event.matches);
     media.addEventListener('change', onChange);
     return () => media.removeEventListener('change', onChange);
   }, [mode]);
@@ -65,5 +74,5 @@ export function useTheme() {
     }
   }, []);
 
-  return { mode, effective, setMode };
+  return { mode, setMode };
 }

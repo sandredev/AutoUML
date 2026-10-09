@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MenuAction, ProjectInfo, StorageInfo } from '../shared/ipc';
+import type { MenuAction, MenuState, ProjectInfo, StorageInfo } from '../shared/ipc';
 import type { OpenPumlFile } from '../shared/history';
 import { buildTree, countByCategory } from '../core/classify';
 import { parsePuml } from '../core/parser';
@@ -15,7 +15,10 @@ import type { DiagramCanvasHandle } from '../render/canvas/DiagramCanvas';
 import { SettingsDialog } from './components/SettingsDialog';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { DropOverlay, type DropPhase } from './components/DropOverlay';
+import { LoadingIntro } from './components/LoadingIntro';
+import { isIntroActive } from './components/loadingIntro';
 import { useTheme } from './components/useTheme';
+import { isThemeMode } from '../shared/themes';
 import { useI18n } from './i18n/I18nProvider';
 
 const api = window.autouml;
@@ -42,6 +45,8 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [layoutLoading, setLayoutLoading] = useState(false);
 
   // Sesión 3
   const [source, setSource] = useState<string | null>(null);
@@ -119,15 +124,13 @@ export default function App() {
 
   // Sincroniza qué opciones del menú nativo están habilitadas.
   // hasPuml también cuenta el diagrama externo soltado (sin proyecto) para zoom/fit/export/sidebar.
+  const menuState = useMemo<MenuState>(
+    () => ({ projectOpen: project !== null, hasPuml: project?.puml != null || diagram !== null, sidebarVisible, locale, themeMode }),
+    [project, diagram, sidebarVisible, locale, themeMode],
+  );
   useEffect(() => {
-    api.updateMenuState({
-      projectOpen: project !== null,
-      hasPuml: project?.puml != null || diagram !== null,
-      sidebarVisible,
-      locale,
-      themeMode,
-    });
-  }, [project, diagram, sidebarVisible, locale, themeMode]);
+    api.updateMenuState(menuState);
+  }, [menuState]);
 
   // Los mensajes que no son de error se ocultan solos.
   useEffect(() => {
@@ -138,18 +141,23 @@ export default function App() {
 
   // Lee el .puml del disco y lo parsea en el renderer. No tumba la app si falla.
   const loadSource = useCallback(async (projectName: string): Promise<boolean> => {
-    const r = await api.readPuml(projectName);
-    if (!r.ok) {
-      setSource(null);
-      setDiagram(null);
-      setStatus({ kind: 'error', text: r.error });
-      return false;
+    setSourceLoading(true);
+    try {
+      const r = await api.readPuml(projectName);
+      if (!r.ok) {
+        setSource(null);
+        setDiagram(null);
+        setStatus({ kind: 'error', text: r.error });
+        return false;
+      }
+      setSource(r.value);
+      setDiagram(parsePuml(r.value));
+      setSourceTick((t) => t + 1);
+      setExternalName(null);
+      return true;
+    } finally {
+      setSourceLoading(false);
     }
-    setSource(r.value);
-    setDiagram(parsePuml(r.value));
-    setSourceTick((t) => t + 1);
-    setExternalName(null);
-    return true;
   }, []);
 
   const handlePumlOpened = useCallback((file: OpenPumlFile) => {
@@ -466,8 +474,9 @@ export default function App() {
         setSettingsOpen(true);
         return;
       }
-      if (action === 'theme-system' || action === 'theme-light' || action === 'theme-dark') {
-        setThemeMode(action.slice('theme-'.length) as 'system' | 'light' | 'dark');
+      if (action.startsWith('theme-')) {
+        const next = action.slice('theme-'.length);
+        if (isThemeMode(next)) setThemeMode(next);
         return;
       }
       if (action === 'locale-es' || action === 'locale-en') {
@@ -524,6 +533,8 @@ export default function App() {
         onFit={handleFit}
         onRelayout={handleRelayout}
         onExport={() => void handleExport()}
+        menuState={menuState}
+        onMenuAction={(a) => actionRef.current(a)}
       />
       <div className="workspace" aria-busy={dropPhase === 'opening'}>
         {sidebarVisible && (project || diagram) && (
@@ -544,7 +555,12 @@ export default function App() {
           selectedId={selectedId}
           onSelect={setSelectedId}
           canvasRef={canvasRef}
-        />
+          onLayoutLoadingChange={setLayoutLoading}
+        >
+          <LoadingIntro
+            active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })}
+          />
+        </RenderArea>
         <HistoryPanel
           api={api.history}
           source={source}

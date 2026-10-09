@@ -1,5 +1,6 @@
 // Tipos compartidos entre main, preload y renderer.
 import type { HistoryApi, OpenPumlFile } from './history';
+import type { ThemeMode } from './themes';
 // El preload solo importa TIPOS de aquí, porque en modo sandbox no puede cargar otros módulos.
 
 export interface ProjectMeta {
@@ -60,19 +61,21 @@ export type MenuAction =
   | 'fit'
   | 'export'
   | 'toggle-sidebar'
-  | 'theme-system'
-  | 'theme-light'
-  | 'theme-dark'
+  | `theme-${ThemeMode}`
   | 'locale-es'
   | 'locale-en'
   | 'settings-more';
+
+// Acciones del menú que solo puede ejecutar el proceso main.
+export const MENU_COMMANDS = ['quit', 'copy', 'select-all', 'dev-tools', 'about', 'copy-project-name'] as const;
+export type MenuCommand = (typeof MENU_COMMANDS)[number];
 
 export interface MenuState {
   projectOpen: boolean;
   hasPuml: boolean;
   sidebarVisible: boolean;
   locale: 'es' | 'en';
-  themeMode: 'system' | 'light' | 'dark';
+  themeMode: ThemeMode;
 }
 
 // Respuesta renderer -> main a 'app:close-requested'.
@@ -101,6 +104,8 @@ export type IpcChannel =
   | 'puml:reload'
   | 'export:save-png'
   | 'menu:update-state'
+  | 'menu:command'
+  | 'window:controls-colors'
   | 'menu:action'
   | 'app:close-requested'
   | 'app:confirm-close';
@@ -126,6 +131,10 @@ export interface AutoUmlApi {
   // Abre el diálogo nativo y guarda la imagen PNG; devuelve null si se cancela.
   savePng(fileName: string, bytes: Uint8Array): Promise<Result<string | null>>;
   updateMenuState(state: MenuState): void;
+  // Pide a main una acción de menú que el renderer no puede hacer (salir, copiar, diálogo "Acerca de"…).
+  runMenuCommand(command: MenuCommand): void;
+  // Colorea los botones de minimizar/maximizar/cerrar con el tema activo (#rrggbb).
+  setWindowControlsColors(background: string, symbols: string): void;
   // Se suscribe a las acciones del menú nativo. Devuelve la función para cancelar.
   onMenuAction(callback: (action: MenuAction) => void): () => void;
   // Se suscribe a las solicitudes de cierre de la ventana. Devuelve la función para cancelar.

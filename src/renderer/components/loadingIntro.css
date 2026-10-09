@@ -1,0 +1,114 @@
+/* Overlay de carga. Solo transform/opacity. Sin movimiento si prefers-reduced-motion: reduce. */
+.loading-intro {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: var(--bg-sunken, var(--bg, #f4f5f8));
+  opacity: 1;
+}
+
+.loading-intro.is-exiting {
+  opacity: 0;
+  transition: opacity 0.2s linear;
+}
+
+.loading-intro-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent, #ff5f3c) 18%, transparent);
+}
+
+.loading-intro-bar-thumb {
+  display: block;
+  width: 40%;
+  height: 100%;
+  background: var(--accent, #ff5f3c);
+  transform: translateX(-100%);
+}
+.loading-intro-logo {
+  display: block;
+  will-change: transform;
+}
+
+.loading-intro-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.loading-intro .li-spark {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .loading-intro .li-a {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: li-build 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  .loading-intro .li-tab,
+  .loading-intro .li-diamond {
+    animation: li-pop 0.4s ease-out 0.5s both;
+  }
+
+  .loading-intro .li-cards {
+    animation: li-fade 0.4s ease-out 0.8s both;
+  }
+
+  .loading-intro .li-spark {
+    display: block;
+    offset-path: path('M205,80 L300,80 L442,412 L356,412 L328,340 L186,340 L164,412 L68,412 Z');
+    offset-rotate: 0deg;
+    animation: li-orbit 1.6s linear 1.2s infinite;
+  }
+
+}
+
+@keyframes li-build {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+@keyframes li-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes li-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes li-orbit {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+
+
+@media (prefers-reduced-motion: no-preference) {
+  .loading-intro-bar-thumb {
+    animation: li-bar 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-intro-bar-thumb {
+    transform: none;
+    width: 100%;
+  }
+}
+
+@keyframes li-bar {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}

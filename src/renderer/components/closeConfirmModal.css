@@ -5,17 +5,17 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--scrim);
 }
 
 .close-confirm {
   width: min(440px, calc(100vw - 32px));
   padding: 20px 22px 18px;
-  border-radius: var(--radius, 6px);
+  border-radius: var(--radius-lg);
   background: var(--bg-elev);
   color: var(--fg);
   border: 1px solid var(--border);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow);
   animation: close-confirm-in 140ms ease-out;
 }
 
@@ -50,7 +50,7 @@
 
 .close-confirm__btn {
   padding: 7px 14px;
-  border-radius: var(--radius, 6px);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);

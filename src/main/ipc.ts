@@ -2,7 +2,9 @@
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, type MessageBoxOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { LoadOutcome, MenuState, ProjectInfo, Result, SavePumlOutcome } from '../shared/ipc';
+import { MENU_COMMANDS, type LoadOutcome, type MenuCommand, type MenuState, type ProjectInfo, type Result, type SavePumlOutcome } from '../shared/ipc';
+import { runMenuCommand } from './menu';
+import { isThemeMode } from '../shared/themes';
 import { hasPumlExtension, PUML_EXTENSIONS, validatePumlMarkers } from '../shared/validation';
 import {
   createProject,
@@ -41,7 +43,7 @@ function isMenuState(v: unknown): v is MenuState {
     && typeof s.hasPuml === 'boolean'
     && typeof s.sidebarVisible === 'boolean'
     && (s.locale === 'es' || s.locale === 'en')
-    && (s.themeMode === 'system' || s.themeMode === 'light' || s.themeMode === 'dark');
+    && isThemeMode(s.themeMode);
 }
 
 async function messageBox(win: BrowserWindow | null, opts: MessageBoxOptions) {
@@ -225,5 +227,18 @@ export function registerIpc(onMenuState: (state: MenuState) => void): void {
 
   ipcMain.on('menu:update-state', (_e, state: unknown) => {
     if (isMenuState(state)) onMenuState(state);
+  });
+
+  // Los menús se dibujan en el renderer; aquí solo se ejecutan las acciones que requieren main.
+  ipcMain.on('menu:command', (e, command: unknown) => {
+    if (typeof command !== 'string' || !(MENU_COMMANDS as readonly string[]).includes(command)) return;
+    const window = BrowserWindow.fromWebContents(e.sender);
+    if (window) runMenuCommand(window, command as MenuCommand);
+  });
+
+  ipcMain.on('window:controls-colors', (e, background: unknown, symbols: unknown) => {
+    const isHex = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
+    if (!isHex(background) || !isHex(symbols)) return;
+    BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay({ color: background, symbolColor: symbols, height: 32 });
   });
 }
