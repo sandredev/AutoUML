@@ -2,6 +2,10 @@
 
 > Módulo: `puml-io-history` · Depende de: `app-shell`.
 
+## Contrato TypeScript
+
+La interfaz exacta para el servicio y el bridge está en `src/shared/history.ts` (`HistoryEntry`, `HistoryApi` y `HistoryStore`). Ese archivo define la forma de las entradas, resultados de apertura y operaciones; los specs funcionales de este documento siguen siendo la autoridad del comportamiento.
+
 ## Objective
 
 Abrir/guardar `.puml` existentes (drag de archivo al app incluido), validar y llevarlos al viewer; mantener **historial de proyectos abiertos** (carpeta Java o `.puml`) con reapertura en 1 clic, pin, eliminar y limpiar.

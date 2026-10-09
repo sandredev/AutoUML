@@ -1,0 +1,106 @@
+.close-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.close-confirm {
+  width: min(440px, calc(100vw - 32px));
+  padding: 20px 22px 18px;
+  border-radius: var(--radius, 6px);
+  background: var(--bg-elev);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  animation: close-confirm-in 140ms ease-out;
+}
+
+.close-confirm__title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.close-confirm__message {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg-muted);
+}
+
+.close-confirm__error {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.close-confirm__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.close-confirm__btn {
+  padding: 7px 14px;
+  border-radius: var(--radius, 6px);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.close-confirm__btn:hover:not(:disabled) {
+  background: var(--bg-sunken);
+}
+
+.close-confirm__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.close-confirm__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.close-confirm__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.close-confirm__btn--primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.close-confirm__btn--danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+@keyframes close-confirm-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .close-confirm {
+    animation: none;
+  }
+}
