@@ -118,6 +118,7 @@ p { margin: 0 0 8px; }
 .render-title { margin: 0 0 8px; font-size: 24px; font-weight: 600; }
 .render-meta { color: var(--fg-muted); font-size: 13px; }
 .render-selected { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: var(--radius); background: var(--selected); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); color: var(--fg); }
+.render-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; justify-content: center; }
 .render-area.has-canvas { padding: 0; align-items: stretch; justify-content: stretch; overflow: hidden; text-align: left; }
 .puml-viewer { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .puml-viewer-bar { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 2px 8px 2px 12px; background: var(--bg-chrome); border-bottom: 1px solid var(--border); flex-shrink: 0; }

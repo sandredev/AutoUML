@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isIntroActive } from './loadingIntro';
+import { isIntroActive } from './introState';
 
 const idle = { booting: false, documentLoading: false, layoutLoading: false };
 

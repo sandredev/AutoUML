@@ -16,7 +16,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import { CloseConfirmModal } from './components/CloseConfirmModal';
 import { DropOverlay, type DropPhase } from './components/DropOverlay';
 import { LoadingIntro } from './components/LoadingIntro';
-import { isIntroActive } from './components/loadingIntro';
+import { isIntroActive } from './components/introState';
 import { useTheme } from './components/useTheme';
 import { isThemeMode } from '../shared/themes';
 import { useI18n } from './i18n/I18nProvider';
@@ -39,7 +39,7 @@ export default function App() {
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [project, setProject] = useState<ProjectInfo | null>(null);
-  const [modal, setModal] = useState<ModalState>({ open: true, dismissable: true });
+  const [modal, setModal] = useState<ModalState>({ open: true, dismissable: false });
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(280);
@@ -313,6 +313,13 @@ export default function App() {
 
   const toggleSidebar = useCallback(() => setSidebarVisible((v) => !v), []);
 
+  const handleNewProject = useCallback(() => {
+    setModal({ open: true, dismissable: project !== null || diagram !== null });
+  }, [project, diagram]);
+
+  // handleStartModalOpened usa setModal({open:false}) al crear/abrir, así que
+  // el estado vacío desaparece solo cuando hay proyecto o diagrama.
+
   const handleZoomIn = useCallback(() => canvasRef.current?.zoomIn(), []);
   const handleZoomOut = useCallback(() => canvasRef.current?.zoomOut(), []);
   const handleFit = useCallback(() => canvasRef.current?.fit(), []);
@@ -556,6 +563,8 @@ export default function App() {
           onSelect={setSelectedId}
           canvasRef={canvasRef}
           onLayoutLoadingChange={setLayoutLoading}
+          onNewProject={handleNewProject}
+          onOpenProject={handleNewProject}
         >
           <LoadingIntro
             active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })}

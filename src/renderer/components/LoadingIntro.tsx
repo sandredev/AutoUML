@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n/I18nProvider';
-import { INTRO_BOOT_MIN_MS, INTRO_EXIT_MS, INTRO_SHOW_DELAY_MS } from './loadingIntro';
+import { INTRO_BOOT_MIN_MS, INTRO_EXIT_MS, INTRO_SHOW_DELAY_MS } from './introState';
 import './loadingIntro.css';
 
 export interface LoadingIntroProps {

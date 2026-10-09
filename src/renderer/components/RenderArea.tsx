@@ -14,6 +14,8 @@ interface Props {
   onLayoutLoadingChange?: (loading: boolean) => void;
   /** Se pinta encima del área de render (la intro de carga). */
   children?: ReactNode;
+  onNewProject?: () => void;
+  onOpenProject?: () => void;
 }
 
 export function RenderArea({
@@ -24,9 +26,29 @@ export function RenderArea({
   canvasRef,
   onLayoutLoadingChange,
   children,
+  onNewProject,
+  onOpenProject,
 }: Props): JSX.Element {
   const { t } = useI18n();
-  if (!project && !model) return <main className="render-area">{children}</main>;
+  if (!project && !model) {
+    return (
+      <main className="render-area">
+        <h1 className="render-title">AutoUML</h1>
+        <p className="render-meta">{t('start.subtitle')}</p>
+        {onNewProject && onOpenProject && (
+          <div className="render-actions">
+            <button type="button" className="btn btn-primary" onClick={onOpenProject}>
+              {t('start.load')} — {t('start.openExisting')}
+            </button>
+            <button type="button" className="btn" onClick={onNewProject}>
+              {t('start.new')} — {t('start.createEmpty')}
+            </button>
+          </div>
+        )}
+        {children}
+      </main>
+    );
+  }
 
   if (project && !project.puml && !model) {
     return (
