@@ -1,14 +1,21 @@
 // src/render/canvas/DiagramCanvas.tsx — componente React del lienzo.
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { Category, DiagramModel } from '../../core/model';
+import type { Skinparams } from '../../core/skinparam';
+import { focusOf } from '../graph/focus';
+import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
+import { collapsedOwner, isPackageNode, packageNodeName } from '../layout/aggregate';
+import { applySkin, skinKey } from '../style/skin';
+import type { CardDisplay } from '../style/contract';
 import type { LayoutResult, ViewState } from '../types';
 import { drawDiagram, type Theme } from './draw';
-import { collapsePackages, hitTestPackageHeader, PACKAGE_NODE_PREFIX } from './collapse';
-import { drawMinimap } from './minimap';
-import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, type Overrides } from './overrides';
+import { collapsePackages, hitTestPackageHeader } from './collapse';
+import { hitTestEdge } from './edgeHit';
+import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './minimap';
+import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, retainOverrides, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
-import { canPaint, fitToBounds, panBy, screenToWorld, zoomAt } from './viewport';
+import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
 
 export interface DiagramCanvasHandle {
   zoomIn(): void;
@@ -26,23 +33,51 @@ interface Props {
   model: DiagramModel;
   layout: LayoutResult;
   /**
-   * Modelo para el que se calculó `layout`. Con layout progresivo (dagre y luego ELK)
-   * el layout cambia dos veces para el MISMO modelo: solo se reencuadra y se descartan
-   * posiciones manuales cuando cambia el modelo, para que la vista no salte al refinar.
-   * Si se omite se usa `layout` como antes.
+   * Modelo para el que se calculó `layout`. Con layout progresivo (dagre y luego ELK) el layout
+   * cambia dos veces para el MISMO modelo: solo cuenta como cambio de modelo cuando cambia este.
+   * Si se omite se usa `layout`.
    */
   layoutModel?: DiagramModel | null;
+  /**
+   * Identidad estable del documento (p. ej. el proyecto o la ruta del archivo). Si el modelo cambia
+   * pero el documento es el mismo (recarga), se conservan las posiciones manuales de los ids que
+   * sigan existiendo y la vista no se reencuadra. Sin docKey, un modelo nuevo lo descarta todo.
+   */
+  docKey?: string;
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
   onViewChange?: (v: ViewState) => void;
   /** Se llama cuando cambia si hay tarjetas movidas a mano (para habilitar "Restablecer"). */
   onManualPositionsChange?: (has: boolean) => void;
+  /**
+   * Modo controlado: el padre recalcula el layout con los paquetes plegados (useDiagramLayout).
+   * Sin estas props se usa el plegado solo visual de collapse.ts.
+   */
+  collapsedPackages?: ReadonlySet<string>;
+  onCollapsedPackagesChange?: (next: Set<string>) => void;
+  /** Modelo original del host (modo controlado), para encontrar el paquete de una clase plegada. */
+  sourceModel?: DiagramModel | null;
+  /** Paquete plegado → número de entidades (modo controlado). */
+  packageCounts?: ReadonlyMap<string, number>;
+  /** skinparam del documento: colores encima del tema de la app. */
+  skin?: Skinparams | undefined;
+  /** Reglas de hide/skinparam para dibujar las tarjetas (las mismas con que se midieron). */
+  display?: CardDisplay | undefined;
+  labels?: ViewerLabels;
 }
+
+type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | null;
+/** Arista seleccionada; el índice solo vale para el layout en que se eligió. */
+interface EdgeSelection { layout: LayoutResult; index: number }
 
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
 const MAX_EXPORT_SIDE = 16384;
 const DRAG_THRESHOLD = 4;
 const FIT_PADDING = 16;
+/** Tolerancia del hit-test de aristas, en píxeles de pantalla. */
+const EDGE_TOL_PX = 6;
+const TIP_OFFSET = 14;
+const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
 
 function errorText(err: unknown): string {
   if (err instanceof Error) return err.message || err.name;
@@ -54,6 +89,7 @@ function readTheme(el: HTMLElement): Theme {
   const v = (name: string, fallback: string): string => cs.getPropertyValue(name).trim() || fallback;
   const cat = {} as Record<Category, string>;
   for (const c of CATEGORIES) cat[c] = v(`--cat-${c}`, '#57606a');
+  const cardBorder = v('--uml-card-border', '#181818');
   return {
     bg: v('--bg-elev', '#ffffff'),
     fg: v('--fg', '#1f2328'),
@@ -62,51 +98,102 @@ function readTheme(el: HTMLElement): Theme {
     accent: v('--accent', '#0969da'),
     cat,
     card: v('--uml-card', '#F1F1F1'),
-    cardBorder: v('--uml-card-border', '#181818'),
+    cardBorder,
     cardFg: v('--uml-card-fg', '#000000'),
     edge: v('--uml-edge', '#181818'),
     pkg: v('--uml-pkg', '#555b62'),
+    noteBg: v('--uml-note', '#FEFECE'),
+    noteBorder: v('--uml-note-border', cardBorder),
+    noteFg: v('--uml-note-fg', '#000000'),
   };
 }
 
+function sameHover(a: Hover, b: Hover): boolean {
+  if (a === null || b === null) return a === b;
+  if (a.kind === 'node' && b.kind === 'node') return a.id === b.id;
+  if (a.kind === 'edge' && b.kind === 'edge') return a.index === b.index;
+  return false;
+}
+
 export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function DiagramCanvas(
-  { model, layout, layoutModel, selectedId = null, onSelect, onViewChange, onManualPositionsChange },
+  {
+    model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
+    collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
+    labels = DEFAULT_LABELS,
+  },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const minimapRef = useRef<HTMLCanvasElement>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<ViewState>({ scale: 1, tx: 0, ty: 0 });
   const pendingFocusRef = useRef<string | null>(null);
+  /** Plegado pedido: se encuadra cuando llegue un layout distinto de `from` (o enseguida sin control). */
+  const pendingFitRef = useRef<{ from: LayoutResult } | null>(null);
   const sizeRef = useRef({ w: 0, h: 0 });
   const themeRef = useRef<Theme | null>(null);
   const rafRef = useRef(0);
-  // Arrastre: 'pan' mueve la vista; 'node' mueve una tarjeta (nodeId).
   // true mientras la vista sea la del último "encuadrar": entonces un cambio de tamaño vuelve a encuadrar.
   // Se pone en false cuando el usuario hace zoom o mueve la vista.
   const autoFitRef = useRef(true);
+  // Arrastre: 'pan' mueve la vista; con nodeId mueve una tarjeta.
   const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean; nodeId: string | null } | null>(null);
+  /** Arrastre en el minimapa: (dx, dy) = centro de la vista − punto agarrado, en mundo. */
+  const miniDragRef = useRef<{ id: number; dx: number; dy: number } | null>(null);
   const paintErrorRef = useRef<string | null>(null);
-  const [collapsedPackages, setCollapsedPackages] = useState<Set<string>>(() => new Set());
+  const [internalCollapsed, setInternalCollapsed] = useState<Set<string>>(() => new Set());
   const [paintError, setPaintError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Overrides>(EMPTY_OVERRIDES);
   const [draggingNode, setDraggingNode] = useState(false);
+  const [hover, setHover] = useState<Hover>(null);
+  const [edgeSel, setEdgeSel] = useState<EdgeSelection | null>(null);
 
-  // Un modelo nuevo descarta las posiciones manuales (el refinado dagre→ELK no: mismo modelo).
+  const controlled = collapsedProp !== undefined;
+  const collapsedPackages = collapsedProp ?? internalCollapsed;
+
+  // Cambio de modelo: mismo documento ⇒ se migran las posiciones manuales por id; si no, se descartan.
+  // Se deriva durante el render (no en un efecto) para no pintar un fotograma con overrides viejos.
   const modelKey = layoutModel ?? layout;
-  const [overridesFor, setOverridesFor] = useState(modelKey);
-  if (overridesFor !== modelKey) {
-    setOverridesFor(modelKey);
-    setOverrides(EMPTY_OVERRIDES);
+  const [tracked, setTracked] = useState({ modelKey, docKey });
+  if (tracked.modelKey !== modelKey || tracked.docKey !== docKey) {
+    const sameDoc = docKey !== undefined && tracked.docKey === docKey;
+    setTracked({ modelKey, docKey });
+    const ids = layout.nodes.map((n) => n.id);
+    setOverrides((prev) => (sameDoc ? retainOverrides(prev, ids) : EMPTY_OVERRIDES));
   }
 
   const movedLayout = useMemo(() => applyOverrides(layout, overrides), [layout, overrides]);
-  const visibleLayout = useMemo(() => collapsePackages(model, movedLayout, collapsedPackages), [model, movedLayout, collapsedPackages]);
+  const visibleLayout = useMemo(
+    () => (controlled ? movedLayout : collapsePackages(model, movedLayout, collapsedPackages, labels.collapsedSubtitle)),
+    [controlled, model, movedLayout, collapsedPackages, labels.collapsedSubtitle],
+  );
   const index = useMemo(() => buildIndex(visibleLayout), [visibleLayout]);
+  const selectedEdge = edgeSel !== null && edgeSel.layout === layout ? edgeSel.index : null;
+  const focus = useMemo(
+    () => focusOf(visibleLayout, selectedEdge === null ? selectedId : null, selectedEdge),
+    [visibleLayout, selectedId, selectedEdge],
+  );
+  // Un hover de arista de otro layout ya no apunta a la misma arista.
+  const liveHover: Hover = hover?.kind === 'edge' && !visibleLayout.edges[hover.index] ? null : hover;
+
+  const degree = useMemo(() => {
+    const inc = new Map<string, number>();
+    const out = new Map<string, number>();
+    for (const r of model.relationships) {
+      out.set(r.source, (out.get(r.source) ?? 0) + 1);
+      inc.set(r.target, (inc.get(r.target) ?? 0) + 1);
+    }
+    return { inc, out };
+  }, [model]);
 
   // Siempre las últimas props para los callbacks estables.
-  const latest = useRef({ model, layout: visibleLayout, index, selectedId, onSelect, onViewChange, collapsedPackages, overrides });
-  latest.current = { model, layout: visibleLayout, index, selectedId, onSelect, onViewChange, collapsedPackages, overrides };
+  const snapshot = {
+    model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, onSelect, onViewChange,
+    collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts,
+  };
+  const latest = useRef(snapshot);
+  latest.current = snapshot;
 
   const manual = hasOverrides(overrides);
   useEffect(() => {
@@ -120,6 +207,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     setPaintError(msg);
   }, []);
 
+  const skinRef = useRef(skin);
+  skinRef.current = skin;
+  const themeOf = useCallback((el: HTMLElement): Theme => applySkin(readTheme(el), skinRef.current), []);
+
   const paint = useCallback(() => {
     rafRef.current = 0;
     const canvas = canvasRef.current;
@@ -127,14 +218,15 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (!canvas || !wrap) return;
     const size = sizeRef.current;
     if (!canPaint(size)) return;
+    const L = latest.current;
     try {
       const ctx = canvas.getContext('2d');
       if (!ctx) {
-        reportPaint('No se pudo obtener el contexto 2D del lienzo.');
+        reportPaint(L.labels.contextUnavailable);
         return;
       }
-      themeRef.current ??= readTheme(wrap);
-      const L = latest.current;
+      themeRef.current ??= themeOf(wrap);
+      const h = L.hover;
       drawDiagram(ctx, {
         model: L.model,
         layout: L.layout,
@@ -145,6 +237,12 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         dpr: window.devicePixelRatio || 1,
         selectedId: L.selectedId,
         theme: themeRef.current,
+        hoverId: h?.kind === 'node' ? h.id : null,
+        hoverEdge: h?.kind === 'edge' ? h.index : null,
+        focus: L.focus,
+        display: L.display,
+        labels: L.labels,
+        packageCounts: L.packageCounts,
       });
       const minimap = minimapRef.current;
       if (minimap) drawMinimap(minimap, L.layout, viewRef.current, size.w, size.h, themeRef.current);
@@ -153,7 +251,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       console.error('[DiagramCanvas] Error al dibujar', err);
       reportPaint(errorText(err));
     }
-  }, [reportPaint]);
+  }, [reportPaint, themeOf]);
 
   const schedule = useCallback(() => {
     if (rafRef.current === 0) rafRef.current = requestAnimationFrame(paint);
@@ -195,6 +293,28 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     [setView],
   );
 
+  /** Cambia el conjunto de paquetes plegados (controlado o interno) y pide encuadrar al terminar. */
+  const updateCollapsed = useCallback(
+    (fn: (prev: ReadonlySet<string>) => Set<string>) => {
+      pendingFitRef.current = { from: latest.current.sourceLayout };
+      if (controlled) onCollapsedPackagesChange?.(fn(latest.current.collapsedPackages));
+      else setInternalCollapsed((prev) => fn(prev));
+    },
+    [controlled, onCollapsedPackagesChange],
+  );
+
+  const togglePackage = useCallback(
+    (name: string) => {
+      updateCollapsed((previous) => {
+        const next = new Set(previous);
+        if (next.has(name)) next.delete(name);
+        else next.add(name);
+        return next;
+      });
+    },
+    [updateCollapsed],
+  );
+
   useImperativeHandle(
     ref,
     () => ({
@@ -203,15 +323,17 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       fit,
       focusNode: (id: string) => {
         if (focusNodeInView(id)) return;
-        const type = latest.current.model.types.find((node) => node.id === id);
-        if (type && latest.current.collapsedPackages.has(type.packageName)) {
-          pendingFocusRef.current = id;
-          setCollapsedPackages((previous) => {
-            const next = new Set(previous);
-            next.delete(type.packageName);
-            return next;
-          });
-        }
+        // En modo controlado `model` es el agregado (sin los tipos plegados): se busca en el original.
+        const L = latest.current;
+        const pkg = (L.sourceModel ?? L.model).types.find((node) => node.id === id)?.packageName;
+        const target = pkg ? collapsedOwner(pkg, L.collapsedPackages) : null;
+        if (target === null) return;
+        pendingFocusRef.current = id;
+        updateCollapsed((previous) => {
+          const next = new Set(previous);
+          next.delete(target);
+          return next;
+        });
       },
       exportPng: async () => {
         const wrap = wrapRef.current;
@@ -236,24 +358,18 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           viewH: off.height,
           dpr: 1,
           selectedId: null,
-          theme: readTheme(wrap),
+          theme: themeOf(wrap),
+          display: L.display,
+          labels: L.labels,
+          packageCounts: L.packageCounts,
         });
         return new Promise<Blob | null>((resolve) => off.toBlob((blob) => resolve(blob), 'image/png'));
       },
       resetPositions: () => setOverrides(EMPTY_OVERRIDES),
       hasManualPositions: () => hasOverrides(latest.current.overrides),
     }),
-    [zoomBy, fit, setView, focusNodeInView],
+    [zoomBy, fit, focusNodeInView, updateCollapsed, themeOf],
   );
-
-  const togglePackage = useCallback((name: string) => {
-    setCollapsedPackages((previous) => {
-      const next = new Set(previous);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  }, []);
 
   // Tamaño del contenedor.
   useEffect(() => {
@@ -281,26 +397,38 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     return () => ro.disconnect();
   }, [fit, schedule]);
 
-  // Nuevo modelo o paquetes contraídos ⇒ ajustar. (Ni mover tarjetas ni el refinado reencuadran.)
+  // Documento nuevo ⇒ encuadrar. Con docKey, recargar el mismo documento conserva la vista;
+  // sin docKey cuenta cada modelo nuevo. Ni mover tarjetas ni el refinado dagre→ELK reencuadran.
+  const fitKey = docKey ?? modelKey;
   useEffect(() => {
     fit();
-    const pending = pendingFocusRef.current;
-    if (pending && focusNodeInView(pending)) pendingFocusRef.current = null;
-  }, [modelKey, collapsedPackages, fit, focusNodeInView]);
+  }, [fitKey, fit]);
 
-  // Tarjetas movidas ⇒ repintar.
+  // Plegar/desplegar ⇒ encuadrar cuando llegue el layout nuevo (controlado) o enseguida (visual),
+  // y después centrar la clase pendiente de focusNode si ya está visible.
+  useEffect(() => {
+    const pending = pendingFitRef.current;
+    if (pending && !(controlled && pending.from === layout)) {
+      pendingFitRef.current = null;
+      fit();
+    }
+    const id = pendingFocusRef.current;
+    if (id && focusNodeInView(id)) pendingFocusRef.current = null;
+  }, [layout, collapsedPackages, controlled, fit, focusNodeInView]);
+
+  // Cualquier cambio de lo que se dibuja ⇒ repintar.
   useEffect(() => {
     schedule();
-  }, [visibleLayout, schedule]);
+  }, [visibleLayout, selectedId, model, focus, liveHover, display, labels, packageCounts, schedule]);
 
-  // Selección o modelo cambian ⇒ repintar.
+  // skinparam distinto ⇒ el tema cacheado ya no vale (antes solo se invalidaba con el tema de la app).
+  const skinK = skinKey(skin);
   useEffect(() => {
+    themeRef.current = null;
     schedule();
-  }, [selectedId, model, schedule]);
+  }, [skinK, schedule]);
 
   // Tema claro/oscuro: el del sistema Y el elegido en la app (atributo data-theme en <html>).
-  // Antes solo se escuchaba el del sistema, así que al cambiar el tema en la app el lienzo
-  // se quedaba con los colores del tema anterior (oscuro en modo claro y viceversa).
   useEffect(() => {
     const onChange = (): void => {
       themeRef.current = null;
@@ -326,13 +454,15 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     [],
   );
 
+  // Modo visual: olvida los paquetes plegados que ya no existen. (En modo controlado lo hace el padre.)
   useEffect(() => {
+    if (controlled) return;
     const known = new Set(model.packages.map((pkg) => pkg.name));
-    setCollapsedPackages((previous) => {
+    setInternalCollapsed((previous) => {
       const next = new Set([...previous].filter((name) => known.has(name)));
       return next.size === previous.size ? previous : next;
     });
-  }, [model]);
+  }, [model, controlled]);
 
   // Rueda: listener nativo no pasivo para poder hacer preventDefault.
   useEffect(() => {
@@ -349,25 +479,61 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     return () => canvas.removeEventListener('wheel', onWheel);
   }, [setView]);
 
+  /** Qué hay bajo el punto de pantalla (sx, sy): tarjeta primero, luego arista. */
+  const pick = (sx: number, sy: number): Hover => {
+    const L = latest.current;
+    const p = screenToWorld(viewRef.current, sx, sy);
+    const nodeId = hitTestNode(L.index, L.layout, p.x, p.y);
+    if (nodeId !== null) return { kind: 'node', id: nodeId };
+    const tol = EDGE_TOL_PX / (viewRef.current.scale || 1);
+    const edge = hitTestEdge(L.layout, p.x, p.y, tol, L.index);
+    return edge !== null ? { kind: 'edge', index: edge } : null;
+  };
+
+  /** Coloca el tooltip junto al puntero sin salirse del lienzo (sin re-render: estilo directo). */
+  const placeTip = (sx: number, sy: number): void => {
+    const tip = tipRef.current;
+    if (!tip) return;
+    const { w, h } = sizeRef.current;
+    const tw = tip.offsetWidth;
+    const th = tip.offsetHeight;
+    const x = sx + TIP_OFFSET + tw > w ? Math.max(0, sx - TIP_OFFSET - tw) : sx + TIP_OFFSET;
+    const y = sy + TIP_OFFSET + th > h ? Math.max(0, sy - TIP_OFFSET - th) : sy + TIP_OFFSET;
+    tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  };
+
+  const updateHover = (sx: number, sy: number): void => {
+    const next = pick(sx, sy);
+    if (!sameHover(next, latest.current.hover)) setHover(next);
+    placeTip(sx, sy);
+  };
+
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    // Sobre una tarjeta (no un paquete contraído ni la franja del nombre de un paquete) se arrastra la tarjeta.
+    // Sobre una tarjeta (no un paquete plegado) se arrastra la tarjeta.
     const rect = e.currentTarget.getBoundingClientRect();
     const p = screenToWorld(viewRef.current, e.clientX - rect.left, e.clientY - rect.top);
     const L = latest.current;
     const hit = hitTestNode(L.index, L.layout, p.x, p.y);
-    const nodeId = hit !== null && !hit.startsWith(PACKAGE_NODE_PREFIX) ? hit : null;
+    const nodeId = hit !== null && !isPackageNode(hit) ? hit : null;
     dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, nodeId };
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
+    const rect = e.currentTarget.getBoundingClientRect();
     const d = dragRef.current;
-    if (!d || d.id !== e.pointerId) return;
+    if (!d || d.id !== e.pointerId) {
+      if (e.pointerType !== 'touch') updateHover(e.clientX - rect.left, e.clientY - rect.top);
+      return;
+    }
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-    if (!d.moved && d.nodeId !== null) setDraggingNode(true);
+    if (!d.moved) {
+      if (d.nodeId !== null) setDraggingNode(true);
+      if (latest.current.hover !== null) setHover(null);
+    }
     d.moved = true;
     d.x = e.clientX;
     d.y = e.clientY;
@@ -389,19 +555,32 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
     if (d.moved) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const p = screenToWorld(viewRef.current, e.clientX - rect.left, e.clientY - rect.top);
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const p = screenToWorld(viewRef.current, sx, sy);
     const L = latest.current;
     const packageName = hitTestPackageHeader(L.layout, p.x, p.y);
     if (packageName) {
       togglePackage(packageName);
       return;
     }
-    const nodeId = hitTestNode(L.index, L.layout, p.x, p.y);
-    if (nodeId?.startsWith(PACKAGE_NODE_PREFIX)) {
-      togglePackage(nodeId.slice(PACKAGE_NODE_PREFIX.length));
+    const hit = pick(sx, sy);
+    if (hit?.kind === 'node' && isPackageNode(hit.id)) {
+      togglePackage(packageNodeName(hit.id));
       return;
     }
-    L.onSelect?.(nodeId);
+    if (hit?.kind === 'edge') {
+      // Arista: se resalta con sus dos clases; la selección de clase del host se limpia.
+      setEdgeSel({ layout: L.sourceLayout, index: hit.index });
+      L.onSelect?.(null);
+      return;
+    }
+    setEdgeSel(null);
+    L.onSelect?.(hit?.kind === 'node' ? hit.id : null);
+  };
+
+  const onPointerLeave = (): void => {
+    if (!dragRef.current && latest.current.hover !== null) setHover(null);
   };
 
   const onDoubleClick = (e: ReactMouseEvent<HTMLCanvasElement>): void => {
@@ -411,27 +590,140 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (hitTestNode(L.index, L.layout, p.x, p.y) === null && !hitTestPackageHeader(L.layout, p.x, p.y)) fit();
   };
 
+  // ---------- Minimapa: clic para centrar, arrastrar el recuadro para desplazar ----------
+  const miniWorld = (e: ReactPointerEvent<HTMLCanvasElement>): { x: number; y: number } | null => {
+    const el = e.currentTarget;
+    const t = minimapTransform(latest.current.layout.bounds, el.clientWidth, el.clientHeight);
+    if (!t) return null;
+    const rect = el.getBoundingClientRect();
+    return minimapToWorld(t, e.clientX - rect.left, e.clientY - rect.top);
+  };
+
+  const onMiniDown = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
+    if (e.button !== 0) return;
+    const w = miniWorld(e);
+    if (!w) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const { w: vw, h: vh } = sizeRef.current;
+    const vis = visibleWorldRect(viewRef.current, vw, vh);
+    const inside = w.x >= vis.x && w.x <= vis.x + vis.w && w.y >= vis.y && w.y <= vis.y + vis.h;
+    // Dentro del recuadro se agarra donde se pulsó; fuera, se centra la vista en el punto.
+    const dx = inside ? vis.x + vis.w / 2 - w.x : 0;
+    const dy = inside ? vis.y + vis.h / 2 - w.y : 0;
+    miniDragRef.current = { id: e.pointerId, dx, dy };
+    autoFitRef.current = false;
+    if (!inside) setView(centerViewOn(viewRef.current, w.x, w.y, vw, vh));
+  };
+
+  const onMiniMove = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
+    const d = miniDragRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    const w = miniWorld(e);
+    if (!w) return;
+    const { w: vw, h: vh } = sizeRef.current;
+    setView(centerViewOn(viewRef.current, w.x + d.dx, w.y + d.dy, vw, vh));
+  };
+
+  const onMiniUp = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
+    if (miniDragRef.current?.id !== e.pointerId) return;
+    miniDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
+  /** Teclado en el minimapa: flechas desplazan un 10 % de la vista (alternativa al arrastre). */
+  const onMiniKey = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
+    const step: Record<string, [number, number]> = { ArrowLeft: [1, 0], ArrowRight: [-1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] };
+    const dir = step[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    const { w, h } = sizeRef.current;
+    autoFitRef.current = false;
+    setView(panBy(viewRef.current, dir[0] * w * 0.1, dir[1] * h * 0.1));
+  };
+
+  // ---------- Tooltip ----------
+  const typeById = useMemo(() => new Map(model.types.map((t) => [t.id, t] as const)), [model]);
+  let tip: JSX.Element | null = null;
+  if (liveHover?.kind === 'node') {
+    const id = liveHover.id;
+    const relations = fill(labels.tipRelations, { in: degree.inc.get(id) ?? 0, out: degree.out.get(id) ?? 0 });
+    if (isPackageNode(id)) {
+      const name = packageNodeName(id);
+      tip = (
+        <>
+          <strong>{name}</strong>
+          <span>{fill(labels.tipEntities, { n: packageCounts.get(name) ?? 0 })}</span>
+          <span>{relations}</span>
+        </>
+      );
+    } else {
+      const t = typeById.get(id);
+      if (t) {
+        tip = (
+          <>
+            <strong>{t.name}</strong>
+            <span>{labels.tipPackage}: {t.packageName && t.packageName !== '(default package)' ? t.packageName : labels.noPackage}</span>
+            <span>{labels.tipKind}: {labels.categories[t.category]}</span>
+            <span>{relations}</span>
+          </>
+        );
+      }
+    }
+  } else if (liveHover?.kind === 'edge') {
+    const e = visibleLayout.edges[liveHover.index];
+    const r = e?.rel !== undefined ? model.relationships[e.rel] : undefined;
+    if (e) {
+      const nameOf = (id: string): string => typeById.get(id)?.name ?? (isPackageNode(id) ? packageNodeName(id) : id);
+      const mult = r?.sourceLabel || r?.targetLabel ? `${r.sourceLabel ?? '—'} → ${r.targetLabel ?? '—'}` : null;
+      const label = r?.label ?? e.label;
+      tip = (
+        <>
+          <strong>{labels.relTypes[e.type]}</strong>
+          <span>{nameOf(e.source)} → {nameOf(e.target)}</span>
+          {mult !== null ? <span>{labels.tipMultiplicity}: {mult}</span> : null}
+          {label ? <span>{labels.tipLabel}: {label}</span> : null}
+        </>
+      );
+    }
+  }
+
+  const cursor = liveHover !== null && !draggingNode ? ' is-hovering' : '';
   return (
-    <div ref={wrapRef} className={draggingNode ? 'diagram-canvas is-dragging-node' : 'diagram-canvas'}>
+    <div ref={wrapRef} className={(draggingNode ? 'diagram-canvas is-dragging-node' : 'diagram-canvas') + cursor}>
       <canvas
         ref={canvasRef}
-        aria-label="Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo."
+        aria-label={labels.canvasAria}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
+        onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}
       />
-      <canvas ref={minimapRef} className="diagram-minimap" aria-label="Minimapa del diagrama" />
-      {paintError !== null && (
+      <canvas
+        ref={minimapRef}
+        className="diagram-minimap"
+        aria-label={labels.minimapAria}
+        tabIndex={0}
+        onKeyDown={onMiniKey}
+        onPointerDown={onMiniDown}
+        onPointerMove={onMiniMove}
+        onPointerUp={onMiniUp}
+        onPointerCancel={onMiniUp}
+      />
+      <div ref={tipRef} className="diagram-tooltip" role="tooltip" hidden={tip === null}>
+        {tip}
+      </div>
+      {paintError !== null ? (
         <p
           className="render-meta diagram-paint-error"
           role="alert"
           style={{ position: 'absolute', top: 8, left: 8, right: 8, margin: 0, padding: '6px 10px', background: 'var(--bg-elev, #fff)', border: '1px solid var(--border, #d0d7de)', color: 'var(--danger, #cf222e)' }}
         >
-          {'No se pudo dibujar el diagrama: ' + paintError}
+          {labels.paintError + paintError}
         </p>
-      )}
+      ) : null}
     </div>
   );
 });

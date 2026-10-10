@@ -1,7 +1,33 @@
-// src/render/canvas/minimap.ts — minimapa con los colores del tema activo.
+// src/render/canvas/minimap.ts — minimapa con los colores del tema activo e interacción (T4).
 import type { LayoutResult, ViewState } from '../types';
-import { visibleWorldRect } from './viewport';
+import { visibleWorldRect, type Rect } from './viewport';
 import type { Theme } from './draw';
+
+const PAD = 8;
+
+export interface MinimapTransform { scale: number; ox: number; oy: number }
+
+/** Transformación mundo → minimapa (px CSS); null si no hay nada que dibujar. */
+export function minimapTransform(bounds: Rect, width: number, height: number): MinimapTransform | null {
+  if (width <= 0 || height <= 0 || bounds.w <= 0 || bounds.h <= 0) return null;
+  const scale = Math.min((width - PAD * 2) / bounds.w, (height - PAD * 2) / bounds.h);
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  return {
+    scale,
+    ox: (width - bounds.w * scale) / 2 - bounds.x * scale,
+    oy: (height - bounds.h * scale) / 2 - bounds.y * scale,
+  };
+}
+
+/** Punto del minimapa (px CSS) → mundo. */
+export function minimapToWorld(t: MinimapTransform, mx: number, my: number): { x: number; y: number } {
+  return { x: (mx - t.ox) / t.scale, y: (my - t.oy) / t.scale };
+}
+
+/** Vista con el mismo zoom que centra el punto de mundo (x, y) en un lienzo de w×h. */
+export function centerViewOn(view: ViewState, x: number, y: number, w: number, h: number): ViewState {
+  return { scale: view.scale, tx: w / 2 - x * view.scale, ty: h / 2 - y * view.scale };
+}
 
 export function drawMinimap(
   canvas: HTMLCanvasElement,
@@ -16,7 +42,8 @@ export function drawMinimap(
   const dpr = window.devicePixelRatio || 1;
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
-  if (width <= 0 || height <= 0 || layout.bounds.w <= 0 || layout.bounds.h <= 0) return;
+  const t = minimapTransform(layout.bounds, width, height);
+  if (!t) return;
   if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
@@ -30,10 +57,7 @@ export function drawMinimap(
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, width - 1, height - 1);
 
-  const pad = 8;
-  const scale = Math.min((width - pad * 2) / layout.bounds.w, (height - pad * 2) / layout.bounds.h);
-  const ox = (width - layout.bounds.w * scale) / 2 - layout.bounds.x * scale;
-  const oy = (height - layout.bounds.h * scale) / 2 - layout.bounds.y * scale;
+  const { scale, ox, oy } = t;
 
   ctx.strokeStyle = theme.pkg;
   ctx.globalAlpha = 0.6;
@@ -52,6 +76,11 @@ export function drawMinimap(
     ctx.strokeStyle = theme.cardBorder;
     ctx.lineWidth = 1;
     ctx.strokeRect(x, y, w, h);
+  }
+
+  if (layout.notes && layout.notes.length > 0) {
+    ctx.fillStyle = theme.noteBg;
+    for (const n of layout.notes) ctx.fillRect(ox + n.x * scale, oy + n.y * scale, Math.max(1, n.w * scale), Math.max(1, n.h * scale));
   }
 
   const visible = visibleWorldRect(view, viewW, viewH);

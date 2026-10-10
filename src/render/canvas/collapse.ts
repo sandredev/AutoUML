@@ -1,9 +1,11 @@
 import type { DiagramModel } from '../../core/model';
+// Plegado SOLO visual (modo no controlado de DiagramCanvas). PumlViewer usa el plegado con
+// recálculo de layout (layout/aggregate.ts + useDiagramLayout).
+import { DEFAULT_LABELS, fill } from '../labels';
+import { COLLAPSED_NODE_HEIGHT, COLLAPSED_NODE_MIN_W as COLLAPSED_NODE_WIDTH, PACKAGE_NODE_PREFIX } from '../layout/aggregate';
 import type { EdgePath, LayoutResult, NodeBox } from '../types';
 
-export const PACKAGE_NODE_PREFIX = '\u0000package:';
-const COLLAPSED_NODE_HEIGHT = 48;
-const COLLAPSED_NODE_WIDTH = 190;
+export { PACKAGE_NODE_PREFIX };
 
 function center(box: NodeBox): [number, number] {
   return [box.x + box.w / 2, box.y + box.h / 2];
@@ -25,6 +27,7 @@ export function collapsePackages(
   model: DiagramModel,
   layout: LayoutResult,
   collapsed: ReadonlySet<string>,
+  subtitle: string = DEFAULT_LABELS.collapsedSubtitle,
 ): LayoutResult {
   if (collapsed.size === 0) return layout;
 
@@ -46,7 +49,7 @@ export function collapsePackages(
       w: Math.max(COLLAPSED_NODE_WIDTH, Math.min(box.w, 280)),
       h: COLLAPSED_NODE_HEIGHT,
       label: name,
-      subtitle: `${packageCounts.get(name) ?? 0} entidades · clic para expandir`,
+      subtitle: fill(subtitle, { n: packageCounts.get(name) ?? 0 }),
       packageName: name,
     });
   }

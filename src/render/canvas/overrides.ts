@@ -1,7 +1,7 @@
 // src/render/canvas/overrides.ts — posiciones movidas a mano sobre un layout (puro, sin React).
 // Un override es un desplazamiento (dx, dy) respecto a la posición que calculó el layout.
 // Así "Restablecer" es simplemente vaciar el mapa: las tarjetas vuelven a la posición del layout.
-import type { EdgePath, LayoutResult, NodeBox, PackageBox } from '../types';
+import type { EdgePath, LayoutResult, NodeBox, NoteBox, PackageBox } from '../types';
 
 export interface Offset {
   dx: number;
@@ -33,6 +33,23 @@ export function setOverride(overrides: Overrides, id: string, offset: Offset): O
 /** Quita todos los desplazamientos (posición original del layout). */
 export function clearOverrides(): Overrides {
   return EMPTY_OVERRIDES;
+}
+
+/**
+ * Migra los desplazamientos a un layout nuevo del MISMO documento (recarga, plegado, hide): se
+ * conservan los de los ids que siguen existiendo. Si no se pierde ninguno devuelve el mismo mapa.
+ */
+export function retainOverrides(overrides: Overrides, ids: Iterable<string>): Overrides {
+  if (overrides.size === 0) return overrides;
+  const keep = new Set(ids);
+  let dropped = false;
+  const next = new Map<string, Offset>();
+  for (const [id, o] of overrides) {
+    if (keep.has(id)) next.set(id, o);
+    else dropped = true;
+  }
+  if (!dropped) return overrides;
+  return next.size === 0 ? EMPTY_OVERRIDES : next;
 }
 
 export function hasOverrides(overrides: Overrides): boolean {
@@ -94,7 +111,18 @@ export function applyOverrides(layout: LayoutResult, overrides: Overrides): Layo
     return { ...p, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   });
 
-  return { nodes, edges, packages, bounds: boundsOf(nodes, packages, edges, layout.bounds) };
+  // Las notas ancladas acompañan a su clase.
+  let notes: NoteBox[] | undefined = layout.notes;
+  if (notes) {
+    notes = notes.map((n) => {
+      const o = n.anchor !== undefined ? off(n.anchor) : undefined;
+      return o ? { ...n, x: n.x + o.dx, y: n.y + o.dy } : n;
+    });
+  }
+
+  const out: LayoutResult = { nodes, edges, packages, bounds: boundsOf(nodes, [...packages, ...(notes ?? [])], edges, layout.bounds) };
+  if (notes) out.notes = notes;
+  return out;
 }
 
 function translate(points: readonly number[], dx: number, dy: number): number[] {
@@ -133,7 +161,7 @@ function moveStart(points: number[], o: Offset, ortho: boolean): number[] {
 
 function boundsOf(
   nodes: readonly NodeBox[],
-  packages: readonly PackageBox[],
+  packages: readonly { x: number; y: number; w: number; h: number }[],
   edges: readonly EdgePath[],
   fallback: LayoutResult['bounds'],
 ): LayoutResult['bounds'] {

@@ -6,6 +6,8 @@ import {
   FONTS,
   type Badge,
   type CardContent,
+  type CardDisplay,
+  DEFAULT_DISPLAY,
   type CardGeometry,
   type CardRow,
   type DetailOptions,
@@ -54,43 +56,68 @@ function stereotypeOf(t: TypeNode): string {
   return list.length > 0 ? '«' + list.join(', ') + '»' : '';
 }
 
-export function cardContentOf(t: TypeNode, detail: DetailOptions, summary: boolean): CardContent {
+export function cardContentOf(
+  t: TypeNode,
+  detail: DetailOptions,
+  summary: boolean,
+  display: Readonly<CardDisplay> = DEFAULT_DISPLAY,
+): CardContent {
   const badge = badgeOf(t);
   const italic = t.declaredKind === 'interface' || t.isAbstract || t.declaredKind === 'abstract';
-  const base = { id: t.id, name: t.name, stereotype: stereotypeOf(t), badge, category: t.category, italic };
+  const base: Omit<CardContent, 'sections' | 'hiddenCount'> = {
+    id: t.id,
+    name: t.name,
+    stereotype: display.showStereotype ? stereotypeOf(t) : '',
+    badge,
+    category: t.category,
+    italic,
+  };
+  if (!display.showCircle) base.noBadge = true;
   if (summary) return { ...base, sections: [], hiddenCount: 0 };
+  const vis = (v: CardRow['visibility']): string => (display.visibilityIcons ? v : '');
   const fields: CardRow[] = [];
-  for (const c of t.enumConstants) fields.push({ visibility: '', text: c, isStatic: false, isAbstract: false });
-  for (const a of t.attributes) {
-    const text = a.visibility + a.name + (a.type ? ': ' + a.type : '');
-    fields.push({ visibility: a.visibility, text, isStatic: a.isStatic, isAbstract: false });
-  }
-  const ops: CardRow[] = [];
-  if (!detail.hideConstructors) {
-    for (const c of t.constructors) {
-      const text = '«create» ' + c.visibility + c.name + '(' + fmtParams(c.parameters, c.parametersAbbreviated) + ')';
-      ops.push({ visibility: c.visibility, text, isStatic: false, isAbstract: false });
+  if (!display.hideFields) {
+    for (const c of t.enumConstants) fields.push({ visibility: '', text: c, isStatic: false, isAbstract: false });
+    for (const a of t.attributes) {
+      const text = vis(a.visibility) + a.name + (a.type ? ': ' + a.type : '');
+      fields.push({ visibility: a.visibility, text, isStatic: a.isStatic, isAbstract: false });
     }
   }
-  for (const m of t.methods) {
-    if (detail.hideAccessors && accessorRe.test(m.name)) continue;
-    const ret = m.returnType ? ': ' + m.returnType : '';
-    const text = m.visibility + m.name + '(' + fmtParams(m.parameters, m.parametersAbbreviated) + ')' + ret;
-    ops.push({ visibility: m.visibility, text, isStatic: m.isStatic, isAbstract: m.isAbstract });
+  const ops: CardRow[] = [];
+  if (!display.hideMethods) {
+    if (!detail.hideConstructors) {
+      for (const c of t.constructors) {
+        const text = '«create» ' + vis(c.visibility) + c.name + '(' + fmtParams(c.parameters, c.parametersAbbreviated) + ')';
+        ops.push({ visibility: c.visibility, text, isStatic: false, isAbstract: false });
+      }
+    }
+    for (const m of t.methods) {
+      if (detail.hideAccessors && accessorRe.test(m.name)) continue;
+      const ret = m.returnType ? ': ' + m.returnType : '';
+      const text = vis(m.visibility) + m.name + '(' + fmtParams(m.parameters, m.parametersAbbreviated) + ')' + ret;
+      ops.push({ visibility: m.visibility, text, isStatic: m.isStatic, isAbstract: m.isAbstract });
+    }
   }
   let budget = Math.max(0, detail.maxRows);
   const s1 = fields.slice(0, budget);
   budget -= s1.length;
   const s2 = ops.slice(0, budget);
   const hiddenCount = fields.length + ops.length - s1.length - s2.length;
+  // Un compartimento vacío se muestra solo si ni el detalle ni hide empty lo ocultan; "hide fields"/
+  // "hide methods" lo quitan siempre.
   const sections: CardRow[][] = [];
-  if (s1.length > 0 || !detail.hideEmptyCompartments) sections.push(s1);
-  if (s2.length > 0 || !detail.hideEmptyCompartments) sections.push(s2);
+  const keepEmptyFields = !detail.hideEmptyCompartments && !display.hideEmptyFields && !display.hideFields;
+  const keepEmptyOps = !detail.hideEmptyCompartments && !display.hideEmptyMethods && !display.hideMethods;
+  if (s1.length > 0 || keepEmptyFields) sections.push(s1);
+  if (s2.length > 0 || keepEmptyOps) sections.push(s2);
   return { ...base, sections, hiddenCount };
 }
 
-export function moreText(n: number): string {
-  return '… +' + n + ' más';
+/** Plantilla por defecto del aviso de filas ocultas; {n} = número (se traduce con labels.moreMembers). */
+export const MORE_TEMPLATE = '… +{n} más';
+
+export function moreText(n: number, template: string = MORE_TEMPLATE): string {
+  return template.split('{n}').join(String(n));
 }
 
 export function geometryOf(c: CardContent): CardGeometry {
@@ -111,16 +138,20 @@ export function heightOf(g: CardGeometry): number {
   return h;
 }
 
-export function measureCardBox(c: CardContent, m: TextMeasurer): { w: number; h: number; geometry: CardGeometry } {
+export function measureCardBox(
+  c: CardContent,
+  m: TextMeasurer,
+  moreTemplate: string = MORE_TEMPLATE,
+): { w: number; h: number; geometry: CardGeometry } {
   const geometry = geometryOf(c);
   const nameW = m(c.name, c.italic ? 'nameItalic' : 'name');
-  const headLeft = CARD.padX + CARD.badgeD + 6;
+  const headLeft = c.noBadge ? CARD.padX : CARD.padX + CARD.badgeD + 6;
   let w = Math.max(CARD.minW, headLeft * 2 + nameW);
   if (c.stereotype) w = Math.max(w, headLeft * 2 + m(c.stereotype, 'stereo'));
   for (const rows of c.sections) {
     for (const r of rows) w = Math.max(w, 2 * CARD.padX + m(r.text, r.isAbstract ? 'rowItalic' : 'row'));
   }
-  if (c.hiddenCount > 0) w = Math.max(w, 2 * CARD.padX + m(moreText(c.hiddenCount), 'row'));
+  if (c.hiddenCount > 0) w = Math.max(w, 2 * CARD.padX + m(moreText(c.hiddenCount, moreTemplate), 'rowItalic'));
   return { w: Math.ceil(w), h: heightOf(geometry), geometry };
 }
 

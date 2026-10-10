@@ -1,7 +1,7 @@
 // src/render/canvas/card.ts — tarjeta estilo PlantUML. Usa cardContentOf/geometryOf/FONTS: igual que la medida.
 import type { TypeNode } from '../../core/model';
 import { badgeColor, cardContentOf, geometryOf, moreText } from '../layout/cardModel';
-import { CARD, DEFAULT_DETAIL, FONTS } from '../style/contract';
+import { CARD, DEFAULT_DETAIL, DEFAULT_DISPLAY, FONTS, type CardDisplay } from '../style/contract';
 import type { NodeBox } from '../types';
 import { resolveColor, textOn } from './color';
 
@@ -12,9 +12,18 @@ export function drawCard(
   t: TypeNode,
   b: NodeBox,
   theme: CardTheme,
-  o: { summary: boolean; members: boolean; selected: boolean; lineWidth: number },
+  o: {
+    summary: boolean;
+    members: boolean;
+    selected: boolean;
+    lineWidth: number;
+    /** hide circle / stereotype / empty… y classAttributeIconSize 0 (la medida usa lo mismo). */
+    display?: Readonly<CardDisplay> | undefined;
+    /** Plantilla traducida de "… +{n} más". */
+    moreTemplate?: string | undefined;
+  },
 ): void {
-  const c = cardContentOf(t, DEFAULT_DETAIL, o.summary);
+  const c = cardContentOf(t, DEFAULT_DETAIL, o.summary, o.display ?? DEFAULT_DISPLAY);
   const g = geometryOf(c);
   const fill = resolveColor(ctx, t.color) ?? theme.card;
   const border = resolveColor(ctx, t.lineColor) ?? theme.cardBorder;
@@ -40,18 +49,23 @@ export function drawCard(
   const r = CARD.badgeD / 2;
   const bx = b.x + CARD.padX + r;
   const by = b.y + g.headerH / 2;
-  ctx.beginPath();
-  ctx.arc(bx, by, r, 0, Math.PI * 2);
-  ctx.fillStyle = badgeColor(c.badge);
-  ctx.fill();
-  ctx.strokeStyle = border;
   ctx.lineWidth = o.lineWidth;
-  ctx.stroke();
-  ctx.fillStyle = '#000000';
-  ctx.font = FONTS.pkg;
+  if (!c.noBadge) {
+    ctx.beginPath();
+    ctx.arc(bx, by, r, 0, Math.PI * 2);
+    ctx.fillStyle = badgeColor(c.badge);
+    ctx.fill();
+    ctx.strokeStyle = border;
+    ctx.stroke();
+    // Las insignias tienen colores claros fijos (PlantUML): la letra va siempre en negro.
+    ctx.fillStyle = '#000000';
+    ctx.font = FONTS.pkg;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(c.badge, bx, by + 0.5);
+  }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(c.badge, bx, by + 0.5);
 
   const cx = b.x + b.w / 2;
   ctx.fillStyle = headFg;
@@ -87,7 +101,7 @@ export function drawCard(
     }
     if (g.hasMoreRow && i === c.sections.length - 1) {
       ctx.font = FONTS.rowItalic;
-      ctx.fillText(moreText(c.hiddenCount), b.x + CARD.padX, ry);
+      ctx.fillText(moreText(c.hiddenCount, o.moreTemplate), b.x + CARD.padX, ry);
     }
     y += g.sectionH[i] ?? 0;
   });

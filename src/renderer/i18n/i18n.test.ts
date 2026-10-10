@@ -73,3 +73,21 @@ describe('i18n (issue #1)', () => {
     expect(pickActive('about', [])).toBeNull();
   });
 });
+
+describe('textos del visor (T4)', () => {
+  it('viewerLabels traduce todas las claves en ambos idiomas, sin dejar la clave a la vista', async () => {
+    const { viewerLabels } = await import('./viewerLabels');
+    for (const locale of ['es', 'en'] as const) {
+      const labels = viewerLabels((key, params) => translate(locale, key, params));
+      const texts = [
+        ...Object.values(labels).filter((v): v is string => typeof v === 'string'),
+        ...Object.values(labels.categories),
+        ...Object.values(labels.relTypes),
+      ];
+      for (const text of texts) expect(text.startsWith('viewer.')).toBe(false);
+    }
+    const en = viewerLabels((key, params) => translate('en', key, params));
+    expect(en.moreMembers).toBe('… +{n} more');
+    expect(en.relTypes.EXTENDS).toBe('Inheritance');
+  });
+});

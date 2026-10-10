@@ -1,5 +1,6 @@
 // src/render/types.ts
 import type { RelType } from '../core/model';
+import type { CardDisplay } from './style/contract';
 
 export interface NodeBox {
   id: string;          // TypeNode.id
@@ -36,10 +37,22 @@ export interface PackageBox {
   layer?: string;
 }
 
+/** Nota colocada en el lienzo (T4). */
+export interface NoteBox {
+  id: string;
+  x: number; y: number; w: number; h: number;
+  /** Texto ya partido en líneas. */
+  lines: string[];
+  /** id del NodeBox al que apunta (línea punteada), si tiene anchor. */
+  anchor?: string;
+}
+
 export interface LayoutResult {
   nodes: NodeBox[];
   edges: EdgePath[];
   packages: PackageBox[];
+  /** Notas colocadas (T4). Opcional para no romper layouts ni tests existentes. */
+  notes?: NoteBox[];
   /** Caja que contiene todo. */
   bounds: { x: number; y: number; w: number; h: number };
 }
@@ -50,6 +63,12 @@ export interface LayoutOptions {
   /** Separación entre niveles y entre nodos hermanos, en unidades de mundo. */
   rankSep?: number; // por defecto 80
   nodeSep?: number; // por defecto 40
+  /** skinparam linetype: 'polyline' → ELK POLYLINE; 'ortho' o sin valor → ORTHOGONAL. dagre lo ignora. */
+  linetype?: 'ortho' | 'polyline';
+  /** hide/show y skinparam que cambian el tamaño de las tarjetas (objeto plano: viaja al Worker). */
+  display?: CardDisplay;
+  /** Plantilla traducida de "… +{n} más" para medir la fila igual que se dibuja. */
+  moreTemplate?: string;
 }
 
 export interface ViewState {

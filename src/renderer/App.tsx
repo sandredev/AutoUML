@@ -522,6 +522,8 @@ export default function App() {
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 
   const headerName = project?.meta.name ?? externalName?.replace(/\.[^.]+$/, '') ?? null;
+  // Mismo docKey ⇒ mismo documento: una recarga conserva la vista y las posiciones manuales.
+  const docKey = externalName ? 'file:' + externalName : project ? 'project:' + project.meta.name : undefined;
 
   return (
     <div className="app">
@@ -565,6 +567,7 @@ export default function App() {
           onLayoutLoadingChange={setLayoutLoading}
           onNewProject={handleNewProject}
           onOpenProject={handleNewProject}
+          {...(docKey !== undefined ? { docKey } : {})}
         >
           <LoadingIntro
             active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })}
