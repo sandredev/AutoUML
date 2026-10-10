@@ -15,5 +15,5 @@
     "forceConsistentCasingInFileNames": true,
     "sourceMap": true
   },
-  "include": ["src/main", "src/preload", "src/shared", "src/core"]
+  "include": ["src/infrastructure", "src/application", "src/domain"]
 }

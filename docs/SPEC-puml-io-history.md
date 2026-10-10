@@ -4,7 +4,7 @@
 
 ## Contrato TypeScript
 
-La interfaz exacta para el servicio y el bridge está en `src/shared/history.ts` (`HistoryEntry`, `HistoryApi` y `HistoryStore`). Ese archivo define la forma de las entradas, resultados de apertura y operaciones; los specs funcionales de este documento siguen siendo la autoridad del comportamiento.
+La interfaz exacta para el servicio y el bridge está en `src/application/ports/history.ts` (`HistoryEntry`, `HistoryApi` y `HistoryStore`). Ese archivo define la forma de las entradas, resultados de apertura y operaciones; los specs funcionales de este documento siguen siendo la autoridad del comportamiento.
 
 ## Objective
 
