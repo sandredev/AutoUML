@@ -41,6 +41,20 @@ export interface StorageInfo {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 
+/** Vista persistida: sidecar `layout.json` / `<archivo>.autouml.json`. (T5) */
+export interface SidecarState {
+  version: 1;
+  collapsed: string[];
+  overrides: Record<string, { dx: number; dy: number }>;
+  view: { scale: number; tx: number; ty: number } | null;
+}
+
+export interface SidecarLoadResult {
+  state: SidecarState | null;
+  /** true si existía pero estaba dañado (usar valores por defecto + aviso). */
+  corrupt: boolean;
+}
+
 export type LoadOutcome =
   | { status: 'loaded'; project: ProjectInfo }
   | { status: 'cancelled' };

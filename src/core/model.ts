@@ -159,6 +159,10 @@ export interface ParseIssue {
   line: number;
   severity: 'error' | 'warning';
   message: string;
+  /** Archivo de origen con !include; ausente = archivo de entrada. (T5) */
+  file?: string;
+  /** Línea en el texto combinado (para el snippet); line es en origen. (T5) */
+  combinedLine?: number;
 }
 
 export interface DiagramModel {
