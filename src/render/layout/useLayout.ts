@@ -49,6 +49,10 @@ export function useLayout(model: DiagramModel | null, opts?: LayoutOptions, layo
   const summary = opts?.summary;
   const rankSep = opts?.rankSep;
   const nodeSep = opts?.nodeSep;
+  const linetype = opts?.linetype;
+  const moreTemplate = opts?.moreTemplate;
+  // Dependencia primitiva: el objeto display puede ser nuevo en cada render con el mismo contenido.
+  const displayKey = opts?.display ? JSON.stringify(opts.display) : '';
 
   // Las funciones viven en una ref para que los handlers de los Workers vean siempre la última versión.
   const api = useRef({
@@ -157,12 +161,15 @@ export function useLayout(model: DiagramModel | null, opts?: LayoutOptions, layo
     if (summary !== undefined) o.summary = summary;
     if (rankSep !== undefined) o.rankSep = rankSep;
     if (nodeSep !== undefined) o.nodeSep = nodeSep;
+    if (linetype !== undefined) o.linetype = linetype;
+    if (moreTemplate !== undefined) o.moreTemplate = moreTemplate;
+    if (displayKey) o.display = JSON.parse(displayKey) as NonNullable<LayoutOptions['display']>;
     const p: Pending = { id, model, opts: o, t0: performance.now(), elkRunning: false, elkDone: false, dagreSent: false, dagreDone: false };
     cur.current = p;
     setState((s) => ({ ...s, loading: true, refining: false, error: null }));
     if (model.types.length > PROGRESSIVE_MIN_NODES) api.current.send('dagre', p);
     api.current.send('elk', p);
-  }, [model, summary, rankSep, nodeSep, layoutVersion]);
+  }, [model, summary, rankSep, nodeSep, linetype, moreTemplate, displayKey, layoutVersion]);
 
   return state;
 }

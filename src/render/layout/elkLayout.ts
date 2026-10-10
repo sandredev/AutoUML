@@ -58,6 +58,7 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
   const nodeSep = opts?.nodeSep ?? DEFAULT_NODE_SEP;
   const dir = model.direction === 'LR' ? 'LR' : 'TB';
   const big = model.types.length > ELK_FAST_NODES;
+  const routing: 'orthogonal' | 'polyline' = opts?.linetype === 'polyline' ? 'polyline' : 'orthogonal';
 
   const typeIds = new Set(model.types.map((t) => t.id));
   const pkgOf = new Map<string, string>();
@@ -66,7 +67,7 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
 
   const leaf = new Map<string, ElkNode>();
   for (const t of model.types) {
-    const m = measureNode(t, summary);
+    const m = measureNode(t, summary, opts);
     leaf.set(t.id, { id: t.id, width: m.w, height: m.h });
   }
 
@@ -99,7 +100,7 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': dir === 'LR' ? 'RIGHT' : 'DOWN',
-      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.edgeRouting': routing === 'polyline' ? 'POLYLINE' : 'ORTHOGONAL',
       'elk.json.edgeCoords': 'ROOT',
       'elk.spacing.nodeNode': String(nodeSep),
       'elk.spacing.edgeNode': String(Math.max(12, Math.round(nodeSep / 2))),
@@ -169,7 +170,7 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
     if (pts.length < 4) return;
     const ep: EdgePath = {
       source: m.rel.source, target: m.rel.target, type: m.rel.type,
-      points: m.reversed ? reversePoints(pts) : pts, routing: 'orthogonal', rel: m.idx,
+      points: m.reversed ? reversePoints(pts) : pts, routing, rel: m.idx,
     };
     if (m.rel.label !== undefined) ep.label = m.rel.label;
     outEdges.push(ep);

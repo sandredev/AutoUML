@@ -20,7 +20,40 @@ export interface CardContent {
   italic: boolean;
   sections: CardRow[][];
   hiddenCount: number;
+  /** T4: true si la insignia (C, I, E…) no se dibuja ("hide circle"). La medida lo tiene en cuenta. */
+  noBadge?: boolean;
 }
+
+/**
+ * T4: cómo se muestran las tarjetas según hide/show y skinparam. Lo usan IGUAL la medida (layout, en
+ * el Worker: por eso es un objeto plano clonable) y el dibujo, para que la altura coincida.
+ */
+export interface CardDisplay {
+  /** false con "hide circle". */
+  showCircle: boolean;
+  /** false con "hide stereotype". */
+  showStereotype: boolean;
+  /** "hide empty fields" / "hide empty members". */
+  hideEmptyFields: boolean;
+  /** "hide empty methods" / "hide empty members". */
+  hideEmptyMethods: boolean;
+  /** "hide fields" / "hide attributes". */
+  hideFields: boolean;
+  /** "hide methods". */
+  hideMethods: boolean;
+  /** false con "skinparam classAttributeIconSize 0": sin el prefijo de visibilidad (+ - # ~). */
+  visibilityIcons: boolean;
+}
+
+export const DEFAULT_DISPLAY: Readonly<CardDisplay> = Object.freeze({
+  showCircle: true,
+  showStereotype: true,
+  hideEmptyFields: false,
+  hideEmptyMethods: false,
+  hideFields: false,
+  hideMethods: false,
+  visibilityIcons: true,
+});
 
 export interface DetailOptions {
   hideConstructors: boolean;

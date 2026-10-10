@@ -174,6 +174,8 @@ export interface DiagramModel {
   hide?: string[];
   /** "left to right direction" = 'LR'; por defecto 'TB'. */
   direction?: 'TB' | 'LR';
+  /** skinparam reconocidos (los soportados por T4), con la clave en minúsculas. */
+  skinparams?: Record<string, string>;
 }
 
 /** Contadores para la sidebar. */

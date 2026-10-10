@@ -35,7 +35,7 @@
   --focus-ring: #ff6a45;
   --shadow: 0 16px 48px rgba(0, 0, 0, 0.55); --scrim: rgba(8, 8, 14, 0.62);
   --uml-card: #2c2e40; --uml-card-border: #8b90ab; --uml-card-fg: #e4e6f2;
-  --uml-edge: #a6abc4; --uml-pkg: #9296ae;
+  --uml-edge: #a6abc4; --uml-pkg: #9296ae; --uml-note: #4a462c; --uml-note-border: #a39d6c; --uml-note-fg: #f4efc9;
 }
 
 /* ---------- Medianoche: el azul del icono con acento amarillo ---------- */
@@ -47,7 +47,7 @@
   --focus-ring: #f5d33b;
   --shadow: 0 16px 48px rgba(0, 0, 0, 0.6); --scrim: rgba(6, 7, 16, 0.66);
   --uml-card: #272a45; --uml-card-border: #8087b8; --uml-card-fg: #e8eafa;
-  --uml-edge: #a3a9d6; --uml-pkg: #8e94c2;
+  --uml-edge: #a3a9d6; --uml-pkg: #8e94c2; --uml-note: #45422b; --uml-note-border: #a09a68; --uml-note-fg: #f4efc9;
 }
 
 /* ---------- Brasa: oscuro cálido con el naranja del icono ---------- */
@@ -59,7 +59,7 @@
   --focus-ring: #ff7a5c;
   --shadow: 0 16px 48px rgba(0, 0, 0, 0.6); --scrim: rgba(12, 6, 4, 0.66);
   --uml-card: #33261f; --uml-card-border: #b09484; --uml-card-fg: #f3e8e0;
-  --uml-edge: #c4a999; --uml-pkg: #ad9486;
+  --uml-edge: #c4a999; --uml-pkg: #ad9486; --uml-note: #4b4129; --uml-note-border: #ab9a6a; --uml-note-fg: #f6ecc8;
 }
 
 /* ---------- Amanecer: claro cálido (crema) ---------- */
@@ -83,7 +83,7 @@
   --focus-ring: #ffffff;
   --shadow: 0 0 0 1px #a5a8d0, 0 16px 48px rgba(0, 0, 0, 0.8); --scrim: rgba(0, 0, 0, 0.8);
   --uml-card: #0a0a0f; --uml-card-border: #ffffff; --uml-card-fg: #ffffff;
-  --uml-edge: #ffffff; --uml-pkg: #d4d4e4;
+  --uml-edge: #ffffff; --uml-pkg: #d4d4e4; --uml-note: #000000; --uml-note-border: #ffff00; --uml-note-fg: #ffff00;
 }
 
 /* ---------- Semánticos: claros ---------- */

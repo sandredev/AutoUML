@@ -17,6 +17,7 @@ import type {
   Visibility,
 } from './model';
 import { classify } from './classify';
+import { SkinparamReader } from './skinparam';
 
 const DEFAULT_PACKAGE = '(default package)';
 const EXTERNAL_PACKAGE = 'EXTERNAL';
@@ -424,6 +425,7 @@ export function parsePuml(source: string): DiagramModel {
   let direction: 'TB' | 'LR' = 'TB';
   const notes: NoteModel[] = [];
   const hide: string[] = [];
+  const skin = new SkinparamReader();
   const qualified = new Map<string, string>();
   const rawAssoc: { left: string; right: string; cls: string; line: number }[] = [];
 
@@ -484,6 +486,9 @@ export function parsePuml(source: string): DiagramModel {
       else if (line.endsWith('{')) stack.push({ kind: 'skip', line: lineNo });
       continue;
     }
+
+    // --- skinparam (línea suelta o bloque); antes del "}" genérico porque el bloque lo cierra él ---
+    if (skin.feed(line, lineNo)) continue;
 
     if (line === '}') {
       if (!top) warn(lineNo, 'Llave de cierre "}" sin apertura', 'error');
@@ -636,6 +641,8 @@ export function parsePuml(source: string): DiagramModel {
   }
 
   if (inNote) warn(noteLine, 'Nota sin cerrar (falta "end note")', 'error');
+  skin.finish();
+  for (const w of skin.warnings) warn(w.line, w.message);
   for (const f of stack) {
     warn(f.line, `Llave sin cerrar (abierta en la línea ${f.line})`, 'error');
   }
@@ -749,5 +756,6 @@ export function parsePuml(source: string): DiagramModel {
     notes,
     hide,
     direction,
+    skinparams: skin.values,
   };
 }

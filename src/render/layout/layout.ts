@@ -1,8 +1,9 @@
 // src/render/layout/layout.ts — motor de layout dagre (puro, sin DOM/React/Electron).
 import * as dagreNs from '@dagrejs/dagre';
 import type { DiagramModel, TypeNode } from '../../core/model';
-import { DEFAULT_DETAIL, type TextMeasurer } from '../style/contract';
+import { DEFAULT_DETAIL, DEFAULT_DISPLAY, type TextMeasurer } from '../style/contract';
 import type { EdgePath, LayoutOptions, LayoutResult, NodeBox, PackageBox } from '../types';
+import { collapsedNodeSize, isPackageNode } from './aggregate';
 import { cardContentOf, makeMeasurer, measureCardBox } from './cardModel';
 import { selfLoopPoints } from './selfLoop';
 
@@ -21,9 +22,18 @@ function getMeasurer(): TextMeasurer {
   return measurer;
 }
 
-/** Tamaño de la tarjeta: misma medida (FONTS + makeMeasurer) que usa el dibujo. */
-export function measureNode(node: TypeNode, summary: boolean): { w: number; h: number } {
-  const box = measureCardBox(cardContentOf(node, DEFAULT_DETAIL, summary), getMeasurer());
+/**
+ * Tamaño de la tarjeta: misma medida (FONTS + makeMeasurer) y mismas reglas de hide/skinparam que
+ * usa el dibujo. Los paquetes plegados (T4) tienen su propio tamaño.
+ */
+export function measureNode(
+  node: TypeNode,
+  summary: boolean,
+  opts?: Pick<LayoutOptions, 'display' | 'moreTemplate'>,
+): { w: number; h: number } {
+  if (isPackageNode(node.id)) return collapsedNodeSize(node.name, getMeasurer());
+  const content = cardContentOf(node, DEFAULT_DETAIL, summary, opts?.display ?? DEFAULT_DISPLAY);
+  const box = measureCardBox(content, getMeasurer(), opts?.moreTemplate);
   return { w: box.w, h: box.h };
 }
 
@@ -70,7 +80,7 @@ export function computeLayout(model: DiagramModel, opts?: LayoutOptions): Layout
   const sizes = new Map<string, { w: number; h: number }>();
   for (const t of model.types) {
     if (sizes.has(t.id)) continue;
-    const s = measureNode(t, summary);
+    const s = measureNode(t, summary, opts);
     sizes.set(t.id, s);
     g.setNode(t.id, { width: s.w, height: s.h });
   }
@@ -100,6 +110,7 @@ export function computeLayout(model: DiagramModel, opts?: LayoutOptions): Layout
     const cx = n && fin(n.x) ? n.x : 0;
     const cy = n && fin(n.y) ? n.y : 0;
     const box: NodeBox = { id, x: cx - s.w / 2, y: cy - s.h / 2, w: s.w, h: s.h };
+    if (isPackageNode(id)) box.label = model.types.find((t) => t.id === id)?.name ?? id;
     nodes.push(box);
     boxById.set(id, box);
   }
