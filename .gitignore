@@ -10,9 +10,8 @@ agent/
 skills-lock.json
 .claude 
 
-# Documentación: ningún .md sube al repo, salvo CONTEXTO.md (ya trackeados como README.md no se ven afectados).
+# Documentación: ningún .md sube al repo.
 *.md
-!CONTEXTO.md
 
 # IDE (JetBrains)
 .idea/
