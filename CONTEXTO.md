@@ -17,6 +17,13 @@ en verde por tanda.
 - `systematic-debugging` en `.agents/skills/systematic-debugging`
 
 ## Última tarea hecha
+- 2026-10-10 — T3 Rendimiento y dirección ejecutada en rama `feature/t3` (commiteada, PR a `develop` pendiente):
+  `elkLayout.ts` (layeringOf/hint, ELK_FAST_NODES, sin timeout dentro), `layout.worker.ts`
+  (motor por petición), `useLayout.ts` (timeout real con terminate + progresivo dagre→ELK),
+  barra motor/ms en `PumlViewer`, fit/overrides por `layoutModel` en `DiagramCanvas`,
+  `bench-layout.ts` (50: 25/189 ms, 200: 42/432 ms, 500: 165/1432 ms dagre/ELK),
+  tests: layeringOf + direction LR en ambos motores. Verificado: 126/126 tests,
+  typecheck limpio, build verde.
 - 2026-10-10 — T2 fusionada en `develop` (merge `a097812`, push a origin) y rama
   `feature/t3` creada sobre `develop`. Verificado en `develop`: 120/120 tests,
   typecheck limpio.
@@ -48,7 +55,7 @@ en verde por tanda.
   `makeMeasurer()` + `FONTS` y deduplicar (`memberRows`, `fmtParams`, `iconFor` vs
   `badgeOf`); colores por clase; anidamiento `+--` y estilos de arista.
   Skills: `plantuml`, `systematic-debugging`.
-- [ ] [EJECUTO] T3 Rendimiento y dirección del layout (retenida: bug sutil, la hago yo) — EN CURSO en rama `feature/t3`.
+- [ ] [EJECUTO] T3 Rendimiento y dirección del layout (retenida: bug sutil, la hago yo) — EJECUTADA en rama `feature/t3` (commiteada, PR a `develop` pendiente).
   Timeout real con `worker.terminate()` desde el hilo principal (ELK bloquea el Worker,
   el timeout NO puede vivir dentro); layout progresivo (dagre rápido primero, ELK
   después); `direction` TB/LR en ambos motores; `hint` por arista; barra con motor
