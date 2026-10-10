@@ -2,7 +2,13 @@ node_modules/
 dist/
 dist-electron/
 release/
+agent/
 *.log
+.agents
+
+.skills
+skills-lock.json
+.claude 
 
 # IDE (JetBrains)
 .idea/
