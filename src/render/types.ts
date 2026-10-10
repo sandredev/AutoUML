@@ -24,6 +24,10 @@ export interface EdgePath {
    * Opcional para no romper los layouts ni los tests existentes.
    */
   routing?: 'orthogonal' | 'polyline';
+  /** Índice en model.relationships: el dibujo saca de ahí cabezas, multiplicidades y estilo. */
+  rel?: number;
+  /** true si es un bucle de una clase consigo misma. */
+  self?: boolean;
 }
 
 export interface PackageBox {

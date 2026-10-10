@@ -40,7 +40,8 @@ export function badgeColor(b: Badge): string {
   return badgeColors[b];
 }
 
-function fmtParams(ps: ParameterModel[], abbr?: number): string {
+/** Única implementación del formato de parámetros (antes duplicada en layout.ts y members.ts). */
+export function fmtParams(ps: ParameterModel[], abbr?: number): string {
   if (abbr !== undefined) return '…' + abbr;
   return ps.map((p) => (p.name ? p.name + ': ' + p.type : p.type)).join(', ');
 }

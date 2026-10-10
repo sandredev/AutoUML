@@ -1,55 +1,30 @@
-// src/render/layout/layout.ts — motor de layout puro (sin DOM/React/Electron).
+// src/render/layout/layout.ts — motor de layout dagre (puro, sin DOM/React/Electron).
 import * as dagreNs from '@dagrejs/dagre';
-import type { DiagramModel, ParameterModel, TypeNode } from '../../core/model';
+import type { DiagramModel, TypeNode } from '../../core/model';
+import { DEFAULT_DETAIL, type TextMeasurer } from '../style/contract';
 import type { EdgePath, LayoutOptions, LayoutResult, NodeBox, PackageBox } from '../types';
-import { cardHeight, memberSections } from './members';
+import { cardContentOf, makeMeasurer, measureCardBox } from './cardModel';
+import { selfLoopPoints } from './selfLoop';
 
 // Interop CJS/ESM: en Node el namespace puede traer solo `default`.
 const dagre = (dagreNs as unknown as { default?: typeof dagreNs }).default ?? dagreNs;
 
-export { HEADER_H, MAX_ROWS, ROW_H, SUMMARY_H } from './members';
-const MIN_W = 140;
-const CHAR_W = 7.2;
-const PAD_W = 24;
 const PKG_MARGIN = 16;
 const PKG_HEADER = 24;
 const BIG_GRAPH = 400;
 const DEFAULT_PACKAGE = '(default package)';
 
-function fmtParams(ps: ParameterModel[], abbr?: number): string {
-  if (abbr !== undefined) return `…${abbr}`;
-  return ps.map((p) => (p.name ? `${p.name}: ${p.type}` : p.type)).join(', ');
+// Un medidor por hilo (principal o Worker): OffscreenCanvas si existe, estimateWidth si no.
+let measurer: TextMeasurer | null = null;
+function getMeasurer(): TextMeasurer {
+  measurer ??= makeMeasurer();
+  return measurer;
 }
 
-/** Filas de miembros en el orden en que se dibujan. */
-export function memberRows(node: TypeNode): string[] {
-  const rows: string[] = [];
-  for (const c of node.enumConstants) rows.push(c);
-  for (const a of node.attributes) rows.push(`${a.visibility} ${a.name}${a.type ? `: ${a.type}` : ''}`);
-  for (const c of node.constructors) rows.push(`${c.visibility} ${c.name}(${fmtParams(c.parameters, c.parametersAbbreviated)})`);
-  for (const m of node.methods) {
-    rows.push(`${m.visibility} ${m.name}(${fmtParams(m.parameters, m.parametersAbbreviated)}): ${m.returnType}`);
-  }
-  return rows;
-}
-
-/** Ancho extra de la cabecera para el icono de categoría (círculo con C, I, E…) a la izquierda del nombre. */
-export const ICON_SPACE = 24;
-/** Ancho extra de cada fila para el icono de visibilidad (cuadro, círculo, rombo, triángulo). */
-export const VIS_SPACE = 16;
-
-/** Tamaño de la tarjeta al estilo PlantUML: cabecera + compartimento de atributos + compartimento de métodos. */
+/** Tamaño de la tarjeta: misma medida (FONTS + makeMeasurer) que usa el dibujo. */
 export function measureNode(node: TypeNode, summary: boolean): { w: number; h: number } {
-  // La cabecera (nombre y estereotipo) comparte espacio con el icono.
-  let headLongest = node.name.length;
-  if (node.stereotypes.length > 0) headLongest = Math.max(headLongest, `«${node.stereotypes.join(', ')}»`.length);
-  const headW = CHAR_W * headLongest + PAD_W + ICON_SPACE;
-  if (summary) return { w: Math.max(MIN_W, headW), h: cardHeight(node, true) };
-  const sec = memberSections(node);
-  let rowW = 0;
-  for (const r of [...sec.fields, ...sec.methods]) rowW = Math.max(rowW, CHAR_W * r.text.length + (r.vis ? VIS_SPACE : 0));
-  if (sec.hidden > 0) rowW = Math.max(rowW, CHAR_W * `… +${sec.hidden} más`.length);
-  return { w: Math.max(MIN_W, headW, rowW + PAD_W), h: cardHeight(node, false) };
+  const box = measureCardBox(cardContentOf(node, DEFAULT_DETAIL, summary), getMeasurer());
+  return { w: box.w, h: box.h };
 }
 
 /** Punto del borde de la caja en la dirección (px,py) desde su centro. */
@@ -78,7 +53,7 @@ export function computeLayout(model: DiagramModel, opts?: LayoutOptions): Layout
 
   const g = new dagre.graphlib.Graph({ multigraph: true });
   const cfg: Record<string, string | number> = {
-    rankdir: 'TB',
+    rankdir: model.direction === 'LR' ? 'LR' : 'TB',
     ranksep: rankSep,
     nodesep: nodeSep,
     edgesep: 10,
@@ -108,7 +83,7 @@ export function computeLayout(model: DiagramModel, opts?: LayoutOptions): Layout
       pending.push({ idx, v: r.source, w: r.target, reversed: false, self: true });
       return;
     }
-    // Herencia: dagre recibe padre -> hijo para que el padre quede arriba.
+    // Herencia: padre -> hijo para que el padre quede antes (arriba en TB, a la izquierda en LR).
     const hier = r.type === 'EXTENDS' || r.type === 'IMPLEMENTS';
     const v = hier ? r.target : r.source;
     const w = hier ? r.source : r.target;
@@ -129,6 +104,7 @@ export function computeLayout(model: DiagramModel, opts?: LayoutOptions): Layout
     boxById.set(id, box);
   }
 
+  const loops = new Map<string, number>();
   const edges: EdgePath[] = [];
   for (const p of pending) {
     const r = model.relationships[p.idx];
@@ -138,9 +114,9 @@ export function computeLayout(model: DiagramModel, opts?: LayoutOptions): Layout
     if (!src || !tgt) continue;
     let points: number[];
     if (p.self) {
-      const x = src.x + src.w;
-      const cy = src.y + src.h / 2;
-      points = [x, cy - 8, x + 24, cy - 8, x + 24, cy + 8, x, cy + 8];
+      const k = loops.get(src.id) ?? 0;
+      loops.set(src.id, k + 1);
+      points = selfLoopPoints(src, k);
     } else {
       const e = g.edge({ v: p.v, w: p.w, name: `e${p.idx}` }) as unknown as { points?: { x: number; y: number }[] } | undefined;
       const raw = (e?.points ?? []).filter((q) => fin(q.x) && fin(q.y));
@@ -154,7 +130,13 @@ export function computeLayout(model: DiagramModel, opts?: LayoutOptions): Layout
       for (const q of inner) points.push(q.x, q.y);
       points.push(ex, ey);
     }
-    edges.push({ source: r.source, target: r.target, type: r.type, points, ...(r.label ? { label: r.label } : {}) });
+    const ep: EdgePath = {
+      source: r.source, target: r.target, type: r.type, points, rel: p.idx,
+      routing: p.self ? 'orthogonal' : 'polyline',
+    };
+    if (p.self) ep.self = true;
+    if (r.label) ep.label = r.label;
+    edges.push(ep);
   }
 
   const packages: PackageBox[] = [];
