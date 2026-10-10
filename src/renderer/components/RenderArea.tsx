@@ -1,6 +1,6 @@
 import { useMemo, type JSX, type ReactNode, type RefObject } from 'react';
 import type { DiagramModel } from '../../core/model';
-import type { ProjectInfo } from '../../shared/ipc';
+import type { ProjectInfo, SidecarState } from '../../shared/ipc';
 import { PumlViewer } from '../../render/PumlViewer';
 import type { DiagramCanvasHandle } from '../../render/canvas/DiagramCanvas';
 import { useI18n } from '../i18n/I18nProvider';
@@ -19,6 +19,10 @@ interface Props {
   onOpenProject?: () => void;
   /** Identidad del documento abierto: recargarlo conserva la vista y las posiciones manuales. */
   docKey?: string;
+  /** Estado persistido del sidecar (colapsados, overrides, vista). */
+  initialSidecar?: SidecarState | null;
+  /** Avisa cuando cambian colapsados, posiciones manuales o vista (para persistir). */
+  onViewStateChange?: (collapsed: ReadonlySet<string>) => void;
 }
 
 export function RenderArea({
@@ -32,6 +36,8 @@ export function RenderArea({
   onNewProject,
   onOpenProject,
   docKey,
+  initialSidecar,
+  onViewStateChange,
 }: Props): JSX.Element {
   const { t } = useI18n();
   const labels = useMemo(() => viewerLabels(t), [t]);
@@ -76,6 +82,8 @@ export function RenderArea({
         className="render-area-content"
         labels={labels}
         {...(docKey !== undefined ? { docKey } : {})}
+        {...(initialSidecar !== undefined ? { initialSidecar } : {})}
+        {...(onViewStateChange ? { onViewStateChange } : {})}
       />
       {children}
     </main>

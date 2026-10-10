@@ -55,6 +55,41 @@ export interface SidecarLoadResult {
   corrupt: boolean;
 }
 
+/** De dónde se carga un documento: proyecto o archivo externo (ruta absoluta). (T5) */
+export type PumlScope = { project: string } | { file: string };
+
+export interface PumlLineRef {
+  file: string;
+  line: number;
+}
+
+export interface PumlLoadIssue {
+  file: string;
+  line: number;
+  severity: 'error' | 'warning';
+  message: string;
+}
+
+export interface PumlSourceResult {
+  /** Ruta absoluta normalizada del archivo de entrada. */
+  entryPath: string;
+  /** Texto tal cual de la entrada (para guardar). */
+  entryText: string;
+  /** Texto con los !include expandidos (para parsear). */
+  combined: string;
+  /** Entrada + incluidos (para vigilar). */
+  files: string[];
+  /** Origen de cada línea de `combined` (índice = nº de línea − 1). */
+  lineMap: PumlLineRef[];
+  /** Avisos de la resolución (faltantes, ciclos, profundidad). */
+  loadIssues: PumlLoadIssue[];
+}
+
+export interface PumlFilesChanged {
+  kind: 'changed' | 'removed';
+  path: string;
+}
+
 export type LoadOutcome =
   | { status: 'loaded'; project: ProjectInfo }
   | { status: 'cancelled' };
@@ -74,6 +109,9 @@ export type MenuAction =
   | 'zoom-out'
   | 'fit'
   | 'export'
+  | 'export-svg'
+  | 'export-pdf'
+  | 'copy-png'
   | 'toggle-sidebar'
   | `theme-${ThemeMode}`
   | 'locale-es'
@@ -116,7 +154,16 @@ export type IpcChannel =
   | 'puml:load'
   | 'puml:save-to-project'
   | 'puml:reload'
+  | 'puml:load-source'
+  | 'puml:watch'
+  | 'puml:unwatch'
+  | 'puml:files-changed'
+  | 'sidecar:load'
+  | 'sidecar:save'
   | 'export:save-png'
+  | 'export:save-svg'
+  | 'export:save-pdf'
+  | 'clipboard:write-png'
   | 'menu:update-state'
   | 'menu:command'
   | 'window:controls-colors'
@@ -144,6 +191,17 @@ export interface AutoUmlApi {
   reloadPuml(name: string): Promise<Result<ProjectInfo>>;
   // Abre el diálogo nativo y guarda la imagen PNG; devuelve null si se cancela.
   savePng(fileName: string, bytes: Uint8Array): Promise<Result<string | null>>;
+  // Lee el .puml con sus !include ya resueltos (proyecto o archivo externo). (T5)
+  loadSource(scope: PumlScope): Promise<Result<PumlSourceResult>>;
+  // Vigila los archivos del documento; avisa con onPumlFilesChanged. (T5)
+  watchPumlFiles(files: string[]): Promise<Result<{ watched: string[] }>>;
+  unwatchPumlFiles(): void;
+  onPumlFilesChanged(callback: (event: PumlFilesChanged) => void): () => void;
+  loadSidecar(scope: PumlScope): Promise<Result<SidecarLoadResult>>;
+  saveSidecar(scope: PumlScope, state: SidecarState): Promise<Result<void>>;
+  saveSvg(fileName: string, svg: string): Promise<Result<string | null>>;
+  savePdf(fileName: string, svg: string, widthPx: number, heightPx: number): Promise<Result<string | null>>;
+  writePngToClipboard(bytes: Uint8Array): Promise<Result<void>>;
   updateMenuState(state: MenuState): void;
   // Pide a main una acción de menú que el renderer no puede hacer (salir, copiar, diálogo "Acerca de"…).
   runMenuCommand(command: MenuCommand): void;

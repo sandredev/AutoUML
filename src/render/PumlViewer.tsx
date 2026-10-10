@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX, RefObject } from 'react';
 import type { DiagramModel } from '../core/model';
+import type { SidecarState } from '../shared/ipc';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from './labels';
 import { useDiagramLayout } from './layout/useDiagramLayout';
-import type { LayoutOptions } from './types';
+import type { LayoutOptions, ViewState } from './types';
 import { initialViewOptions, resetViewOptions, type ViewOptionsState } from './viewOptions';
 
 /**
@@ -27,6 +28,10 @@ export interface PumlViewerProps {
   docKey?: string;
   /** Textos traducidos; sin ellos, español. */
   labels?: ViewerLabels;
+  /** Estado persistido del sidecar (colapsados, overrides, vista). */
+  initialSidecar?: SidecarState | null;
+  /** Avisa cuando cambian colapsados, posiciones manuales o vista (para persistir). */
+  onViewStateChange?: (collapsed: ReadonlySet<string>) => void;
 }
 
 const NO_COLLAPSED: ReadonlySet<string> = new Set();
@@ -40,10 +45,28 @@ export function PumlViewer({
   onLayoutLoadingChange,
   docKey,
   labels = DEFAULT_LABELS,
+  initialSidecar,
+  onViewStateChange,
 }: PumlViewerProps): JSX.Element {
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_COLLAPSED);
+
+  // Al cambiar de documento se parte de cero; al llegar el sidecar se aplican sus
+  // colapsados (filtrados a los existentes). Se deriva durante el render.
+  const sidecarKey = docKey ?? null;
+  const lastKeyFor = useRef<string | null>(null);
+  const lastAppliedSidecar = useRef<SidecarState | null | undefined>(undefined);
+  if (sidecarKey !== lastKeyFor.current) {
+    lastKeyFor.current = sidecarKey;
+    lastAppliedSidecar.current = undefined;
+    setCollapsed(NO_COLLAPSED);
+  }
+  if (sidecarKey !== null && initialSidecar !== undefined && lastAppliedSidecar.current !== initialSidecar) {
+    lastAppliedSidecar.current = initialSidecar;
+    const known = model ? new Set(model.packages.map((p) => p.name)) : null;
+    setCollapsed(new Set((initialSidecar?.collapsed ?? []).filter((name) => !known || known.has(name))));
+  }
 
   // Paquetes plegados que siguen existiendo en el modelo (derivado: sin efecto ni render extra).
   const liveCollapsed = useMemo(() => {
@@ -85,6 +108,23 @@ export function PumlViewer({
   }, [handleRef]);
 
   const handleCollapsed = useCallback((next: Set<string>) => setCollapsed(next), []);
+
+  // Aviso al host para persistir el sidecar (colapsados, posiciones manuales o vista).
+  // El host lee el snapshot del canvas al guardar; aquí solo se le despierta (él hace debounce).
+  const notifyRef = useRef(onViewStateChange);
+  notifyRef.current = onViewStateChange;
+  const liveCollapsedRef = useRef(liveCollapsed);
+  liveCollapsedRef.current = liveCollapsed;
+  useEffect(() => {
+    notifyRef.current?.(liveCollapsed);
+  }, [liveCollapsed]);
+  const handleManualPositions = useCallback((has: boolean) => {
+    setManual(has);
+    notifyRef.current?.(liveCollapsedRef.current);
+  }, []);
+  const handleViewChange = useCallback((_v: ViewState) => {
+    notifyRef.current?.(liveCollapsedRef.current);
+  }, []);
 
   if (error) {
     return (
@@ -145,9 +185,11 @@ export function PumlViewer({
         layout={layout}
         layoutModel={layoutModel}
         {...(docKey !== undefined ? { docKey } : {})}
+        {...(initialSidecar ? { initialOverrides: initialSidecar.overrides, initialView: initialSidecar.view } : {})}
         selectedId={selectedId}
         onSelect={onSelect}
-        onManualPositionsChange={setManual}
+        onViewChange={handleViewChange}
+        onManualPositionsChange={handleManualPositions}
         collapsedPackages={liveCollapsed}
         onCollapsedPackagesChange={handleCollapsed}
         packageCounts={packageCounts}

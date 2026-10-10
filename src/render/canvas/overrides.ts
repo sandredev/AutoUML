@@ -60,8 +60,9 @@ export function hasOverrides(overrides: Overrides): boolean {
 /**
  * Aplica los desplazamientos al layout sin mutarlo:
  * - mueve las tarjetas;
- * - en las aristas conectadas mueve el extremo y, si la ruta es ortogonal, añade un codo para que siga siendo ortogonal;
- * - agranda la caja del paquete para que siga conteniendo sus tarjetas;
+ * - en las aristas conectadas mueve el extremo y, si la ruta es ortogonal, añade un codo para que siga siendo ortogonal
+ *   (el codo evita las cajas de las tarjetas: como mucho 2-3 tramos);
+ * - agranda la caja del paquete para que siga conteniendo sus tarjetas, y la ENCOGE cuando una tarjeta sale de él;
  * - recalcula bounds.
  */
 export function applyOverrides(layout: LayoutResult, overrides: Overrides): LayoutResult {
@@ -75,6 +76,8 @@ export function applyOverrides(layout: LayoutResult, overrides: Overrides): Layo
     const o = off(n.id);
     return o ? { ...n, x: n.x + o.dx, y: n.y + o.dy } : n;
   });
+  // Obstáculos para el re-ruteo: las cajas de las tarjetas ya movidas.
+  const obstacles: Box[] = nodes.map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h }));
 
   const edges: EdgePath[] = layout.edges.map((e) => {
     const os = off(e.source);
@@ -86,8 +89,8 @@ export function applyOverrides(layout: LayoutResult, overrides: Overrides): Layo
     }
     let pts = e.points.slice();
     const ortho = e.routing === 'orthogonal';
-    if (os) pts = moveStart(pts, os, ortho);
-    if (ot) pts = reverse(moveStart(reverse(pts), ot, ortho));
+    if (os) pts = moveStart(pts, os, ortho, obstacles);
+    if (ot) pts = reverse(moveStart(reverse(pts), ot, ortho, obstacles));
     return { ...e, points: pts };
   });
 
@@ -100,7 +103,27 @@ export function applyOverrides(layout: LayoutResult, overrides: Overrides): Layo
   }
   const packages: PackageBox[] = layout.packages.map((p) => {
     const members = byPackage.get(p.name);
-    if (!members || !members.some((m) => off(m.id))) return p;
+    if (!members || members.length === 0 || !members.some((m) => off(m.id))) return p;
+    // Si alguna tarjeta salió de la caja (con padding), se recalcula ajustada a los
+    // miembros actuales: contiene a todos pero el lado abandonado se encoge.
+    const escaped = members.some(
+      (m) =>
+        m.x - PKG_PAD.left < p.x - EPS ||
+        m.y - PKG_PAD.top < p.y - EPS ||
+        m.x + m.w + PKG_PAD.right > p.x + p.w + EPS ||
+        m.y + m.h + PKG_PAD.bottom > p.y + p.h + EPS,
+    );
+    if (escaped) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const m of members) {
+        x0 = Math.min(x0, m.x - PKG_PAD.left);
+        y0 = Math.min(y0, m.y - PKG_PAD.top);
+        x1 = Math.max(x1, m.x + m.w + PKG_PAD.right);
+        y1 = Math.max(y1, m.y + m.h + PKG_PAD.bottom);
+      }
+      if (!Number.isFinite(x0) || x1 <= x0 || y1 <= y0) return p;
+      return { ...p, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
     let x0 = p.x, y0 = p.y, x1 = p.x + p.w, y1 = p.y + p.h;
     for (const m of members) {
       x0 = Math.min(x0, m.x - PKG_PAD.left);
@@ -143,8 +166,10 @@ function reverse(points: readonly number[]): number[] {
 /**
  * Mueve el primer punto de la polilínea. En rutas ortogonales conserva la orientación del primer tramo
  * (sale de la tarjeta igual que antes) y añade un codo para volver a unirse con el resto de la ruta.
+ * Con `obstacles`, el codo elegido no cruza el interior de las cajas (origen, destino y demás
+ * tarjetas): si el codo ingenuo cruza, se prueba la orientación alternativa (2-3 tramos).
  */
-function moveStart(points: number[], o: Offset, ortho: boolean): number[] {
+export function moveStart(points: number[], o: Offset, ortho: boolean, obstacles?: readonly Box[]): number[] {
   if (points.length < 4) return points;
   const sx = (points[0] ?? 0) + o.dx;
   const sy = (points[1] ?? 0) + o.dy;
@@ -155,8 +180,94 @@ function moveStart(points: number[], o: Offset, ortho: boolean): number[] {
   const vertical = Math.abs((points[0] ?? 0) - nx) < EPS;
   // Primer tramo vertical: baja/sube desde la tarjeta hasta la altura del siguiente punto y luego en horizontal.
   // Primer tramo horizontal: igual pero girado.
-  const elbow = vertical ? [sx, ny] : [nx, sy];
+  const first = vertical ? [sx, ny] : [nx, sy];
+  if (!obstacles || obstacles.length === 0) return [sx, sy, ...first, ...rest];
+  const alt = vertical ? [nx, sy] : [sx, ny];
+  const crosses = (elbow: number[]): number => {
+    let n = 0;
+    const segs: Array<[number, number, number, number]> = [
+      [sx, sy, elbow[0] ?? 0, elbow[1] ?? 0],
+      [elbow[0] ?? 0, elbow[1] ?? 0, nx, ny],
+    ];
+    for (const [x1, y1, x2, y2] of segs) {
+      for (const box of obstacles) {
+        if (segCrossesBox(x1, y1, x2, y2, box)) n += 1;
+      }
+    }
+    return n;
+  };
+  // Empate o mejora ingenua: se conserva el codo actual (no se salta sin motivo).
+  const elbow = crosses(alt) < crosses(first) ? alt : first;
   return [sx, sy, ...elbow, ...rest];
+}
+
+/** Caja para el re-ruteo (una tarjeta ya movida). */
+export interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function strictlyInside(px: number, py: number, b: Box): boolean {
+  return px > b.x && px < b.x + b.w && py > b.y && py < b.y + b.h;
+}
+
+function orient(ax: number, ay: number, bx: number, by: number, cx: number, cy: number): number {
+  return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+}
+
+function onSegment(ax: number, ay: number, bx: number, by: number, cx: number, cy: number): boolean {
+  return Math.min(ax, cx) - EPS <= bx && bx <= Math.max(ax, cx) + EPS && Math.min(ay, cy) - EPS <= by && by <= Math.max(ay, cy) + EPS;
+}
+
+/** Cruce (incluido el roce) de dos segmentos. */
+function segsCross(
+  x1: number, y1: number, x2: number, y2: number,
+  x3: number, y3: number, x4: number, y4: number,
+): boolean {
+  const d1 = orient(x3, y3, x4, y4, x1, y1);
+  const d2 = orient(x3, y3, x4, y4, x2, y2);
+  const d3 = orient(x1, y1, x2, y2, x3, y3);
+  const d4 = orient(x1, y1, x2, y2, x4, y4);
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+  if (Math.abs(d1) < EPS && onSegment(x3, y3, x1, y1, x4, y4)) return true;
+  if (Math.abs(d2) < EPS && onSegment(x3, y3, x2, y2, x4, y4)) return true;
+  if (Math.abs(d3) < EPS && onSegment(x1, y1, x3, y3, x2, y2)) return true;
+  if (Math.abs(d4) < EPS && onSegment(x1, y1, x4, y4, x2, y2)) return true;
+  return false;
+}
+
+/** true si el segmento atraviesa el interior de la caja (best-effort). */
+function segCrossesBox(x1: number, y1: number, x2: number, y2: number, b: Box): boolean {
+  if (Math.hypot(x2 - x1, y2 - y1) < EPS) return false;
+  if (strictlyInside(x1, y1, b) || strictlyInside(x2, y2, b)) return true;
+  const x0 = b.x, y0 = b.y, x3 = b.x + b.w, y3 = b.y + b.h;
+  return (
+    segsCross(x1, y1, x2, y2, x0, y0, x3, y0) ||
+    segsCross(x1, y1, x2, y2, x3, y0, x3, y3) ||
+    segsCross(x1, y1, x2, y2, x3, y3, x0, y3) ||
+    segsCross(x1, y1, x2, y2, x0, y3, x0, y0)
+  );
+}
+
+/** Convierte el record del sidecar a Overrides (filtra valores no finitos). */
+export function overridesFromRecord(record: Record<string, { dx: number; dy: number }>): Overrides {
+  const next = new Map<string, Offset>();
+  if (record === null || typeof record !== 'object') return EMPTY_OVERRIDES;
+  for (const [id, o] of Object.entries(record)) {
+    if (typeof o?.dx !== 'number' || typeof o?.dy !== 'number') continue;
+    if (!Number.isFinite(o.dx) || !Number.isFinite(o.dy)) continue;
+    next.set(id, { dx: o.dx, dy: o.dy });
+  }
+  return next.size === 0 ? EMPTY_OVERRIDES : next;
+}
+
+/** Convierte Overrides al record del sidecar (copias, listo para JSON). */
+export function overridesToRecord(overrides: Overrides): Record<string, { dx: number; dy: number }> {
+  const out: Record<string, { dx: number; dy: number }> = {};
+  for (const [id, o] of overrides) out[id] = { dx: o.dx, dy: o.dy };
+  return out;
 }
 
 function boundsOf(

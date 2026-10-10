@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MenuAction, MenuState, ProjectInfo, StorageInfo } from '../shared/ipc';
+import type { MenuAction, MenuState, ProjectInfo, PumlScope, SidecarState, StorageInfo } from '../shared/ipc';
 import type { OpenPumlFile } from '../shared/history';
 import { buildTree, countByCategory } from '../core/classify';
 import { parsePuml } from '../core/parser';
@@ -60,12 +60,23 @@ export default function App() {
   const [externalName, setExternalName] = useState<string | null>(null);
   const [historyTick, setHistoryTick] = useState(0);
   const dropBusy = useRef(false);
+  // T5: scope actual (proyecto o externo) para el watch y el sidecar.
+  const scopeRef = useRef<PumlScope | null>(null);
+  const saveTimer = useRef<number | undefined>(undefined);
+  const pendingCollapsed = useRef<ReadonlySet<string> | null>(null);
+  // T5: texto combinado (con !include expandidos, lo que se parsea y muestra IssuesPanel),
+  // archivos vigilados, ruta externa y sidecar.
+  const [combined, setCombined] = useState<string | null>(null);
+  const [sourceFiles, setSourceFiles] = useState<string[]>([]);
+  const [externalPath, setExternalPath] = useState<string | null>(null);
+  const [initialSidecar, setInitialSidecar] = useState<SidecarState | null | undefined>(undefined);
 
   // Feedback visual de drag and drop.
   const [dropPhase, setDropPhase] = useState<DropPhase>('idle');
   const dragDepth = useRef(0);
   const tRef = useRef(t);
   const handleRelayoutRef = useRef<() => void>(() => undefined);
+  const handleCopyPngRef = useRef<() => void>(() => undefined);
 
   // Confirmación de cierre.
   const [closePromptOpen, setClosePromptOpen] = useState(false);
@@ -78,6 +89,10 @@ export default function App() {
   const docName = externalName
     ? externalName.replace(/\.[^.]+$/, '')
     : project?.meta.name ?? t('app.diagram');
+
+  // Mismo docKey ⇒ mismo documento: una recarga conserva la vista y las posiciones manuales.
+  const docKey = externalName ? 'file:' + externalName : project ? 'project:' + project.meta.name : undefined;
+  scopeRef.current = project ? { project: project.meta.name } : externalPath ? { file: externalPath } : null;
 
   useEffect(() => {
     tRef.current = t;
@@ -105,6 +120,10 @@ export default function App() {
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'L' || event.key === 'l')) {
         event.preventDefault();
         handleRelayoutRef.current();
+      }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'C' || event.key === 'c')) {
+        event.preventDefault();
+        void handleCopyPngRef.current();
       }
     };
     window.addEventListener('keydown', onSettingsShortcut);
@@ -139,35 +158,53 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [status]);
 
-  // Lee el .puml del disco y lo parsea en el renderer. No tumba la app si falla.
-  const loadSource = useCallback(async (projectName: string): Promise<boolean> => {
-    setSourceLoading(true);
+  // Carga el documento con sus !include resueltos (proyecto o externo) y lo parsea.
+  // source sigue siendo el texto crudo de entrada (los guardados quedan intactos);
+  // combined es lo parseado (IssuesPanel lo usa para el snippet). No tumba la app si falla.
+  const loadDocument = useCallback(async (scope: PumlScope, opts?: { silent?: boolean }): Promise<boolean> => {
+    const silent = opts?.silent ?? false;
+    if (!silent) setSourceLoading(true);
     try {
-      const r = await api.readPuml(projectName);
+      const r = await api.loadSource(scope);
       if (!r.ok) {
-        setSource(null);
-        setDiagram(null);
-        setStatus({ kind: 'error', text: r.error });
+        if (!silent) {
+          setSource(null);
+          setCombined(null);
+          setSourceFiles([]);
+          setDiagram(null);
+          setStatus({ kind: 'error', text: r.error });
+        }
         return false;
       }
-      setSource(r.value);
-      setDiagram(parsePuml(r.value));
+      const { entryText, combined: text, files, lineMap, loadIssues } = r.value;
+      const model = parsePuml(text);
+      // Los issues del parser van en líneas del combinado: se remapean al origen
+      // (line+file) y guardan la línea combinada para el snippet.
+      const remapped = model.issues.map((issue) => {
+        const ref = lineMap[issue.line - 1];
+        if (!ref) return issue;
+        return { ...issue, file: ref.file, line: ref.line, combinedLine: issue.line };
+      });
+      // Los del loader ya traen file+line de origen (sin línea combinada).
+      const loaderIssues = loadIssues.map((i) => ({ line: i.line, severity: i.severity, message: i.message, file: i.file }));
+      setSource(entryText);
+      setCombined(text);
+      setSourceFiles(files);
+      setDiagram({ ...model, issues: [...loaderIssues, ...remapped] });
       setSourceTick((t) => t + 1);
-      setExternalName(null);
       return true;
     } finally {
-      setSourceLoading(false);
+      if (!silent) setSourceLoading(false);
     }
   }, []);
 
   const handlePumlOpened = useCallback((file: OpenPumlFile) => {
-    setSource(file.source);
-    setDiagram(parsePuml(file.source));
-    setSourceTick((tick) => tick + 1);
     setSelectedId(null);
     setExternalName(file.entry.name);
+    setExternalPath(file.entry.path);
     setModal((current) => current.open ? { open: false, dismissable: true } : current);
-  }, []);
+    void loadDocument({ file: file.entry.path });
+  }, [loadDocument]);
 
   // Ruta global única de drop. El overlay solo refleja la fase; nunca recibe eventos.
   useEffect(() => {
@@ -257,6 +294,8 @@ export default function App() {
       loadedFor.current = null;
       if (externalName) return;
       setSource(null);
+      setCombined(null);
+      setSourceFiles([]);
       setDiagram(null);
       setSelectedId(null);
       return;
@@ -264,8 +303,10 @@ export default function App() {
     const key = project.meta.name + ':' + (project.meta.pumlLoadedAt ?? '');
     if (loadedFor.current === key) return;
     loadedFor.current = key;
-    void loadSource(project.meta.name);
-  }, [project, externalName, loadSource]);
+    setExternalName(null);
+    setExternalPath(null);
+    void loadDocument({ project: project.meta.name });
+  }, [project, externalName, loadDocument]);
 
   const handleLoad = useCallback(async () => {
     if (!project || busy) return;
@@ -286,27 +327,102 @@ export default function App() {
     if (!project?.puml || busy) return;
     setBusy(true);
     try {
-      const r = await api.reloadPuml(project.meta.name);
-      if (r.ok) {
-        setProject(r.value);
-        // Re-parseo aunque los metadatos no cambien: el texto pudo cambiar en disco.
-        const ok = await loadSource(project.meta.name);
-        setStatus(
-          ok
-            ? { kind: 'success', text: t('status.reloaded') }
-            : { kind: 'error', text: t('status.reloadFailed') },
-        );
-      } else {
-        setStatus({ kind: 'error', text: r.error });
+      // El contenido manda (con !include resueltos); los metadatos se refrescan después
+      // sin disparar la carga inicial (loadedFor ya queda al día).
+      const ok = await loadDocument({ project: project.meta.name });
+      const meta = await api.reloadPuml(project.meta.name);
+      if (meta.ok) {
+        setProject(meta.value);
+        loadedFor.current = meta.value.meta.name + ':' + (meta.value.meta.pumlLoadedAt ?? '');
       }
+      setStatus(
+        ok
+          ? { kind: 'success', text: t('status.reloaded') }
+          : { kind: 'error', text: t('status.reloadFailed') },
+      );
     } finally {
       setBusy(false);
     }
-  }, [project, busy, loadSource, t]);
+  }, [project, busy, loadDocument, t]);
+
+  // T5.1: vigila la entrada + los incluidos; al cambiar, recarga silenciosa por el
+  // mismo flujo (sin busy; la vista se conserva por docKey). Al borrar, aviso sin crash.
+  const filesKey = sourceFiles.join('\n');
+  useEffect(() => {
+    if (sourceFiles.length === 0) return;
+    let cancelled = false;
+    void api.watchPumlFiles(sourceFiles).then((r) => {
+      if (!r.ok && !cancelled) setStatus({ kind: 'error', text: r.error });
+    });
+    return () => {
+      cancelled = true;
+      api.unwatchPumlFiles();
+    };
+    // filesKey estabiliza la dep: el mismo contenido no revigila.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filesKey]);
+
+  useEffect(() => api.onPumlFilesChanged((event) => {
+    if (event.kind === 'removed') {
+      setStatus({ kind: 'error', text: tRef.current('status.externalRemoved') });
+      api.unwatchPumlFiles();
+      return;
+    }
+    const scope = scopeRef.current;
+    if (!scope) return;
+    void loadDocument(scope, { silent: true }).then((ok) => {
+      if (ok) setStatus({ kind: 'success', text: tRef.current('status.externalChanged') });
+    });
+  }), [loadDocument]);
+
+  // T5.3: el sidecar se carga por documento; lo que cambie (colapsados, posiciones,
+  // vista) se guarda con debounce de ~800 ms.
+  useEffect(() => {
+    setInitialSidecar(undefined);
+    if (docKey === undefined) return;
+    const scope: PumlScope | null = project ? { project: project.meta.name } : externalPath ? { file: externalPath } : null;
+    if (scope === null) return;
+    let cancelled = false;
+    void api.loadSidecar(scope).then((r) => {
+      if (cancelled) return;
+      if (!r.ok) {
+        setInitialSidecar(null);
+        return;
+      }
+      if (r.value.corrupt) setStatus({ kind: 'info', text: tRef.current('status.sidecarCorrupt') });
+      setInitialSidecar(r.value.state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [docKey, project, externalPath]);
+
+  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>) => {
+    pendingCollapsed.current = _collapsed;
+    if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = undefined;
+      const handle = canvasRef.current;
+      const scope = scopeRef.current;
+      if (!handle || !scope) return;
+      const snap = handle.getSnapshot();
+      void api.saveSidecar(scope, {
+        version: 1,
+        collapsed: [...(pendingCollapsed.current ?? [])],
+        overrides: snap.overrides,
+        view: snap.view,
+      });
+    }, 800);
+  }, []);
+
+  useEffect(() => () => {
+    if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
+  }, []);
 
   const onProjectOpened = useCallback((p: ProjectInfo) => {
     setProject(p);
     setExternalName(null);
+    setExternalPath(null);
     setModal({ open: false, dismissable: true });
     setStatus({ kind: 'info', text: t('status.projectOpened', { name: p.meta.name }) });
   }, [t]);
@@ -342,6 +458,46 @@ export default function App() {
     if (!result.ok) setStatus({ kind: 'error', text: result.error });
     else if (result.value) setStatus({ kind: 'success', text: t('status.pngSaved', { path: result.value }) });
   }, [docName, t]);
+
+  const handleExportSvg = useCallback(async () => {
+    const handle = canvasRef.current;
+    if (!handle) return;
+    const data = handle.exportSvg();
+    if (!data) {
+      setStatus({ kind: 'error', text: t('status.noDiagramToExport') });
+      return;
+    }
+    const result = await api.saveSvg(docName + '.svg', data.svg);
+    if (!result.ok) setStatus({ kind: 'error', text: result.error });
+    else if (result.value) setStatus({ kind: 'success', text: t('status.svgSaved', { path: result.value }) });
+  }, [docName, t]);
+
+  const handleExportPdf = useCallback(async () => {
+    const handle = canvasRef.current;
+    if (!handle) return;
+    const data = handle.exportSvg();
+    if (!data) {
+      setStatus({ kind: 'error', text: t('status.noDiagramToExport') });
+      return;
+    }
+    const result = await api.savePdf(docName + '.pdf', data.svg, data.width, data.height);
+    if (!result.ok) setStatus({ kind: 'error', text: result.error });
+    else if (result.value) setStatus({ kind: 'success', text: t('status.pdfSaved', { path: result.value }) });
+  }, [docName, t]);
+
+  const handleCopyPng = useCallback(async () => {
+    const handle = canvasRef.current;
+    if (!handle) return;
+    const blob = await handle.exportPngFull({ scale: 2, theme: 'light' });
+    if (!blob) {
+      setStatus({ kind: 'error', text: t('status.noDiagramToExport') });
+      return;
+    }
+    const result = await api.writePngToClipboard(new Uint8Array(await blob.arrayBuffer()));
+    if (!result.ok) setStatus({ kind: 'error', text: result.error });
+    else setStatus({ kind: 'success', text: t('status.pngCopied') });
+  }, [t]);
+  handleCopyPngRef.current = handleCopyPng;
 
   const saveCloseSourceToProject = useCallback(async (target: ProjectInfo, text: string) => {
     const keepDisplayedDiagram = () => {
@@ -515,15 +671,22 @@ export default function App() {
         case 'export':
           void handleExport();
           break;
+        case 'export-svg':
+          void handleExportSvg();
+          break;
+        case 'export-pdf':
+          void handleExportPdf();
+          break;
+        case 'copy-png':
+          void handleCopyPng();
+          break;
       }
     };
-  }, [project, diagram, modal.open, closePromptOpen, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport, setThemeMode, setLocale, t]);
+  }, [project, diagram, modal.open, closePromptOpen, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 
   const headerName = project?.meta.name ?? externalName?.replace(/\.[^.]+$/, '') ?? null;
-  // Mismo docKey ⇒ mismo documento: una recarga conserva la vista y las posiciones manuales.
-  const docKey = externalName ? 'file:' + externalName : project ? 'project:' + project.meta.name : undefined;
 
   return (
     <div className="app">
@@ -568,6 +731,8 @@ export default function App() {
           onNewProject={handleNewProject}
           onOpenProject={handleNewProject}
           {...(docKey !== undefined ? { docKey } : {})}
+          {...(initialSidecar !== undefined ? { initialSidecar } : {})}
+          onViewStateChange={handleViewStateChange}
         >
           <LoadingIntro
             active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })}
@@ -585,7 +750,7 @@ export default function App() {
       </div>
       <IssuesPanel
         issues={diagram?.issues ?? []}
-        source={source}
+        source={combined}
         open={issuesOpen}
         onToggle={() => setIssuesOpen((v) => !v)}
       />

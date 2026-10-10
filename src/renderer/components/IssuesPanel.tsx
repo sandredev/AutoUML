@@ -34,10 +34,14 @@ export function IssuesPanel({ issues, source, open, onToggle }: Props): JSX.Elem
       {open && (
         <ul className="issues-list">
           {issues.map((issue, idx) => {
-            const text = lineAt(source, issue.line);
+            // El snippet sale del texto combinado (misma numeración que combinedLine);
+            // L{line} + archivo son el origen real (tras !include).
+            const text = lineAt(source, issue.combinedLine ?? issue.line);
+            const base = issue.file?.split(/[/\\]/).pop();
             return (
               <li key={`${issue.line}-${idx}`} className={`issue ${issue.severity}`}>
                 <span className="issue-line">L{issue.line}</span>
+                {base && <span className="issue-file">{base}</span>}
                 <span className={`issue-sev ${issue.severity}`}>{issue.severity === 'error' ? t('issues.error') : t('issues.warning')}</span>
                 <span className="issue-msg">{issue.message}</span>
                 {text.trim().length > 0 && (

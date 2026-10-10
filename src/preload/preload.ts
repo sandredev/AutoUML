@@ -1,6 +1,6 @@
 // Puente seguro. Solo importa 'electron' y TIPOS, porque el preload corre en sandbox.
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
-import type { AutoUmlApi, CloseDecision, IpcChannel, MenuAction, MenuCommand, MenuState } from '../shared/ipc';
+import type { AutoUmlApi, CloseDecision, IpcChannel, MenuAction, MenuCommand, MenuState, PumlFilesChanged, PumlScope, SidecarState } from '../shared/ipc';
 import type { HistoryApi } from '../shared/history';
 
 function invoke<T>(channel: IpcChannel, ...args: unknown[]): Promise<T> {
@@ -43,6 +43,24 @@ const api: AutoUmlApi = {
   loadPuml: (name) => invoke('puml:load', name),
   savePumlToProject: (name, source) => invoke('puml:save-to-project', name, source),
   reloadPuml: (name) => invoke('puml:reload', name),
+  loadSource: (scope: PumlScope) => invoke('puml:load-source', scope),
+  watchPumlFiles: (files: string[]) => invoke('puml:watch', files),
+  unwatchPumlFiles: () => {
+    ipcRenderer.send('puml:unwatch' as IpcChannel);
+  },
+  onPumlFilesChanged: (callback: (event: PumlFilesChanged) => void) => {
+    const channel: IpcChannel = 'puml:files-changed';
+    const listener = (_e: IpcRendererEvent, event: PumlFilesChanged) => callback(event);
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+    };
+  },
+  loadSidecar: (scope: PumlScope) => invoke('sidecar:load', scope),
+  saveSidecar: (scope: PumlScope, state: SidecarState) => invoke('sidecar:save', scope, state),
+  saveSvg: (fileName, svg) => invoke('export:save-svg', fileName, svg),
+  savePdf: (fileName, svg, widthPx, heightPx) => invoke('export:save-pdf', fileName, svg, widthPx, heightPx),
+  writePngToClipboard: (bytes) => invoke('clipboard:write-png', bytes),
   savePng: (fileName, bytes) => invoke('export:save-png', fileName, bytes),
   updateMenuState: (state: MenuState) => {
     const channel: IpcChannel = 'menu:update-state';

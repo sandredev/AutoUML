@@ -9,11 +9,12 @@ import { collapsedOwner, isPackageNode, packageNodeName } from '../layout/aggreg
 import { applySkin, skinKey } from '../style/skin';
 import type { CardDisplay } from '../style/contract';
 import type { LayoutResult, ViewState } from '../types';
-import { drawDiagram, type Theme } from './draw';
+import { diagramToSvg, type SvgCardContent } from '../svg';
+import { drawDiagram, LIGHT_THEME, type Theme } from './draw';
 import { collapsePackages, hitTestPackageHeader } from './collapse';
 import { hitTestEdge } from './edgeHit';
 import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './minimap';
-import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, retainOverrides, type Overrides } from './overrides';
+import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
 import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
 
@@ -23,6 +24,12 @@ export interface DiagramCanvasHandle {
   fit(): void;
   focusNode(id: string): void;
   exportPng(): Promise<Blob | null>;
+  /** PNG con escala/tema/fondo configurables (T5: tema claro por defecto). */
+  exportPngFull(opts?: { scale?: 1 | 2 | 4; theme?: 'app' | 'light'; transparent?: boolean }): Promise<Blob | null>;
+  /** SVG vectorial del diagrama visible (tema claro), con su tamaño en px. */
+  exportSvg(): { svg: string; width: number; height: number } | null;
+  /** Vista y posiciones manuales actuales (para persistir el sidecar). */
+  getSnapshot(): { view: ViewState; overrides: Record<string, { dx: number; dy: number }> };
   /** Devuelve las tarjetas movidas a mano a la posición que calculó el layout. */
   resetPositions(): void;
   /** true si hay alguna tarjeta movida a mano. */
@@ -64,6 +71,10 @@ interface Props {
   /** Reglas de hide/skinparam para dibujar las tarjetas (las mismas con que se midieron). */
   display?: CardDisplay | undefined;
   labels?: ViewerLabels;
+  /** Posiciones manuales iniciales del sidecar (se aplican una vez por documento). */
+  initialOverrides?: Record<string, { dx: number; dy: number }>;
+  /** Vista inicial del sidecar (si hay, no se encuadra al abrir). */
+  initialView?: ViewState | null;
 }
 
 type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | null;
@@ -82,6 +93,27 @@ const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
 function errorText(err: unknown): string {
   if (err instanceof Error) return err.message || err.name;
   return String(err);
+}
+
+/** Contenido textual de las tarjetas para el export SVG (nombre + miembros). */
+function svgCardsOf(model: DiagramModel): Map<string, SvgCardContent> {
+  const out = new Map<string, SvgCardContent>();
+  for (const t of model.types) {
+    const members: string[] = [];
+    for (const a of t.attributes) members.push(`${a.visibility} ${a.name}: ${a.type}${a.isStatic ? ' {static}' : ''}`);
+    for (const m of t.methods) {
+      const params = m.parameters.map((p) => `${p.name}: ${p.type}`).join(', ');
+      const extra = m.parametersAbbreviated !== undefined ? `, …${m.parametersAbbreviated}` : '';
+      members.push(`${m.visibility} ${m.name}(${params}${extra}): ${m.returnType}${m.isStatic ? ' {static}' : ''}${m.isAbstract ? ' {abstract}' : ''}`);
+    }
+    for (const c of t.constructors) {
+      const params = c.parameters.map((p) => `${p.name}: ${p.type}`).join(', ');
+      members.push(`${c.visibility} ${c.name}(${params})`);
+    }
+    for (const e of t.enumConstants) members.push(e);
+    out.set(t.id, { name: t.name, members });
+  }
+  return out;
 }
 
 function readTheme(el: HTMLElement): Theme {
@@ -119,7 +151,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   {
     model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
-    labels = DEFAULT_LABELS,
+    labels = DEFAULT_LABELS, initialOverrides, initialView,
   },
   ref,
 ) {
@@ -161,6 +193,20 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     setTracked({ modelKey, docKey });
     const ids = layout.nodes.map((n) => n.id);
     setOverrides((prev) => (sameDoc ? retainOverrides(prev, ids) : EMPTY_OVERRIDES));
+  }
+
+  // Iniciales del sidecar: se aplican una vez por documento (aunque lleguen tarde por la
+  // carga asíncrona). Ganan al vacío/retain del bloque anterior porque van después.
+  const initialsFor = useRef<string | undefined>(undefined);
+  const fittedFor = useRef<string | undefined>(undefined);
+  if (docKey !== undefined && initialsFor.current !== docKey && (initialOverrides !== undefined || initialView !== undefined)) {
+    initialsFor.current = docKey;
+    if (initialOverrides !== undefined) setOverrides(overridesFromRecord(initialOverrides));
+    if (initialView !== undefined && initialView !== null) {
+      viewRef.current = { ...initialView };
+      autoFitRef.current = false;
+      fittedFor.current = docKey;
+    }
   }
 
   const movedLayout = useMemo(() => applyOverrides(layout, overrides), [layout, overrides]);
@@ -336,40 +382,60 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         });
       },
       exportPng: async () => {
-        const wrap = wrapRef.current;
+        const canvas = renderOffscreen(2, 'app', false);
+        if (!canvas) return null;
+        return new Promise<Blob | null>((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'));
+      },
+      exportPngFull: async (opts) => {
+        const canvas = renderOffscreen(opts?.scale ?? 2, opts?.theme ?? 'light', opts?.transparent ?? false);
+        if (!canvas) return null;
+        return new Promise<Blob | null>((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'));
+      },
+      exportSvg: () => {
         const L = latest.current;
         const b = L.layout.bounds;
-        if (!wrap || b.w <= 0 || b.h <= 0) return null;
-        const pad = 32;
-        const worldW = b.w + 2 * pad;
-        const worldH = b.h + 2 * pad;
-        const scale = Math.min(2, MAX_EXPORT_SIDE / worldW, MAX_EXPORT_SIDE / worldH);
-        const off = document.createElement('canvas');
-        off.width = Math.max(1, Math.floor(worldW * scale));
-        off.height = Math.max(1, Math.floor(worldH * scale));
-        const ctx = off.getContext('2d');
-        if (!ctx) return null;
-        drawDiagram(ctx, {
-          model: L.model,
-          layout: L.layout,
-          index: L.index,
-          view: { scale, tx: (pad - b.x) * scale, ty: (pad - b.y) * scale },
-          viewW: off.width,
-          viewH: off.height,
-          dpr: 1,
-          selectedId: null,
-          theme: themeOf(wrap),
-          display: L.display,
-          labels: L.labels,
-          packageCounts: L.packageCounts,
-        });
-        return new Promise<Blob | null>((resolve) => off.toBlob((blob) => resolve(blob), 'image/png'));
+        if (b.w <= 0 || b.h <= 0) return null;
+        return diagramToSvg(L.layout, { cards: svgCardsOf(L.model) });
       },
+      getSnapshot: () => ({ view: { ...viewRef.current }, overrides: overridesToRecord(latest.current.overrides) }),
       resetPositions: () => setOverrides(EMPTY_OVERRIDES),
       hasManualPositions: () => hasOverrides(latest.current.overrides),
     }),
     [zoomBy, fit, focusNodeInView, updateCollapsed, themeOf],
   );
+
+  /** Pinta el diagrama visible en un canvas fuera de pantalla (exportación). */
+  function renderOffscreen(scale: number, theme: 'app' | 'light', transparent: boolean): HTMLCanvasElement | null {
+    const wrap = wrapRef.current;
+    const L = latest.current;
+    const b = L.layout.bounds;
+    if (!wrap || b.w <= 0 || b.h <= 0) return null;
+    const pad = 32;
+    const worldW = b.w + 2 * pad;
+    const worldH = b.h + 2 * pad;
+    const clamped = Math.min(scale, MAX_EXPORT_SIDE / worldW, MAX_EXPORT_SIDE / worldH);
+    const off = document.createElement('canvas');
+    off.width = Math.max(1, Math.floor(worldW * clamped));
+    off.height = Math.max(1, Math.floor(worldH * clamped));
+    const ctx = off.getContext('2d');
+    if (!ctx) return null;
+    drawDiagram(ctx, {
+      model: L.model,
+      layout: L.layout,
+      index: L.index,
+      view: { scale: clamped, tx: (pad - b.x) * clamped, ty: (pad - b.y) * clamped },
+      viewW: off.width,
+      viewH: off.height,
+      dpr: 1,
+      selectedId: null,
+      theme: theme === 'light' ? LIGHT_THEME : themeOf(wrap),
+      transparent,
+      display: L.display,
+      labels: L.labels,
+      packageCounts: L.packageCounts,
+    });
+    return off;
+  }
 
   // Tamaño del contenedor.
   useEffect(() => {
@@ -399,8 +465,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   // Documento nuevo ⇒ encuadrar. Con docKey, recargar el mismo documento conserva la vista;
   // sin docKey cuenta cada modelo nuevo. Ni mover tarjetas ni el refinado dagre→ELK reencuadran.
+  // Con vista inicial del sidecar no se encuadra (ya hay una vista guardada).
   const fitKey = docKey ?? modelKey;
   useEffect(() => {
+    if (typeof fitKey === 'string' && fittedFor.current === fitKey) return;
     fit();
   }, [fitKey, fit]);
 

@@ -55,7 +55,37 @@ export interface DrawArgs {
   labels?: ViewerLabels;
   /** Paquete plegado → número de entidades. */
   packageCounts?: ReadonlyMap<string, number> | undefined;
+  /** Sin relleno de fondo (exportación con transparencia). */
+  transparent?: boolean;
 }
+
+/** Tema claro fijo para exportar (mismos valores que los fallbacks de readTheme). */
+export const LIGHT_THEME: Theme = {
+  bg: '#ffffff',
+  fg: '#1f2328',
+  muted: '#656d76',
+  border: '#d0d7de',
+  accent: '#0969da',
+  cat: {
+    sealed: '#57606a',
+    abstract: '#57606a',
+    interface: '#57606a',
+    enum: '#57606a',
+    record: '#57606a',
+    annotation: '#57606a',
+    class: '#57606a',
+    external: '#57606a',
+    undeclared: '#57606a',
+  },
+  card: '#F1F1F1',
+  cardBorder: '#181818',
+  cardFg: '#000000',
+  edge: '#181818',
+  pkg: '#555b62',
+  noteBg: '#FEFECE',
+  noteBorder: '#181818',
+  noteFg: '#000000',
+};
 
 export const LOD_BOXES = 0.15;
 export const LOD_MEMBERS = 0.5;
@@ -162,8 +192,12 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   const px = 1 / s;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalAlpha = 1;
-  ctx.fillStyle = theme.bg;
-  ctx.fillRect(0, 0, viewW, viewH);
+  if (!a.transparent) {
+    ctx.fillStyle = theme.bg;
+    ctx.fillRect(0, 0, viewW, viewH);
+  } else {
+    ctx.clearRect(0, 0, viewW, viewH);
+  }
   ctx.setTransform(dpr * s, 0, 0, dpr * s, dpr * view.tx, dpr * view.ty);
   const r = visibleWorldRect(view, viewW, viewH);
   const rx1 = r.x + r.w, ry1 = r.y + r.h;

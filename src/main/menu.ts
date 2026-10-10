@@ -16,6 +16,9 @@ interface MenuCopy {
   loadPuml: string;
   reload: string;
   exportPng: string;
+  exportSvg: string;
+  exportPdf: string;
+  copyPng: string;
   quit: string;
   replacePuml: string;
   copyProjectName: string;
@@ -48,6 +51,9 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     loadPuml: 'Cargar PUML…',
     reload: 'Recargar',
     exportPng: 'Exportar PNG…',
+    exportSvg: 'Exportar SVG…',
+    exportPdf: 'Exportar PDF…',
+    copyPng: 'Copiar PNG',
     quit: 'Salir',
     replacePuml: 'Reemplazar PUML…',
     copyProjectName: 'Copiar nombre del proyecto',
@@ -78,6 +84,9 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     loadPuml: 'Load PUML…',
     reload: 'Reload',
     exportPng: 'Export PNG…',
+    exportSvg: 'Export SVG…',
+    exportPdf: 'Export PDF…',
+    copyPng: 'Copy PNG',
     quit: 'Quit',
     replacePuml: 'Replace PUML…',
     copyProjectName: 'Copy project name',
@@ -155,6 +164,9 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
         { label: labels.loadPuml, accelerator: 'CmdOrCtrl+O', enabled: state.projectOpen, click: send('load-puml') },
         { label: labels.reload, accelerator: 'CmdOrCtrl+R', enabled: state.hasPuml, click: send('reload-puml') },
         { label: labels.exportPng, accelerator: 'CmdOrCtrl+E', enabled: state.hasPuml, click: send('export') },
+        { label: labels.exportSvg, accelerator: 'CmdOrCtrl+Shift+E', enabled: state.hasPuml, click: send('export-svg') },
+        { label: labels.exportPdf, accelerator: 'CmdOrCtrl+Shift+P', enabled: state.hasPuml, click: send('export-pdf') },
+        { label: labels.copyPng, accelerator: 'CmdOrCtrl+Shift+C', enabled: state.hasPuml, click: send('copy-png') },
         { type: 'separator' },
         { label: labels.quit, role: 'quit' },
       ],
