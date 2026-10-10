@@ -4,6 +4,7 @@ import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api';
 import type { DiagramModel, RelType } from '../../core/model';
 import type { EdgePath, LayoutOptions, LayoutResult, NodeBox, PackageBox } from '../types';
 import { computeLayout, measureNode } from './layout';
+import { selfLoopPoints } from './selfLoop';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { withElkEnv } from './elkEnv';
 
@@ -72,11 +73,16 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
   }
   for (const t of model.types) if (!pkgOf.has(t.id)) { const n = leaf.get(t.id); if (n) rootChildren.push(n); }
 
-  // Herencia: se invierte (padre → hijo) para que el padre quede arriba en TB.
+  // Herencia: se invierte (padre → hijo) para que el padre quede antes (arriba en TB, a la izquierda en LR).
   const edges: ElkExtendedEdge[] = [];
-  const meta = new Map<string, { reversed: boolean; rel: DiagramModel['relationships'][number] }>();
+  const meta = new Map<string, { reversed: boolean; rel: DiagramModel['relationships'][number]; idx: number }>();
+  const selfPending: number[] = [];
   model.relationships.forEach((r, i) => {
-    if (!typeIds.has(r.source) || !typeIds.has(r.target) || r.source === r.target) return;
+    if (!typeIds.has(r.source) || !typeIds.has(r.target)) return;
+    if (r.source === r.target) {
+      selfPending.push(i);
+      return;
+    }
     const reversed = isHierarchy(r.type);
     edges.push({
       id: 'e' + i,
@@ -84,14 +90,14 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
       targets: [reversed ? r.source : r.target],
       layoutOptions: edgeOptions(reversed),
     });
-    meta.set('e' + i, { reversed, rel: r });
+    meta.set('e' + i, { reversed, rel: r, idx: i });
   });
 
   const graph: ElkNode = {
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
-      'elk.direction': 'DOWN',
+      'elk.direction': model.direction === 'LR' ? 'RIGHT' : 'DOWN',
       'elk.edgeRouting': 'ORTHOGONAL',
       // Coordenadas de aristas absolutas: con INCLUDE_CHILDREN, ELK mueve las aristas internas a su paquete
       // y por defecto devolvería sus puntos relativos a ese contenedor (aristas desplazadas).
@@ -167,10 +173,27 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
     }
     if (pts.length < 4) return;
     const points = m.reversed ? reversePoints(pts) : pts;
-    const ep: EdgePath = { source: m.rel.source, target: m.rel.target, type: m.rel.type, points, routing: 'orthogonal' };
+    const ep: EdgePath = { source: m.rel.source, target: m.rel.target, type: m.rel.type, points, routing: 'orthogonal', rel: m.idx };
     if (m.rel.label !== undefined) ep.label = m.rel.label;
     outEdges.push(ep);
   });
+
+  // Bucles (misma geometría que dagre): ELK no los rutea, se dibujan en la esquina superior derecha.
+  const boxById = new Map(nodes.map((n) => [n.id, n] as const));
+  const loops = new Map<string, number>();
+  for (const idx of selfPending) {
+    const r = model.relationships[idx];
+    const b = r ? boxById.get(r.source) : undefined;
+    if (!r || !b) continue;
+    const k = loops.get(b.id) ?? 0;
+    loops.set(b.id, k + 1);
+    const ep: EdgePath = {
+      source: r.source, target: r.target, type: r.type,
+      points: selfLoopPoints(b, k), routing: 'orthogonal', rel: idx, self: true,
+    };
+    if (r.label !== undefined) ep.label = r.label;
+    outEdges.push(ep);
+  }
 
   return { nodes, edges: outEdges, packages, bounds: computeBounds(nodes, packages, outEdges) };
 }

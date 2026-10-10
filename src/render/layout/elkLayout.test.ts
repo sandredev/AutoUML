@@ -42,6 +42,20 @@ describe('computeElkLayout', () => {
       expect(e.points.every(Number.isFinite)).toBe(true);
     }
   });
+
+  it('bucle de una clase consigo misma: ortogonal con rel/self', async () => {
+    const m = model();
+    m.types.push(t('C'));
+    m.relationships.push({ source: 'C', target: 'C', type: 'ASSOCIATION', line: 3 });
+    const r = await computeElkLayout(m);
+    const loop = r.edges.find((e) => e.source === 'C' && e.target === 'C');
+    expect(loop).toBeTruthy();
+    expect(loop?.routing).toBe('orthogonal');
+    expect(loop?.self).toBe(true);
+    expect(loop?.rel).toBe(2);
+    expect(loop?.points.length).toBeGreaterThanOrEqual(8);
+    expect(loop?.points.every(Number.isFinite)).toBe(true);
+  });
 });
 
 describe('runLayoutWithFallback', () => {
