@@ -97,6 +97,34 @@ El empaquetado de Windows suele ser más sencillo al ejecutar `npm run dist` en 
 
 Los paquetes usan ASAR; Vite genera el worker de layout como bundle clásico para el renderer empaquetado.
 
+## Estructura del proyecto
+
+El código sigue Clean Architecture: las dependencias apuntan siempre hacia adentro
+(`presentation` / `infrastructure` → `application` → `domain`). `tests/architecture/layers.test.ts`
+lo verifica automáticamente.
+
+```text
+src/
+  domain/          Modelo UML y reglas puras (sin Electron, DOM ni fs)
+    diagram/       model, classify, skinparam
+    rules/         validation (nombres, extensiones .puml), themes
+  application/     Casos de uso puros y contratos
+    puml/          parser, include, validate (texto .puml → DiagramModel)
+    ports/         ipc, history: contrato entre la UI y el proceso principal
+  infrastructure/  Electron y Node
+    main/          arranque, menú, cierre, handlers IPC
+    preload/       puente seguro (window.autouml)
+    storage/       proyectos, historial, sidecar
+    filesystem/    lectura de .puml con includes, watcher
+  presentation/    Interfaz React
+    app/           App, main, index.html, estilos
+    components/    paneles, diálogos, iconos
+    diagram/       motor del visor: layout (dagre/ELK), canvas, SVG
+    localization/  textos es/en y selección de idioma (internacionalización)
+tests/             espejo de src/ por capa, más fixtures/ y helpers/
+public/            archivos estáticos que Vite copia tal cual (favicon)
+```
+
 ## Almacenamiento de proyectos
 
 En desarrollo, los proyectos se guardan dentro de la carpeta `userData` de Electron. En una aplicación empaquetada, AutoUML intenta crear `projects/` junto al ejecutable (o junto al AppImage). Si no puede escribir allí, usa `userData/projects` y presenta un aviso. Cada proyecto contiene `project.json` y, si tiene diagrama, `diagram.puml`.

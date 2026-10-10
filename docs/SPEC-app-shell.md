@@ -63,7 +63,7 @@ Vitest para stores/servicios puros; Playwright e2e smoke: arranca, abre ventana,
 
 ## Temas (apariencia)
 
-- Registro único en `src/shared/themes.ts` (`THEME_IDS`, `THEME_MODES`, `THEME_SCHEME`, `isThemeMode`). Main lo usa para validar `MenuState.themeMode` y construir el menú Configuración → Tema; el renderer, para Ajustes y `useTheme`.
+- Registro único en `src/domain/rules/themes.ts` (`THEME_IDS`, `THEME_MODES`, `THEME_SCHEME`, `isThemeMode`). Main lo usa para validar `MenuState.themeMode` y construir el menú Configuración → Tema; el renderer, para Ajustes y `useTheme`.
 - Modos: `system` (se resuelve a `light`/`dark` según el SO) + `light`, `dark`, `midnight`, `ember`, `sunrise`, `contrast`. Paleta derivada del icono: naranja `#FF5F3C`, azul noche `#1E2033`, amarillo `#F5D33B`.
-- `useTheme` fija siempre `data-theme` con el tema ya resuelto y `color-scheme` según `THEME_SCHEME`. Los colores viven en `src/renderer/theme.css` (variables `--bg`, `--accent`, `--hover`, `--uml-*`, …); el lienzo del diagrama las lee por `getComputedStyle` y se repinta al cambiar `data-theme`.
+- `useTheme` fija siempre `data-theme` con el tema ya resuelto y `color-scheme` según `THEME_SCHEME`. Los colores viven en `src/presentation/app/theme.css` (variables `--bg`, `--accent`, `--hover`, `--uml-*`, …); el lienzo del diagrama las lee por `getComputedStyle` y se repinta al cambiar `data-theme`.
 - Añadir un tema = una entrada en `THEME_IDS` y `THEME_SCHEME`, un bloque en `theme.css`, `themeSwatches` (useTheme), claves `settings.theme*` en `catalog.ts` y etiqueta en `menu.ts`.

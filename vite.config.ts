@@ -4,14 +4,15 @@ import { defineConfig } from 'vite';
 // Se usa el JSX automático de esbuild en lugar de @vitejs/plugin-react porque ese plugin
 // inyecta un script inline en desarrollo, y la CSP lo bloquearía.
 export default defineConfig({
-  root: 'src/renderer',
+  root: 'src/presentation/app',
+  publicDir: '../../../public',
   base: './',
   esbuild: { jsx: 'automatic' },
   server: { host: '127.0.0.1', port: 5173, strictPort: true },
   // El bundle clásico evita la carga de module workers desde file:// en Electron.
   worker: { format: 'iife' },
   build: {
-    outDir: '../../dist/renderer',
+    outDir: '../../../dist/renderer',
     emptyOutDir: true,
     target: 'chrome120',
   },

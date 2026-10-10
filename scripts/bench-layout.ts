@@ -1,7 +1,7 @@
 // Benchmark: npx tsx scripts/bench-layout.ts — primer layout (dagre) y ELK para 50/200/500 clases.
-import type { DiagramModel, TypeNode } from '../src/core/model';
-import { computeLayout } from '../src/render/layout/layout';
-import { computeElkLayout } from '../src/render/layout/elkLayout';
+import type { DiagramModel, TypeNode } from '../src/domain/diagram/model';
+import { computeLayout } from '../src/presentation/diagram/layout/layout';
+import { computeElkLayout } from '../src/presentation/diagram/layout/elkLayout';
 
 function synth(n: number): DiagramModel {
   const types: TypeNode[] = Array.from({ length: n }, (_, i) => ({
