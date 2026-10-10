@@ -86,6 +86,15 @@ describe('computeLayout', () => {
     expect(by('I').y + by('I').h).toBeLessThanOrEqual(by('Hijo').y);
   });
 
+  it("en LR el padre queda a la izquierda del hijo", () => {
+    const m = model([type('Hijo'), type('Padre', 'x.dom', 'abstract')],
+      [rel('Hijo', 'Padre', 'EXTENDS')]);
+    m.direction = 'LR';
+    const L = computeLayout(m);
+    const by = (id: string) => L.nodes.find((n) => n.id === id)!;
+    expect(by('Padre').x + by('Padre').w).toBeLessThanOrEqual(by('Hijo').x);
+  });
+
   it('sin solapes, puntos finitos y el último toca al destino', () => {
     const L = computeLayout(sample());
     for (let i = 0; i < L.nodes.length; i++) {

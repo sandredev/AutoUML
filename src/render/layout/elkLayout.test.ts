@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DiagramModel, TypeNode } from '../../core/model';
-import type { LayoutResult } from '../types';
-import { computeElkLayout, runLayoutWithFallback } from './elkLayout';
+import type { DiagramModel, RelationshipModel, TypeNode } from '../../core/model';
+import { computeElkLayout, layeringOf, runLayoutWithFallback } from './elkLayout';
 
 function t(id: string, declaredKind: TypeNode['declaredKind'] = 'class'): TypeNode {
   return {
@@ -68,13 +67,50 @@ describe('runLayoutWithFallback', () => {
     expect(r.result.nodes.length).toBe(3);
   });
 
-  it('timeout de ELK también cae a dagre', async () => {
-    const r = await runLayoutWithFallback(model(), undefined, {
-      elk: () => new Promise<LayoutResult>(() => undefined),
-      timeoutMs: 20,
-    });
-    expect(r.engine).toBe('dagre');
-    expect(r.fallback).toContain('20');
+  it('timeoutMs ya no tiene efecto (el timeout vive en useLayout)', async () => {
+    // runLayoutWithFallback solo cae a dagre ante ERRORES; si ELK cuelga, es useLayout
+    // quien lo mata con worker.terminate(). Este test fija que un ELK que resuelve
+    // se usa aunque se pase el antiguo timeoutMs.
+    const r = await runLayoutWithFallback(model(), undefined, { timeoutMs: 1 });
+    expect(r.engine).toBe('elk');
+    expect(r.fallback).toBeUndefined();
+  });
+});
+
+describe('layeringOf', () => {
+  const rel = (over: Partial<RelationshipModel> = {}): RelationshipModel => ({
+    source: 'A', target: 'B', type: 'ASSOCIATION', line: 1, ...over,
+  });
+  it('herencia sin hint: padre antes que hijo, fuerte', () => {
+    expect(layeringOf(rel({ type: 'EXTENDS' }), 'TB')).toEqual({ reversed: true, strong: true });
+    expect(layeringOf(rel({ type: 'IMPLEMENTS' }), 'LR')).toEqual({ reversed: true, strong: true });
+  });
+  it('hint en el eje manda sobre el tipo', () => {
+    expect(layeringOf(rel({ hint: 'down' }), 'TB')).toEqual({ reversed: false, strong: true });
+    expect(layeringOf(rel({ hint: 'up' }), 'TB')).toEqual({ reversed: true, strong: true });
+    expect(layeringOf(rel({ type: 'EXTENDS', hint: 'down' }), 'TB')).toEqual({ reversed: false, strong: true });
+    expect(layeringOf(rel({ hint: 'right' }), 'LR')).toEqual({ reversed: false, strong: true });
+    expect(layeringOf(rel({ hint: 'left' }), 'LR')).toEqual({ reversed: true, strong: true });
+  });
+  it('hint perpendicular se ignora (débil según tipo)', () => {
+    expect(layeringOf(rel({ hint: 'left' }), 'TB')).toEqual({ reversed: false, strong: false });
+    expect(layeringOf(rel({ type: 'EXTENDS', hint: 'left' }), 'TB')).toEqual({ reversed: true, strong: true });
+    expect(layeringOf(rel({ hint: 'up' }), 'LR')).toEqual({ reversed: false, strong: false });
+  });
+  it('sin hint ni herencia: débil sin invertir', () => {
+    expect(layeringOf(rel(), 'TB')).toEqual({ reversed: false, strong: false });
+  });
+});
+
+describe('computeElkLayout con direction', () => {
+  it("en LR el padre queda a la izquierda del hijo", async () => {
+    const m = model();
+    m.direction = 'LR';
+    const r = await computeElkLayout(m);
+    const p = r.nodes.find((n) => n.id === 'Padre');
+    const h = r.nodes.find((n) => n.id === 'Hijo');
+    expect(p && h).toBeTruthy();
+    expect((p?.x ?? 0) + (p?.w ?? 0)).toBeLessThanOrEqual(h?.x ?? 0);
   });
 });
 

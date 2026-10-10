@@ -17,6 +17,16 @@ en verde por tanda.
 - `systematic-debugging` en `.agents/skills/systematic-debugging`
 
 ## Última tarea hecha
+- 2026-10-10 — T3 Rendimiento y dirección ejecutada en rama `feature/t3` (commiteada, PR a `develop` pendiente):
+  `elkLayout.ts` (layeringOf/hint, ELK_FAST_NODES, sin timeout dentro), `layout.worker.ts`
+  (motor por petición), `useLayout.ts` (timeout real con terminate + progresivo dagre→ELK),
+  barra motor/ms en `PumlViewer`, fit/overrides por `layoutModel` en `DiagramCanvas`,
+  `bench-layout.ts` (50: 25/189 ms, 200: 42/432 ms, 500: 165/1432 ms dagre/ELK),
+  tests: layeringOf + direction LR en ambos motores. Verificado: 126/126 tests,
+  typecheck limpio, build verde.
+- 2026-10-10 — T2 fusionada en `develop` (merge `a097812`, push a origin) y rama
+  `feature/t3` creada sobre `develop`. Verificado en `develop`: 120/120 tests,
+  typecheck limpio.
 - 2026-10-10 — T2 tests mínimos (2 nuevos): `edgePath.test.ts` (firstSegment) y
   bucle ELK en `elkLayout.test.ts` (ortogonal, rel/self). Verificado: typecheck
   limpio, 120/120 tests, build verde.
@@ -39,13 +49,13 @@ en verde por tanda.
   reescrito y tests T1 en `parser.test.ts`.
 
 ## Tareas pendientes (reparto final: EJECUTO yo en el repo; DISEÑA el otro modelo y me pasa diffs)
-- [x] [EJECUTO] T2 Dibujo y medida de tarjetas (`src/render`) — COMMIT en rama `feature/t2` (120/120 tests, build verde).
+- [x] [EJECUTO] T2 Dibujo y medida de tarjetas (`src/render`) — FUSIONADA en `develop` (merge `a097812`, 120/120 tests, build verde).
   Cabezas por extremo (sourceHead/targetHead) + `firstSegment`; multiplicidades y
   etiqueta central con fondo; bucles self-relación en ELK; unificar medida con
   `makeMeasurer()` + `FONTS` y deduplicar (`memberRows`, `fmtParams`, `iconFor` vs
   `badgeOf`); colores por clase; anidamiento `+--` y estilos de arista.
   Skills: `plantuml`, `systematic-debugging`.
-- [ ] [EJECUTO] T3 Rendimiento y dirección del layout (retenida: bug sutil, la hago yo).
+- [ ] [EJECUTO] T3 Rendimiento y dirección del layout (retenida: bug sutil, la hago yo) — EJECUTADA en rama `feature/t3` (commiteada, PR a `develop` pendiente).
   Timeout real con `worker.terminate()` desde el hilo principal (ELK bloquea el Worker,
   el timeout NO puede vivir dentro); layout progresivo (dagre rápido primero, ELK
   después); `direction` TB/LR en ambos motores; `hint` por arista; barra con motor

@@ -1,90 +1,167 @@
-// src/render/layout/useLayout.ts — calcula el layout en un Worker (ELK con respaldo dagre).
+// src/render/layout/useLayout.ts — layout en Workers con timeout real y layout progresivo.
+// - Worker "elk": puede bloquearse; si vence ELK_TIMEOUT_MS se hace terminate() y se recrea.
+// - Worker "dagre": rápido; da el primer layout en grafos grandes y sirve de respaldo.
 import { useEffect, useRef, useState } from 'react';
 import type { DiagramModel } from '../../core/model';
 import type { LayoutOptions, LayoutResult } from '../types';
-import type { LayoutRequest, LayoutResponse } from './layout.worker';
-// `?worker` hace que Vite empaquete el worker con worker.format (iife), en dev y en build.
+import type { EngineRequest, LayoutRequest, LayoutResponse } from './layout.worker';
 import LayoutWorker from './layout.worker?worker';
+
+/** Tiempo máximo de ELK antes de matar su Worker y quedarse con dagre. */
+export const ELK_TIMEOUT_MS = 4000;
+/** A partir de este número de tipos se muestra primero dagre y ELK refina en segundo plano. */
+export const PROGRESSIVE_MIN_NODES = 150;
 
 export interface LayoutState {
   layout: LayoutResult | null;
-  /** Modelo para el que se calculó `layout` (durante un recálculo se conserva el layout anterior). */
   layoutModel: DiagramModel | null;
   loading: boolean;
+  /** true mientras ELK refina un layout dagre ya visible. */
+  refining: boolean;
   error: string | null;
   engine?: 'elk' | 'dagre';
   fallback?: string;
+  /** Tiempo desde la petición hasta este layout, medido en el hilo principal. */
   ms?: number;
 }
 
-/**
- * @param layoutVersion cambiarlo fuerza un recálculo aunque el modelo y las opciones sean iguales
- * (lo usa "Restablecer").
- */
+interface Pending {
+  id: number;
+  model: DiagramModel;
+  opts: LayoutOptions;
+  t0: number;
+  timer?: ReturnType<typeof setTimeout>;
+  elkRunning: boolean;
+  elkDone: boolean;
+  dagreSent: boolean;
+  dagreDone: boolean;
+  fallback?: string;
+}
+
+const EMPTY: LayoutState = { layout: null, layoutModel: null, loading: false, refining: false, error: null };
+
 export function useLayout(model: DiagramModel | null, opts?: LayoutOptions, layoutVersion = 0): LayoutState {
-  const [state, setState] = useState<LayoutState>({ layout: null, layoutModel: null, loading: false, error: null });
-  // Modelo de cada petición, para saber a qué modelo pertenece la respuesta.
-  const modelByReq = useRef(new Map<number, DiagramModel>());
-  const workerRef = useRef<Worker | null>(null);
+  const [state, setState] = useState<LayoutState>(EMPTY);
+  const elkRef = useRef<Worker | null>(null);
+  const dagreRef = useRef<Worker | null>(null);
+  const cur = useRef<Pending | null>(null);
   const reqId = useRef(0);
   const summary = opts?.summary;
   const rankSep = opts?.rankSep;
   const nodeSep = opts?.nodeSep;
 
-  useEffect(() => {
-    let w: Worker;
-    try {
-      w = new LayoutWorker();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setState({ layout: null, layoutModel: null, loading: false, error: 'No se pudo iniciar el Worker de layout: ' + msg });
-      return;
-    }
-    workerRef.current = w;
-    w.onmessage = (e: MessageEvent<LayoutResponse>) => {
-      const d = e.data;
-      const forModel = modelByReq.current.get(d.id) ?? null;
-      modelByReq.current.delete(d.id);
-      if (d.id !== reqId.current) return; // respuesta obsoleta
-      if (!d.ok) {
-        setState({ layout: null, layoutModel: null, loading: false, error: d.error });
-        return;
+  // Las funciones viven en una ref para que los handlers de los Workers vean siempre la última versión.
+  const api = useRef({
+    send(kind: 'elk' | 'dagre', p: Pending): void {
+      const w = kind === 'elk' ? elkRef.current : dagreRef.current;
+      if (!w) return;
+      const engine: EngineRequest = kind;
+      const req: LayoutRequest = { id: p.id, model: p.model, opts: p.opts, engine };
+      w.postMessage(req);
+      if (kind === 'dagre') p.dagreSent = true;
+      else {
+        p.elkRunning = true;
+        p.timer = setTimeout(() => api.current.elkFailed(p, `ELK superó ${ELK_TIMEOUT_MS} ms`), ELK_TIMEOUT_MS);
       }
-      if (import.meta.env.DEV) {
-        console.debug('[layout] engine=%s ms=%d', d.engine, d.ms);
-        if (d.fallback) console.warn('[layout] ' + d.fallback);
+    },
+    /** ELK no sirve para esta petición (timeout o error): se mata si sigue corriendo y se usa dagre. */
+    elkFailed(p: Pending, reason: string): void {
+      if (cur.current !== p || p.elkDone) return;
+      if (p.timer !== undefined) clearTimeout(p.timer);
+      if (p.elkRunning) api.current.restartElk();
+      p.elkRunning = false;
+      p.elkDone = true;
+      p.fallback = 'ELK falló, usando dagre: ' + reason;
+      if (!p.dagreSent) api.current.send('dagre', p);
+      else if (p.dagreDone) setState((s) => ({ ...s, loading: false, refining: false, fallback: p.fallback }));
+    },
+    restartElk(): void {
+      elkRef.current?.terminate();
+      elkRef.current = api.current.make('elk');
+    },
+    make(kind: 'elk' | 'dagre'): Worker | null {
+      let w: Worker;
+      try {
+        w = new LayoutWorker();
+      } catch (err) {
+        setState({ ...EMPTY, error: 'No se pudo iniciar el Worker de layout: ' + (err instanceof Error ? err.message : String(err)) });
+        return null;
       }
-      const next: LayoutState = { layout: d.result, layoutModel: forModel, loading: false, error: null, engine: d.engine, ms: d.ms };
-      if (d.fallback !== undefined) next.fallback = d.fallback;
+      w.onmessage = (e: MessageEvent<LayoutResponse>) => api.current.onResponse(kind, e.data);
+      w.onerror = (e: ErrorEvent) => {
+        const p = cur.current;
+        if (!p) return;
+        if (kind === 'elk') api.current.elkFailed(p, e.message || 'error en el Worker');
+        else setState({ ...EMPTY, error: e.message || 'Error en el cálculo del layout' });
+      };
+      return w;
+    },
+    onResponse(kind: 'elk' | 'dagre', d: LayoutResponse): void {
+      const p = cur.current;
+      if (!p || d.id !== p.id || d.id !== reqId.current) return; // obsoleta
+      if (kind === 'elk') {
+        if (p.timer !== undefined) clearTimeout(p.timer);
+        p.elkRunning = false;
+        if (!d.ok) { api.current.elkFailed(p, d.error); return; }
+        p.elkDone = true;
+      } else {
+        p.dagreDone = true;
+        if (!d.ok) { setState({ ...EMPTY, error: d.error }); return; }
+        if (p.elkDone && !p.fallback) return; // ELK ya llegó: dagre tardío, se ignora
+      }
+      if (!d.ok) return;
+      const next: LayoutState = {
+        layout: d.result,
+        layoutModel: p.model,
+        loading: false,
+        refining: kind === 'dagre' && !p.elkDone,
+        error: null,
+        engine: d.engine,
+        ms: Math.round(performance.now() - p.t0),
+      };
+      const fb = kind === 'dagre' ? p.fallback : d.fallback;
+      if (fb !== undefined) next.fallback = fb;
+      if (import.meta.env.DEV) console.debug('[layout] engine=%s ms=%d', next.engine, next.ms);
       setState(next);
-    };
-    w.onerror = (e: ErrorEvent) => {
-      setState({ layout: null, layoutModel: null, loading: false, error: e.message || 'Error en el cálculo del layout' });
-    };
+    },
+  });
+
+  useEffect(() => {
+    elkRef.current = api.current.make('elk');
+    dagreRef.current = api.current.make('dagre');
     return () => {
-      w.terminate();
-      if (workerRef.current === w) workerRef.current = null;
+      const p = cur.current;
+      if (p?.timer !== undefined) clearTimeout(p.timer);
+      elkRef.current?.terminate();
+      dagreRef.current?.terminate();
+      elkRef.current = null;
+      dagreRef.current = null;
     };
   }, []);
 
   useEffect(() => {
     const id = ++reqId.current;
+    // Cancela la petición anterior: si ELK seguía bloqueado, su Worker se mata.
+    const prev = cur.current;
+    if (prev) {
+      if (prev.timer !== undefined) clearTimeout(prev.timer);
+      if (prev.elkRunning) api.current.restartElk();
+      prev.elkRunning = false;
+    }
     if (!model) {
-      modelByReq.current.clear();
-      setState({ layout: null, layoutModel: null, loading: false, error: null });
+      cur.current = null;
+      setState(EMPTY);
       return;
     }
-    const w = workerRef.current;
-    if (!w) return;
     const o: LayoutOptions = {};
     if (summary !== undefined) o.summary = summary;
     if (rankSep !== undefined) o.rankSep = rankSep;
     if (nodeSep !== undefined) o.nodeSep = nodeSep;
-    // Se conserva el layout anterior mientras se calcula (la vista no parpadea al restablecer).
-    setState((s) => ({ ...s, loading: true, error: null }));
-    modelByReq.current.set(id, model);
-    const req: LayoutRequest = { id, model, opts: o };
-    w.postMessage(req);
+    const p: Pending = { id, model, opts: o, t0: performance.now(), elkRunning: false, elkDone: false, dagreSent: false, dagreDone: false };
+    cur.current = p;
+    setState((s) => ({ ...s, loading: true, refining: false, error: null }));
+    if (model.types.length > PROGRESSIVE_MIN_NODES) api.current.send('dagre', p);
+    api.current.send('elk', p);
   }, [model, summary, rankSep, nodeSep, layoutVersion]);
 
   return state;

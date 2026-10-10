@@ -30,7 +30,7 @@ export function PumlViewer({
 }: PumlViewerProps): JSX.Element {
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
-  const { layout, layoutModel, loading, error, fallback } = useLayout(model, view.options, view.layoutVersion);
+  const { layout, layoutModel, loading, refining, error, engine, fallback, ms } = useLayout(model, view.options, view.layoutVersion);
   useEffect(() => {
     onLayoutLoadingChange?.(loading);
   }, [loading, onLayoutLoadingChange]);
@@ -43,7 +43,8 @@ export function PumlViewer({
 
   /**
    * Restablecer: las tarjetas movidas vuelven a su posición, las opciones de vista a sus valores por defecto
-   * y se fuerza un recálculo del layout (layoutVersion++). Al llegar el layout nuevo, el lienzo se reencuadra solo.
+   * y se fuerza un recálculo del layout (layoutVersion++). El encuadre se aplica aquí mismo de forma
+   * imperativa; el layout recalculado no reencuadra solo (así el refinado dagre→ELK tampoco mueve la vista).
    */
   const handleReset = useCallback(() => {
     const canvas = handleRef.current;
@@ -80,11 +81,19 @@ export function PumlViewer({
     );
   }
 
+  const engineInfo = engine
+    ? `${engine.toUpperCase()} · ${ms ?? 0} ms${refining ? ' · refinando…' : ''}`
+    : '';
+
   return (
     <section className={`${classes} has-canvas`}>
       <div className="puml-viewer-bar" role="toolbar" aria-label="Vista del diagrama">
         <span className="puml-viewer-bar-info" title={fallback}>
           {loading ? 'Reorganizando…' : fallback ? `Diseño de respaldo (dagre): ${fallback}` : manual ? 'Posiciones modificadas a mano' : ''}
+          {engineInfo && <span className="puml-viewer-bar-engine"> · {engineInfo}</span>}
+          {fallback && (
+            <span className="puml-viewer-bar-warn" title={fallback}> ⚠ respaldo</span>
+          )}
         </span>
         <button
           type="button"
@@ -100,6 +109,7 @@ export function PumlViewer({
         ref={handleRef}
         model={model}
         layout={layout}
+        layoutModel={layoutModel}
         selectedId={selectedId}
         onSelect={onSelect}
         onManualPositionsChange={setManual}

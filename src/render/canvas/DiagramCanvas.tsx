@@ -25,6 +25,13 @@ export interface DiagramCanvasHandle {
 interface Props {
   model: DiagramModel;
   layout: LayoutResult;
+  /**
+   * Modelo para el que se calculó `layout`. Con layout progresivo (dagre y luego ELK)
+   * el layout cambia dos veces para el MISMO modelo: solo se reencuadra y se descartan
+   * posiciones manuales cuando cambia el modelo, para que la vista no salte al refinar.
+   * Si se omite se usa `layout` como antes.
+   */
+  layoutModel?: DiagramModel | null;
   selectedId?: string | null;
   onSelect?: (id: string | null) => void;
   onViewChange?: (v: ViewState) => void;
@@ -63,7 +70,7 @@ function readTheme(el: HTMLElement): Theme {
 }
 
 export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function DiagramCanvas(
-  { model, layout, selectedId = null, onSelect, onViewChange, onManualPositionsChange },
+  { model, layout, layoutModel, selectedId = null, onSelect, onViewChange, onManualPositionsChange },
   ref,
 ) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -85,10 +92,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [overrides, setOverrides] = useState<Overrides>(EMPTY_OVERRIDES);
   const [draggingNode, setDraggingNode] = useState(false);
 
-  // Un layout nuevo (recalculado) descarta las posiciones manuales.
-  const [overridesFor, setOverridesFor] = useState(layout);
-  if (overridesFor !== layout) {
-    setOverridesFor(layout);
+  // Un modelo nuevo descarta las posiciones manuales (el refinado dagre→ELK no: mismo modelo).
+  const modelKey = layoutModel ?? layout;
+  const [overridesFor, setOverridesFor] = useState(modelKey);
+  if (overridesFor !== modelKey) {
+    setOverridesFor(modelKey);
     setOverrides(EMPTY_OVERRIDES);
   }
 
@@ -273,12 +281,12 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     return () => ro.disconnect();
   }, [fit, schedule]);
 
-  // Nuevo layout o paquetes contraídos ⇒ ajustar. (Mover tarjetas NO reencuadra la vista.)
+  // Nuevo modelo o paquetes contraídos ⇒ ajustar. (Ni mover tarjetas ni el refinado reencuadran.)
   useEffect(() => {
     fit();
     const pending = pendingFocusRef.current;
     if (pending && focusNodeInView(pending)) pendingFocusRef.current = null;
-  }, [layout, collapsedPackages, fit, focusNodeInView]);
+  }, [modelKey, collapsedPackages, fit, focusNodeInView]);
 
   // Tarjetas movidas ⇒ repintar.
   useEffect(() => {
