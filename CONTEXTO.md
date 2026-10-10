@@ -7,6 +7,10 @@ comentarios en español, módulos puros en `src/core` y `src/render/layout`, tes
 por arreglo, i18n en el renderer y `npm test && npm run typecheck && npm run build`
 en verde por tanda.
 
+## Reglas fijas
+- Ningún `.md` sube al repo, salvo `CONTEXTO.md` (forzado en `.gitignore`).
+- Cada etapa (T2–T11) se trabaja en su rama `feature/tN` con base en `develop`.
+
 ## Skills cargadas
 - `plantuml` en `.claude/skills/plantuml`
 - `test-driven-development` en `.claude/skills/test-driven-development`
