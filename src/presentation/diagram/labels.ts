@@ -60,6 +60,11 @@ export interface ViewerLabels {
   shortcutsClose: string;
   shortcutsNav: string;
   shortcutsFocus: string;
+  shortcutsEscape: string;
+  shortcutsNavLinked: string;
+  shortcutsNavRelation: string;
+  relMode: string;
+  relModeAll: string;
   shortcutsZoom: string;
   shortcutsFit: string;
   shortcutsHelp: string;
@@ -259,11 +264,16 @@ export const DEFAULT_LABELS: ViewerLabels = {
   focusDirIn: 'Entrantes',
   focusDirBoth: 'Ambas',
   focusExit: 'Salir del foco',
-  focusExitTitle: 'Volver al diagrama completo con la vista anterior (Esc)',
+  focusExitTitle: 'Volver al diagrama completo con la vista anterior (F sobre la misma clase o Esc)',
   shortcutsTitle: 'Atajos de teclado',
   shortcutsClose: 'Cerrar',
-  shortcutsNav: 'Pasar a la siguiente / anterior clase conectada',
-  shortcutsFocus: 'Enfocar la clase seleccionada',
+  shortcutsNav: 'Ir a la clase más cercana en esa dirección',
+  shortcutsNavLinked: 'Pulsar y soltar: activar/desactivar el modo relaciones (las flechas recorren la relación elegida: padre → comentario → hija)',
+  relMode: 'Modo relaciones',
+  relModeAll: 'todas',
+  shortcutsNavRelation: 'En modo relaciones, elegir relación: ←/→ las recorren (arriba primero, luego abajo); ↑/↓ saltan a las de arriba/abajo',
+  shortcutsFocus: 'Entrar en el foco de la selección; ya en foco, cambiar a otra o salir',
+  shortcutsEscape: 'Deshacer por capas: modo relaciones, ruta, foco y, al final, la disposición original',
   shortcutsZoom: 'Acercar / alejar',
   shortcutsFit: 'Ajustar la vista al diagrama',
   shortcutsHelp: 'Mostrar esta ayuda',

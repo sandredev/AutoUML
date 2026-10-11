@@ -18,11 +18,12 @@ import type { LayoutResult, ViewState } from '../types';
 import { diagramToSvg, type SvgCardContent } from '../svg';
 import { drawDiagram, LIGHT_THEME, type Theme } from './draw';
 import { collapsePackages, hitTestPackageHeader } from './collapse';
+import { labelAnchor } from './edgePath';
 import { hitTestEdge } from './edgeHit';
 import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './minimap';
 import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
-import { nextConnected, shortcutOf } from './keyboardNav';
+import { pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong } from './keyboardNav';
 import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
 import {
   blendLayouts, canAnimate, changedTypes, EASE_IN_OUT, haloIntensity, layoutsDiffer, lerpView, LAYOUT_MS, REDUCED_LAYOUT_MS, snapshotOf, VIEW_MS,
@@ -287,8 +288,15 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [routeReq, setRouteReq] = useState<RouteRequest | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  /** Recorrido con flechas: clase de la que se parte y última visitada (se reinicia si la selección cambia por otra vía). */
-  const navRef = useRef<{ anchor: string; cur: string } | null>(null);
+  /**
+   * Modo relaciones (Ctrl lo activa/desactiva): null = apagado. `edge` = relación elegida con Mayús + flechas
+   * (índice en las aristas visibles; null = todas) y `step` = paso del flujo padre → comentario → hija.
+   */
+  const [relMode, setRelMode] = useState<{ edge: number | null; step: number } | null>(null);
+  const relModeRef = useRef(relMode);
+  relModeRef.current = relMode;
+  /** Ctrl pulsado sin otra tecla todavía (al soltarlo alterna el modo relaciones). */
+  const ctrlAloneRef = useRef(false);
   /** Momento de la última apertura por teclado: el evento contextmenu que la sigue no abre otro. */
   const keyMenuAt = useRef(-Infinity);
   const inFocus = focusKey !== null;
@@ -875,6 +883,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
+    ctrlAloneRef.current = false; // Ctrl+clic no alterna el modo relaciones
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     // Sobre una tarjeta (no un paquete plegado) se arrastra la tarjeta.
@@ -999,6 +1008,22 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     openMenu(e.clientX, e.clientY, subjectOf(pick(e.clientX - rect.left, e.clientY - rect.top)));
   };
 
+  /** Sale del modo relaciones y quita el resaltado de la relación elegida. */
+  const exitRelMode = (): void => {
+    if (relModeRef.current?.edge != null) {
+      setEdgeSel(null);
+      latest.current.onRelationSelect?.(null);
+    }
+    setRelMode(null);
+  };
+
+  const onCanvasKeyUp = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
+    if (e.key !== 'Control' || !ctrlAloneRef.current) return;
+    ctrlAloneRef.current = false;
+    if (relModeRef.current !== null) exitRelMode();
+    else setRelMode({ edge: null, step: 0 });
+  };
+
   /** Teclado en el lienzo: tecla Menú o Mayús+F10 abren el menú de la clase seleccionada (o del fondo). */
   const onCanvasKey = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
     if (e.key === 'Escape' && helpOpen) {
@@ -1006,20 +1031,73 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       setHelpOpen(false);
       return;
     }
+    // Ctrl solo (pulsar y soltar sin otra tecla) alterna el modo relaciones: Ctrl+K, Ctrl+Shift+L... no.
+    if (e.key === 'Control') {
+      if (!e.repeat) ctrlAloneRef.current = true;
+      return;
+    }
+    ctrlAloneRef.current = false;
+    if (e.key === 'Escape' && relModeRef.current !== null) {
+      e.preventDefault();
+      exitRelMode();
+      return;
+    }
     const action = shortcutOf(e.key, { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey });
-    if (action !== null && action !== 'focus') {
+    if (action !== null) {
       e.preventDefault();
       if (action === 'zoomIn') zoomBy(1.25);
       else if (action === 'zoomOut') zoomBy(1 / 1.25);
       else if (action === 'fit') fit(true);
       else if (action === 'help') setHelpOpen((open) => !open);
       else {
+        // Flechas: clase más cercana en esa dirección. En modo relaciones (Ctrl): Mayús + flechas elige la
+        // relación de la clase (queda resaltada) y las flechas recorren su flujo padre → comentario → hija;
+        // sin relación elegida, solo por vecinas. Entre las visibles (en modo foco, el subgrafo enfocado).
         const L = latest.current;
-        const nav = navRef.current !== null && navRef.current.cur === L.selectedId ? navRef.current : null;
-        const anchor = nav?.anchor ?? L.selectedId;
-        const next = nextConnected(adjacencyOf(L.model), anchor, action, nav === null ? null : nav.cur);
-        if (next !== null) {
-          navRef.current = { anchor: anchor ?? next, cur: next };
+        const rm = relModeRef.current;
+        const edges = L.layout.edges;
+        const flow = rm?.edge != null && edges[rm.edge] ? relationFlow(edges[rm.edge]) : null;
+        if (rm !== null && e.shiftKey) {
+          // Clase de partida: la del paso actual o, sobre el comentario, la anterior del flujo.
+          const here = flow?.[rm.step];
+          const before = flow?.[rm.step - 1];
+          const anchor = here?.kind === 'node' ? here.id : before?.kind === 'node' ? before.id : L.selectedId;
+          if (anchor === null) return;
+          const edge = pickEdge(relationOrder(edges, L.layout.nodes, anchor), flow === null ? null : rm.edge, action);
+          if (edge === null) return;
+          const steps = relationFlow(edges[edge]);
+          const step = steps.findIndex((st) => st.kind === 'node' && st.id === anchor);
+          setRelMode({ edge, step: Math.max(0, step) });
+          setEdgeSel({ layout: L.sourceLayout, hidden: L.hidden, index: edge });
+          const rel = edges[edge].rel;
+          L.onRelationSelect?.(rel !== undefined ? (L.model.relationships[rel]?.line ?? null) : null);
+          if (anchor !== L.selectedId) L.onSelect?.(anchor);
+          return;
+        }
+        if (rm !== null && flow !== null && rm.edge !== null) {
+          const step = stepAlong(flow.length, rm.step, action);
+          if (step === rm.step) return;
+          setRelMode({ edge: rm.edge, step });
+          const st = flow[step];
+          if (st.kind === 'node') {
+            L.onSelect?.(st.id);
+            focusNodeInView(st.id, true);
+          } else {
+            const pts = edges[rm.edge].points;
+            const at = labelAnchor(pts);
+            const { w, h } = sizeRef.current;
+            if (at && w > 0 && h > 0) {
+              const scale = Math.max(viewRef.current.scale, 0.8);
+              autoFitRef.current = false;
+              flyTo({ scale, tx: w / 2 - at.x * scale, ty: h / 2 - at.y * scale }, true);
+            }
+          }
+          return;
+        }
+        const next = rm !== null
+          ? relatedNext(L.layout.nodes, L.model.relationships, L.selectedId, null, action)
+          : spatialNext(L.layout.nodes, L.selectedId, action);
+        if (next !== null && next !== L.selectedId) {
           L.onSelect?.(next);
           focusNodeInView(next, true);
         }
@@ -1217,8 +1295,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
         onKeyDown={onCanvasKey}
+        onKeyUp={onCanvasKeyUp}
+        onBlur={() => { ctrlAloneRef.current = false; }}
         tabIndex={0}
-        aria-keyshortcuts="F Enter Escape Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown + - 0 ?"
+        aria-keyshortcuts="F Escape Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown Control Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
       />
       <canvas
         ref={minimapRef}
@@ -1231,14 +1311,32 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onPointerUp={onMiniUp}
         onPointerCancel={onMiniUp}
       />
+      {relMode !== null ? (
+        <div className="puml-viewer-relmode" role="status" style={{ position: 'absolute', left: 8, bottom: 8, padding: '2px 8px', borderRadius: 4, background: 'rgba(0,0,0,.65)', color: '#fff', font: '12px sans-serif', pointerEvents: 'none' }}>
+          {labels.relMode}
+          {relMode.edge !== null && visibleLayout.edges[relMode.edge]
+            ? relationFlow(visibleLayout.edges[relMode.edge]).map((st, i) => (
+                <span key={i} style={{ fontWeight: i === relMode.step ? 700 : 400, opacity: i === relMode.step ? 1 : 0.7 }}>
+                  {i === 0 ? ': ' : ' → '}{st.kind === 'node' ? st.id : `«${st.text}»`}
+                </span>
+              ))
+            : `: ${labels.relModeAll}`}
+        </div>
+      ) : null}
       {helpOpen ? (
         <div className="diagram-shortcuts" role="dialog" aria-label={labels.shortcutsTitle}>
           <h2>{labels.shortcutsTitle}</h2>
           <dl>
             <dt><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
             <dd>{labels.shortcutsNav}</dd>
-            <dt><kbd>Enter</kbd> / <kbd>F</kbd></dt>
+            <dt><kbd>Ctrl</kbd></dt>
+            <dd>{labels.shortcutsNavLinked}</dd>
+            <dt><kbd>Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
+            <dd>{labels.shortcutsNavRelation}</dd>
+            <dt><kbd>F</kbd></dt>
             <dd>{labels.shortcutsFocus}</dd>
+            <dt><kbd>Esc</kbd></dt>
+            <dd>{labels.shortcutsEscape}</dd>
             <dt><kbd>+</kbd> <kbd>−</kbd></dt>
             <dd>{labels.shortcutsZoom}</dd>
             <dt><kbd>0</kbd></dt>

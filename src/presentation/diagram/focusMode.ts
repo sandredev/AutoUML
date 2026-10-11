@@ -21,7 +21,16 @@ export function focusTargetOf(
   return focusable.types.some((t) => t.id === id) ? id : null;
 }
 
-export type ViewerShortcut = 'focus' | 'escape';
+/**
+ * Qué hace F: sin foco, entrar en el de la selección (`target`); en foco (`current`), cambiar a otra
+ * selección o, si es la misma o no hay, salir. null si no hay nada que hacer.
+ */
+export function focusToggle(current: string | null, target: string | null): 'enter' | 'exit' | null {
+  if (current !== null) return target !== null && target !== current ? 'enter' : 'exit';
+  return target !== null ? 'enter' : null;
+}
+
+export type ViewerShortcut = 'toggle-focus' | 'escape';
 
 interface KeyLike {
   key: string;
@@ -43,9 +52,7 @@ function isEditable(target: unknown): boolean {
 /** Atajo del visor de una pulsación, o null (con modificadores, escribiendo en un campo/editor o ya atendida). */
 export function viewerShortcut(e: KeyLike): ViewerShortcut | null {
   if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return null;
-  if (e.key === 'f' || e.key === 'F') return 'focus';
-  // Enter enfoca solo desde el canvas: en un botón o enlace activa el control, no el modo foco.
-  if (e.key === 'Enter' && (e.target as { tagName?: unknown } | null)?.tagName === 'CANVAS') return 'focus';
+  if (e.key === 'f' || e.key === 'F') return 'toggle-focus';
   if (e.key === 'Escape') return 'escape';
   return null;
 }

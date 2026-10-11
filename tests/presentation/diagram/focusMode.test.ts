@@ -1,6 +1,6 @@
 // tests/presentation/diagram/focusMode.test.ts — objetivo del modo foco y atajos de teclado del visor (T8).
 import { describe, expect, it } from 'vitest';
-import { focusTargetOf, viewerShortcut } from '../../../src/presentation/diagram/focusMode';
+import { focusTargetOf, focusToggle, viewerShortcut } from '../../../src/presentation/diagram/focusMode';
 import { aggregateCollapsed, PACKAGE_NODE_PREFIX } from '../../../src/presentation/diagram/layout/aggregate';
 import { diagram, rel, typeNode } from '../../helpers/diagramBuilders';
 
@@ -40,15 +40,14 @@ describe('viewerShortcut', () => {
   const ev = (key: string, extra: Record<string, unknown> = {}) =>
     ({ key, ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false, target: canvas, ...extra });
 
-  it('F (mayúscula o minúscula) enfoca; Esc sale', () => {
-    expect(viewerShortcut(ev('f'))).toBe('focus');
-    expect(viewerShortcut(ev('F'))).toBe('focus');
+  it('F (mayúscula o minúscula) alterna el foco; Esc sale', () => {
+    expect(viewerShortcut(ev('f'))).toBe('toggle-focus');
+    expect(viewerShortcut(ev('F'))).toBe('toggle-focus');
     expect(viewerShortcut(ev('Escape'))).toBe('escape');
   });
 
-  it('Enter enfoca solo cuando el objetivo es el canvas (no un botón)', () => {
-    expect(viewerShortcut(ev('Enter'))).toBe('focus');
-    expect(viewerShortcut(ev('Enter', { target: { tagName: 'BUTTON', isContentEditable: false } }))).toBeNull();
+  it('Enter no es un atajo del visor (solo F alterna el foco)', () => {
+    expect(viewerShortcut(ev('Enter'))).toBeNull();
   });
 
   it('con Ctrl, Meta o Alt no es un atajo del visor', () => {
@@ -67,5 +66,18 @@ describe('viewerShortcut', () => {
   it('un evento ya atendido (defaultPrevented) se ignora; otras teclas también', () => {
     expect(viewerShortcut(ev('Escape', { defaultPrevented: true }))).toBeNull();
     expect(viewerShortcut(ev('g'))).toBeNull();
+  });
+});
+
+describe('focusToggle (F)', () => {
+  it('sin foco entra en el de la selección; sin selección no hace nada', () => {
+    expect(focusToggle(null, 'A')).toBe('enter');
+    expect(focusToggle(null, null)).toBeNull();
+  });
+
+  it('en foco: otra selección cambia el foco a ella; la misma (o ninguna) sale', () => {
+    expect(focusToggle('A', 'B')).toBe('enter');
+    expect(focusToggle('A', 'A')).toBe('exit');
+    expect(focusToggle('A', null)).toBe('exit');
   });
 });

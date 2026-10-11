@@ -10,7 +10,7 @@ import { buildOverlay, type HeatMetric } from './analysis/overlay';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
 import type { MenuAction, MenuSubject } from './contextMenu';
 import { FiltersPanel, withListItem } from './FiltersPanel';
-import { focusTargetOf, viewerShortcut } from './focusMode';
+import { focusTargetOf, focusToggle, viewerShortcut } from './focusMode';
 import { drawHiddenOf, hasActiveFilters, memberFiltersKey, type DiagramFilters } from './graph/filters';
 import { focusKey, type FocusDirection, type FocusSpec } from './graph/neighborhood';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from './labels';
@@ -217,23 +217,38 @@ export function PumlViewer({
   const ownRef = useRef<DiagramCanvasHandle | null>(null);
   const handleRef = canvasRef ?? ownRef;
 
-  // F enfoca la selección; Esc quita la ruta y, si no hay, sale del foco. Atajos de alta frecuencia: la
-  // cámara no vuela (la transición del layout sí). No actúan escribiendo ni con un diálogo modal abierto.
+  // F entra en el foco de la selección; ya en foco, cambia a la nueva selección o, si es la misma, sale.
+  // Esc deshace por capas: quita la ruta, luego sale del foco y, sin nada más, restablece la disposición
+  // (tarjetas movidas a mano a su sitio). La ayuda y el modo relaciones los cierra antes el lienzo.
+  // Atajos de alta frecuencia: la cámara no vuela (la transición del layout sí). No actúan escribiendo ni
+  // con un diálogo modal abierto.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const shortcut = viewerShortcut(e);
       if (shortcut === null || document.querySelector('[aria-modal="true"]')) return;
-      if (shortcut === 'focus') {
-        if (enterFocus(false)) e.preventDefault();
+      const { activeFocus: current, focusTarget: target } = keyState.current;
+      if (shortcut === 'toggle-focus') {
+        const action = focusToggle(current?.id ?? null, target);
+        if (action === null) return;
+        e.preventDefault();
+        if (action === 'exit') exitFocus(false);
+        else enterFocus(false);
         return;
       }
       if (handleRef.current?.clearRoute()) {
         e.preventDefault();
         return;
       }
-      if (keyState.current.activeFocus !== null) {
+      if (current !== null) {
         e.preventDefault();
         exitFocus(false);
+        return;
+      }
+      const canvas = handleRef.current;
+      if (canvas?.hasManualPositions()) {
+        e.preventDefault();
+        canvas.resetPositions();
+        canvas.fit();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -593,7 +608,7 @@ export function PumlViewer({
                 {FOCUS_DIRECTIONS.map((d) => <option key={d} value={d}>{directionLabel[d]}</option>)}
               </select>
             </label>
-            <button type="button" className="puml-viewer-reset" onClick={() => exitFocus(true)} title={labels.focusExitTitle}>
+            <button type="button" className="puml-viewer-reset" onClick={() => exitFocus(true)} title={labels.focusExitTitle} aria-keyshortcuts="F Escape">
               {labels.focusExit}
             </button>
           </div>
