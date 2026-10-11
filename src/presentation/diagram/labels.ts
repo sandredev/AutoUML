@@ -90,6 +90,25 @@ export interface ViewerLabels {
   filtersNoPackages: string;
   filtersClear: string;
   filtersClose: string;
+  // Menú contextual (T8)
+  menuAria: string;
+  menuFocus: string;
+  menuRouteFrom: string;
+  menuCopyName: string;
+  menuGoToCode: string;
+  menuHideClass: string;
+  menuHidePackage: string;
+  /** "Plegar el paquete {name}" */
+  menuCollapsePackage: string;
+  menuExpandPackage: string;
+  /** "Ocultar relaciones de tipo {type}" */
+  menuHideRelType: string;
+  menuFit: string;
+  menuClearRoute: string;
+  menuExitFocus: string;
+  menuClearFilters: string;
+  /** "Ruta desde {from}: haz clic en la clase de destino" */
+  routePick: string;
 }
 
 export const DEFAULT_LABELS: ViewerLabels = {
@@ -179,6 +198,21 @@ export const DEFAULT_LABELS: ViewerLabels = {
   filtersNoPackages: 'Ninguno',
   filtersClear: 'Quitar filtros',
   filtersClose: 'Cerrar',
+  menuAria: 'Acciones del diagrama',
+  menuFocus: 'Enfocar',
+  menuRouteFrom: 'Ruta desde aquí…',
+  menuCopyName: 'Copiar nombre',
+  menuGoToCode: 'Ir al código',
+  menuHideClass: 'Ocultar esta clase',
+  menuHidePackage: 'Ocultar este paquete',
+  menuCollapsePackage: 'Plegar el paquete {name}',
+  menuExpandPackage: 'Desplegar el paquete',
+  menuHideRelType: 'Ocultar relaciones de tipo {type}',
+  menuFit: 'Encuadrar el diagrama',
+  menuClearRoute: 'Quitar ruta',
+  menuExitFocus: 'Salir del foco',
+  menuClearFilters: 'Quitar filtros',
+  routePick: 'Ruta desde {from}: haz clic en la clase de destino',
 };
 
 /** Sustituye los marcadores {clave} de una etiqueta. */

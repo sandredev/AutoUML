@@ -19,6 +19,7 @@ import { Sidebar } from '../components/Sidebar';
 import { StartModal } from '../components/StartModal';
 import { StatusBar, type Status } from '../components/StatusBar';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
+import type { CodeTarget } from '../diagram/PumlViewer';
 import { hasActiveFilters } from '../diagram/graph/filters';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { CloseConfirmModal } from '../components/CloseConfirmModal';
@@ -767,6 +768,25 @@ export default function App() {
     return null;
   }, []);
 
+  /** Menú contextual "Ir al código" (T8): abre el editor y salta al tipo o a la relación. */
+  const handleGoToCode = useCallback((target: CodeTarget) => {
+    setEditorVisible(true);
+    // Si el panel estaba oculto, CodeMirror mide al mostrarse: el salto va en el siguiente fotograma.
+    requestAnimationFrame(() => {
+      if (target.kind === 'type') revealType(target.id);
+      else revealInEditor(target.line);
+      editorRef.current?.focus();
+    });
+  }, [revealType, revealInEditor]);
+
+  /** Menú contextual "Copiar nombre" (T8). */
+  const handleCopyText = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text).then(
+      () => setStatus({ kind: 'success', text: tRef.current('status.copied', { name: text }) }),
+      (error: unknown) => setStatus({ kind: 'error', text: error instanceof Error ? error.message : String(error) }),
+    );
+  }, []);
+
   const toggleEditor = useCallback(() => setEditorVisible((v) => !v), []);
   useEffect(() => {
     if (editorVisible) editorRef.current?.focus();
@@ -1053,6 +1073,8 @@ export default function App() {
           highlightLine={highlightLine}
           onRelationSelect={handleRelationSelect}
           onRename={handleRename}
+          {...(source !== null ? { onGoToCode: handleGoToCode } : {})}
+          onCopyText={handleCopyText}
           canvasRef={canvasRef}
           onLayoutLoadingChange={setLayoutLoading}
           onNewProject={handleNewProject}

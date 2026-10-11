@@ -3,6 +3,8 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import type { JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { Category, DiagramModel, TypeNode } from '../../../domain/diagram/model';
 import type { Skinparams } from '../../../domain/diagram/skinparam';
+import { ContextMenu } from '../../components/ContextMenu';
+import { contextMenuEntries, type MenuAction, type MenuSubject } from '../contextMenu';
 import { adjacencyOf } from '../graph/adjacency';
 import { filterLayout, type DrawHidden } from '../graph/filters';
 import { focusOf } from '../graph/focus';
@@ -115,6 +117,13 @@ interface Props {
    * del layout ya calculado (tampoco se pueden señalar ni seleccionar).
    */
   hidden?: DrawHidden | null;
+  /** Menú contextual (T8): qué puede hacer el host. Sin `onMenuAction` solo hay acciones del lienzo. */
+  menuContext?: { canGoToCode: boolean; hasFilters: boolean };
+  /**
+   * Acciones del menú que no son del lienzo (enfocar, ocultar, filtros, copiar, ir al código). Las del lienzo
+   * (ruta desde aquí, plegar/desplegar, encuadrar, quitar ruta) se resuelven aquí.
+   */
+  onMenuAction?: (action: MenuAction, subject: MenuSubject) => void;
 }
 
 type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | null;
@@ -122,8 +131,10 @@ type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | nu
 interface RenameDraft { id: string; value: string; error: string | null; x: number; y: number; w: number }
 /** Arista seleccionada; el índice solo vale para el layout y los filtros con que se eligió. */
 interface EdgeSelection { layout: LayoutResult; hidden: DrawHidden | null; index: number }
-/** Ruta entre dos clases (T8); vale para el modelo en que se pidió. */
-interface RouteRequest { model: DiagramModel; from: string; to: string; directed: boolean }
+/** Ruta entre dos clases (T8); vale para el modelo en que se pidió. `to` null: falta elegir el destino. */
+interface RouteRequest { model: DiagramModel; from: string; to: string | null; directed: boolean }
+/** Menú contextual abierto: punto (ventana) y sobre qué. */
+interface MenuState { x: number; y: number; subject: MenuSubject }
 /** Vista pendiente hasta que llegue un layout distinto de `from`: encuadrar o ir a `target`. */
 interface PendingView { from: LayoutResult; target?: ViewState; animate?: boolean }
 
@@ -213,7 +224,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
     labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename,
-    focusKey = null, focusAnimate = true, hidden = null,
+    focusKey = null, focusAnimate = true, hidden = null, menuContext, onMenuAction,
   },
   ref,
 ) {
@@ -258,6 +269,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [edgeSel, setEdgeSel] = useState<EdgeSelection | null>(null);
   const [rename, setRename] = useState<RenameDraft | null>(null);
   const [routeReq, setRouteReq] = useState<RouteRequest | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  /** Momento de la última apertura por teclado: el evento contextmenu que la sigue no abre otro. */
+  const keyMenuAt = useRef(-Infinity);
   const inFocus = focusKey !== null;
 
   const controlled = collapsedProp !== undefined;
@@ -328,7 +342,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // Ruta (T8): BFS sobre la adyacencia memoizada del modelo dibujado; manda sobre el foco de selección.
   const route = routeReq !== null && routeReq.model === model ? routeReq : null;
   const routePath = useMemo(
-    () => (route ? shortestPath(adjacencyOf(route.model), route.from, route.to, route.directed) : null),
+    () => (route?.to != null ? shortestPath(adjacencyOf(route.model), route.from, route.to, route.directed) : null),
     [route],
   );
   const routeDirected = route?.directed ?? false;
@@ -877,11 +891,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const sy = e.clientY - rect.top;
     const p = screenToWorld(viewRef.current, sx, sy);
     const L = latest.current;
-    // Mayús+clic en otra clase con una seleccionada: ruta más corta (T8). Un Mayús+clic que arrastra no llega aquí.
-    if (e.shiftKey && L.selectedId !== null) {
+    // Mayús+clic en otra clase con una seleccionada, o clic tras "Ruta desde aquí": ruta más corta (T8).
+    // Un Mayús+clic que arrastra no llega aquí.
+    const pendingFrom = L.route !== null && L.route.to === null ? L.route.from : null;
+    if (pendingFrom !== null || (e.shiftKey && L.selectedId !== null)) {
       const target = pick(sx, sy);
-      const from = L.selectedId;
-      if (target?.kind === 'node' && target.id !== from && L.model.types.some((t) => t.id === from)) {
+      const from = pendingFrom ?? L.selectedId;
+      if (from !== null && target?.kind === 'node' && target.id !== from && L.model.types.some((t) => t.id === from)) {
         setRouteReq((prev) => ({ model: L.model, from, to: target.id, directed: prev?.directed ?? false }));
         return;
       }
@@ -909,6 +925,84 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (edgeSel !== null) L.onRelationSelect?.(null);
     setEdgeSel(null);
     L.onSelect?.(hit?.kind === 'node' ? hit.id : null);
+  };
+
+  /** Objetivo del menú para lo que hay bajo un punto (o el fondo). */
+  const subjectOf = (hit: Hover): MenuSubject => {
+    const L = latest.current;
+    if (hit?.kind === 'node') {
+      if (isPackageNode(hit.id)) return { kind: 'package', id: hit.id, name: packageNodeName(hit.id) };
+      const t = L.model.types.find((x) => x.id === hit.id);
+      return { kind: 'node', id: hit.id, name: t?.name ?? hit.id, packageName: t?.packageName ?? '' };
+    }
+    if (hit?.kind === 'edge') {
+      const e = L.layout.edges[hit.index];
+      if (e) {
+        const rel = e.rel !== undefined ? L.model.relationships[e.rel] : undefined;
+        return { kind: 'edge', name: `${nameOfRef.current(e.source)} → ${nameOfRef.current(e.target)}`, relType: e.type, line: rel?.line ?? null };
+      }
+    }
+    return { kind: 'background' };
+  };
+
+  const openMenu = (x: number, y: number, subject: MenuSubject): void => {
+    setHover(null);
+    // Abrir el menú sobre una clase la selecciona (como en cualquier explorador).
+    if (subject.kind === 'node' && latest.current.selectedId !== subject.id) latest.current.onSelect?.(subject.id);
+    setMenu({ x, y, subject });
+  };
+
+  const onContextMenu = (e: ReactMouseEvent<HTMLCanvasElement>): void => {
+    e.preventDefault();
+    if (e.timeStamp - keyMenuAt.current < 500) return; // ya lo abrió el teclado
+    const rect = e.currentTarget.getBoundingClientRect();
+    openMenu(e.clientX, e.clientY, subjectOf(pick(e.clientX - rect.left, e.clientY - rect.top)));
+  };
+
+  /** Teclado en el lienzo: tecla Menú o Mayús+F10 abren el menú de la clase seleccionada (o del fondo). */
+  const onCanvasKey = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
+    if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+    e.preventDefault();
+    keyMenuAt.current = e.timeStamp;
+    const L = latest.current;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const v = viewRef.current;
+    const b = L.selectedId !== null ? L.layout.nodes.find((n) => n.id === L.selectedId) : undefined;
+    if (b) {
+      const x = rect.left + (b.x + b.w / 2) * v.scale + v.tx;
+      const y = rect.top + (b.y + b.h / 2) * v.scale + v.ty;
+      openMenu(Math.min(Math.max(x, rect.left), rect.right), Math.min(Math.max(y, rect.top), rect.bottom), subjectOf({ kind: 'node', id: b.id }));
+    } else openMenu(rect.left + rect.width / 2, rect.top + rect.height / 2, { kind: 'background' });
+  };
+
+  const runMenu = (action: MenuAction, subject: MenuSubject): void => {
+    setMenu(null);
+    const L = latest.current;
+    switch (action) {
+      case 'route-from':
+        if (subject.kind === 'node' || subject.kind === 'package') {
+          const from = subject.id;
+          setRouteReq((prev) => ({ model: L.model, from, to: null, directed: prev?.directed ?? false }));
+        }
+        return;
+      case 'collapse-package':
+        if (subject.kind === 'node' && subject.packageName) {
+          const name = subject.packageName;
+          updateCollapsed((prev) => new Set([...prev, name]));
+        }
+        return;
+      case 'expand-package':
+        if (subject.kind === 'package') togglePackage(subject.name);
+        return;
+      case 'fit':
+        fit(true);
+        return;
+      case 'clear-route':
+        setRouteReq(null);
+        return;
+      default:
+        onMenuAction?.(action, subject);
+    }
   };
 
   const onPointerLeave = (): void => {
@@ -997,6 +1091,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // ---------- Tooltip ----------
   const typeById = useMemo(() => new Map(model.types.map((t) => [t.id, t] as const)), [model]);
   const nameOf = (id: string): string => typeById.get(id)?.name ?? (isPackageNode(id) ? packageNodeName(id) : id);
+  const nameOfRef = useRef(nameOf);
+  nameOfRef.current = nameOf;
   let tip: JSX.Element | null = null;
   if (liveHover?.kind === 'node') {
     const id = liveHover.id;
@@ -1052,6 +1148,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onPointerCancel={onPointerUp}
         onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
+        onKeyDown={onCanvasKey}
+        tabIndex={0}
+        aria-keyshortcuts="F Escape Shift+F10"
       />
       <canvas
         ref={minimapRef}
@@ -1096,12 +1196,14 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       ) : null}
       {route !== null ? (
         <div className="diagram-route" role="group" aria-label={labels.routeAria}>
-          <span role="status" className={routePath ? 'diagram-route-info' : 'diagram-route-info is-empty'}>
-            {fill(routePath ? labels.routeInfo : labels.routeNone, {
-              from: nameOf(route.from),
-              to: nameOf(route.to),
-              n: (routePath?.length ?? 1) - 1,
-            })}
+          <span role="status" className={routePath || route.to === null ? 'diagram-route-info' : 'diagram-route-info is-empty'}>
+            {route.to === null
+              ? fill(labels.routePick, { from: nameOf(route.from) })
+              : fill(routePath ? labels.routeInfo : labels.routeNone, {
+                from: nameOf(route.from),
+                to: nameOf(route.to),
+                n: (routePath?.length ?? 1) - 1,
+              })}
           </span>
           <label className="diagram-route-directed">
             <input type="checkbox" checked={route.directed} onChange={(e) => setRouteReq({ ...route, directed: e.target.checked })} />
@@ -1111,6 +1213,25 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
             {labels.routeClear}
           </button>
         </div>
+      ) : null}
+      {menu !== null ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={labels.menuAria}
+          items={contextMenuEntries(
+            menu.subject,
+            {
+              canGoToCode: menuContext?.canGoToCode ?? false,
+              hasFilters: menuContext?.hasFilters ?? false,
+              hasRoute: route !== null,
+              inFocus,
+            },
+            labels,
+          ).map((it) => ({ id: it.action, label: it.label, ...(it.disabled ? { disabled: true } : {}), ...(it.shortcut ? { shortcut: it.shortcut } : {}) }))}
+          onSelect={(id) => runMenu(id as MenuAction, menu.subject)}
+          onClose={() => setMenu(null)}
+        />
       ) : null}
       {paintError !== null ? (
         <p

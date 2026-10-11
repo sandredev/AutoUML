@@ -151,7 +151,7 @@ export function FiltersPanel({ filters, packages, labels, onChange, defaultOpen 
                       checked={!hiddenPkgs.includes(p)}
                       onChange={(e) => set({ hiddenPackages: withListItem(filters.hiddenPackages, p, !e.target.checked) })}
                     />
-                    <span className="filters-panel-pkg">{p === DEFAULT_PACKAGE ? labels.noPackage : p}</span>
+                    <span className="filters-panel-pkg" translate="no">{p === DEFAULT_PACKAGE ? labels.noPackage : p}</span>
                   </label>
                 ))}
               </div>

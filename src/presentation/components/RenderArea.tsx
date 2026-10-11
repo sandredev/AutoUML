@@ -1,7 +1,7 @@
 import { useMemo, type JSX, type ReactNode, type RefObject } from 'react';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { ProjectInfo, SidecarFilters, SidecarState } from '../../application/ports/ipc';
-import { PumlViewer } from '../diagram/PumlViewer';
+import { PumlViewer, type CodeTarget } from '../diagram/PumlViewer';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { viewerLabels } from '../localization/viewerLabels';
@@ -27,6 +27,9 @@ interface Props {
   highlightLine?: number | null;
   onRelationSelect?: (line: number | null) => void;
   onRename?: (id: string, next: string) => string | null;
+  /** Menú contextual (T8): ir al código y copiar nombre. */
+  onGoToCode?: (target: CodeTarget) => void;
+  onCopyText?: (text: string) => void;
 }
 
 export function RenderArea({
@@ -45,6 +48,8 @@ export function RenderArea({
   highlightLine = null,
   onRelationSelect,
   onRename,
+  onGoToCode,
+  onCopyText,
 }: Props): JSX.Element {
   const { t } = useLocalization();
   const labels = useMemo(() => viewerLabels(t), [t]);
@@ -94,6 +99,8 @@ export function RenderArea({
         highlightLine={highlightLine}
         {...(onRelationSelect ? { onRelationSelect } : {})}
         {...(onRename ? { onRename } : {})}
+        {...(onGoToCode ? { onGoToCode } : {})}
+        {...(onCopyText ? { onCopyText } : {})}
       />
       {children}
     </main>

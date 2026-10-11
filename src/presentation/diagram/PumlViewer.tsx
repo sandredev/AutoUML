@@ -3,9 +3,10 @@ import type { JSX, RefObject } from 'react';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { SidecarState } from '../../application/ports/ipc';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
-import { FiltersPanel } from './FiltersPanel';
+import type { MenuAction, MenuSubject } from './contextMenu';
+import { FiltersPanel, withListItem } from './FiltersPanel';
 import { focusTargetOf, viewerShortcut } from './focusMode';
-import { drawHiddenOf, type DiagramFilters } from './graph/filters';
+import { drawHiddenOf, hasActiveFilters, type DiagramFilters } from './graph/filters';
 import { focusKey, type FocusDirection, type FocusSpec } from './graph/neighborhood';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from './labels';
 import { isPackageNode, packageNodeName } from './layout/aggregate';
@@ -43,7 +44,13 @@ export interface PumlViewerProps {
   onRelationSelect?: (line: number | null) => void;
   /** Renombrado en línea con doble clic (T7): mensaje de error o null si se aplicó. */
   onRename?: (id: string, next: string) => string | null;
+  /** Menú contextual "Ir al código" (T8): un tipo o la línea de una relación. Sin él, la entrada sale deshabilitada. */
+  onGoToCode?: (target: CodeTarget) => void;
+  /** Menú contextual "Copiar nombre" (T8). */
+  onCopyText?: (text: string) => void;
 }
+
+export type CodeTarget = { kind: 'type'; id: string } | { kind: 'relation'; line: number };
 
 const NO_COLLAPSED: ReadonlySet<string> = new Set();
 const NO_FILTERS: DiagramFilters = {};
@@ -64,6 +71,8 @@ export function PumlViewer({
   highlightLine = null,
   onRelationSelect,
   onRename,
+  onGoToCode,
+  onCopyText,
 }: PumlViewerProps): JSX.Element {
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
@@ -124,14 +133,18 @@ export function PumlViewer({
   const keyState = useRef({ focusTarget, activeFocus });
   keyState.current = { focusTarget, activeFocus };
 
-  /** Enfoca la selección (o la vuelve a enfocar si ya hay foco), conservando saltos y dirección. */
+  /** Enfoca `id` (o lo vuelve a enfocar si ya hay foco), conservando saltos y dirección. */
+  const focusOn = useCallback((id: string, animate: boolean) => {
+    setFocusAnimate(animate);
+    setFocus((prev) => ({ id, depth: prev?.depth ?? 1, direction: prev?.direction ?? 'both' }));
+  }, []);
+  /** Enfoca la selección. */
   const enterFocus = useCallback((animate: boolean): boolean => {
     const id = keyState.current.focusTarget;
     if (id === null) return false;
-    setFocusAnimate(animate);
-    setFocus((prev) => ({ id, depth: prev?.depth ?? 1, direction: prev?.direction ?? 'both' }));
+    focusOn(id, animate);
     return true;
-  }, []);
+  }, [focusOn]);
   const exitFocus = useCallback((animate: boolean) => {
     setFocusAnimate(animate);
     setFocus(null);
@@ -191,6 +204,43 @@ export function PumlViewer({
   }, [handleRef]);
 
   const handleCollapsed = useCallback((next: Set<string>) => setCollapsed(next), []);
+
+  // Acciones del menú contextual que no son del lienzo (T8).
+  const hostRef = useRef({ onGoToCode, onCopyText });
+  hostRef.current = { onGoToCode, onCopyText };
+  const handleMenuAction = useCallback((action: MenuAction, subject: MenuSubject) => {
+    const host = hostRef.current;
+    switch (action) {
+      case 'focus':
+        if (subject.kind === 'node' || subject.kind === 'package') focusOn(subject.id, true);
+        break;
+      case 'exit-focus':
+        exitFocus(true);
+        break;
+      case 'hide-node':
+        if (subject.kind === 'node') setFilters((f) => ({ ...f, hiddenTypes: withListItem(f.hiddenTypes, subject.id, true) }));
+        else if (subject.kind === 'package') setFilters((f) => ({ ...f, hiddenPackages: withListItem(f.hiddenPackages, subject.name, true) }));
+        break;
+      case 'hide-rel-type':
+        if (subject.kind === 'edge') setFilters((f) => ({ ...f, hiddenRelTypes: withListItem(f.hiddenRelTypes, subject.relType, true) }));
+        break;
+      case 'clear-filters':
+        setFilters(NO_FILTERS);
+        break;
+      case 'copy-name':
+        if (subject.kind !== 'background') host.onCopyText?.(subject.name);
+        break;
+      case 'go-to-code':
+        if (subject.kind === 'node') host.onGoToCode?.({ kind: 'type', id: subject.id });
+        else if (subject.kind === 'edge' && subject.line !== null) host.onGoToCode?.({ kind: 'relation', line: subject.line });
+        break;
+      default:
+        break;
+    }
+  }, [focusOn, exitFocus]);
+  const filtersActive = hasActiveFilters(filters);
+  const canGoToCode = onGoToCode !== undefined;
+  const menuContext = useMemo(() => ({ canGoToCode, hasFilters: filtersActive }), [canGoToCode, filtersActive]);
 
   // Aviso al host para persistir el sidecar (colapsados, posiciones manuales o vista).
   // El host lee el snapshot del canvas al guardar; aquí solo se le despierta (él hace debounce).
@@ -324,6 +374,8 @@ export function PumlViewer({
         focusKey={activeFocus !== null ? focusKey(activeFocus) : null}
         focusAnimate={focusAnimate}
         hidden={drawHidden}
+        menuContext={menuContext}
+        onMenuAction={handleMenuAction}
       />
     </section>
   );
