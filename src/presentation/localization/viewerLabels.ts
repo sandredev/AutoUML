@@ -38,8 +38,6 @@ export function viewerLabels(t: TranslateFn): ViewerLabels {
     fallbackBadge: t('viewer.fallbackBadge'),
     manual: t('viewer.manual'),
     refining: t('viewer.refining'),
-    reset: t('viewer.reset'),
-    resetTitle: t('viewer.resetTitle'),
     focus: t('viewer.focus'),
     focusTitle: t('viewer.focusTitle'),
     focusGroupAria: t('viewer.focusGroupAria'),

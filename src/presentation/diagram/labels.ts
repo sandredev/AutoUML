@@ -42,8 +42,6 @@ export interface ViewerLabels {
   fallbackBadge: string;
   manual: string;
   refining: string;
-  reset: string;
-  resetTitle: string;
   // Modo foco (T8)
   focus: string;
   focusTitle: string;
@@ -251,8 +249,6 @@ export const DEFAULT_LABELS: ViewerLabels = {
   fallbackBadge: '⚠ respaldo',
   manual: 'Posiciones modificadas a mano',
   refining: 'refinando…',
-  reset: 'Restablecer',
-  resetTitle: 'Devolver las tarjetas a su posición inicial y reorganizar el diagrama',
   focus: 'Enfocar',
   focusTitle: 'Mostrar solo la clase seleccionada y sus vecinos (F)',
   focusGroupAria: 'Modo foco',

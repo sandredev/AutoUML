@@ -72,6 +72,8 @@ export interface PumlViewerProps {
   reportTitle?: string;
   /** Guarda el informe Markdown (T9). Sin él, el botón de exportar sale deshabilitado. */
   onExportReport?: (markdown: string) => void;
+  /** Cada incremento restablece el visor: tarjetas a su posición inicial, opciones por defecto y encuadre. */
+  resetSignal?: number;
 }
 
 export type CodeTarget = { kind: 'type'; id: string } | { kind: 'relation'; line: number };
@@ -102,6 +104,7 @@ export function PumlViewer({
   analysisLayers = null,
   reportTitle = '',
   onExportReport,
+  resetSignal = 0,
 }: PumlViewerProps): JSX.Element {
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
@@ -237,17 +240,22 @@ export function PumlViewer({
     return () => window.removeEventListener('keydown', onKey);
   }, [enterFocus, exitFocus, handleRef]);
 
-  /**
-   * Restablecer: las tarjetas movidas vuelven a su posición, las opciones de vista a sus valores por defecto
-   * y se fuerza un recálculo del layout (layoutVersion++). El encuadre se aplica aquí mismo de forma
-   * imperativa; el layout recalculado no reencuadra solo (así el refinado dagre→ELK tampoco mueve la vista).
-   */
-  const handleReset = useCallback(() => {
-    const canvas = handleRef.current;
-    canvas?.resetPositions();
-    canvas?.fit();
+  // Reset por señal (recarga): tarjetas a su posición, opciones por defecto y layout recalculado (layoutVersion++).
+  // Reencuadra cuando llega el layout nuevo: encuadrar antes lo haría sobre el viejo.
+  const lastResetSignal = useRef(resetSignal);
+  const fitAfterLayoutFrom = useRef<typeof layout | undefined>(undefined);
+  useEffect(() => {
+    if (lastResetSignal.current === resetSignal) return;
+    lastResetSignal.current = resetSignal;
+    handleRef.current?.resetPositions();
+    fitAfterLayoutFrom.current = layout;
     setView((v) => resetViewOptions(v));
-  }, [handleRef]);
+  }, [resetSignal, handleRef, layout]);
+  useEffect(() => {
+    if (fitAfterLayoutFrom.current === undefined || loading || layout === fitAfterLayoutFrom.current) return;
+    fitAfterLayoutFrom.current = undefined;
+    handleRef.current?.fit({ animate: false });
+  }, [layout, loading, handleRef]);
 
   const handleCollapsed = useCallback((next: Set<string>) => setCollapsed(next), []);
 
@@ -601,15 +609,6 @@ export function PumlViewer({
             {labels.focus}
           </button>
         )}
-        <button
-          type="button"
-          className="puml-viewer-reset"
-          onClick={handleReset}
-          disabled={loading}
-          title={labels.resetTitle}
-        >
-          {labels.reset}
-        </button>
       </div>
       <div className="puml-viewer-body">
       <DiagramCanvas

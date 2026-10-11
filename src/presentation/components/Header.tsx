@@ -2,21 +2,19 @@
 import type { JSX, ReactNode } from 'react';
 import type { MenuAction, MenuState } from '../../application/ports/ipc';
 import { AppMenuBar } from './AppMenuBar';
-import { CodeIcon, ExportIcon, FitIcon, LoadIcon, RelayoutIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
+import { CodeIcon, ExportIcon, FitIcon, RelayoutIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { withShortcut } from '../localization/translations';
 import './settings.css';
 
 interface Props {
   projectName: string | null;
-  canLoad: boolean;
   canReload: boolean;
   sidebarVisible: boolean;
   /** Panel del editor de código (T7). */
   editorVisible: boolean;
   canEdit: boolean;
   onToggleEditor: () => void;
-  onLoad: () => void;
   onReload: () => void;
   canView: boolean;
   onToggleSidebar: () => void;
@@ -48,13 +46,11 @@ function ToolButton({ label, shortcut, icon, disabled, onClick }: ToolProps): JS
 
 export function Header({
   projectName,
-  canLoad,
   canReload,
   sidebarVisible,
   editorVisible,
   canEdit,
   onToggleEditor,
-  onLoad,
   onReload,
   canView,
   onToggleSidebar,
@@ -103,7 +99,6 @@ export function Header({
       </div>
 
       <div className="toolbar" role="toolbar" aria-label={t('header.toolbar')}>
-        <ToolButton label={t('header.load')} shortcut="Ctrl+O" icon={<LoadIcon />} disabled={!canLoad} onClick={onLoad} />
         <ToolButton label={t('header.reload')} shortcut="Ctrl+R" icon={<ReloadIcon />} disabled={!canReload} onClick={onReload} />
         <span className="toolbar-sep" aria-hidden="true" />
         <ToolButton label={t('header.zoomIn')} shortcut="Ctrl+=" icon={<ZoomInIcon />} disabled={!canView} onClick={onZoomIn} />

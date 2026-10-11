@@ -37,19 +37,6 @@ const openedOutcome = (file: OpenPumlFile, t: TranslateFn = spanish): ActionOutc
   refresh: true,
 });
 
-export async function openPumlDialog(api: HistoryApi, t: TranslateFn = spanish): Promise<ActionOutcome> {
-  const result = await api.openPumlFile();
-  if (!result.ok) return fail(result.error);
-  return result.value === null ? { status: null } : openedOutcome(result.value, t);
-}
-
-export async function openJavaDialog(api: HistoryApi, t: TranslateFn = spanish): Promise<ActionOutcome> {
-  const result = await api.openJavaProject();
-  if (!result.ok) return fail(result.error);
-  if (result.value === null) return { status: null };
-  return { status: { kind: 'info', text: javaMessage(result.value.path, t) }, refresh: true };
-}
-
 export async function reopenEntry(api: HistoryApi, entry: HistoryEntry, t: TranslateFn = spanish): Promise<ActionOutcome> {
   if (!entry.available) {
     return fail(t('history.reopenUnavailable', { name: entry.name, path: entry.path }));
@@ -122,8 +109,6 @@ export interface HistoryViewProps {
   busy: boolean;
   error: string | null;
   canSave: boolean;
-  onOpenPuml(): void;
-  onOpenJava(): void;
   onSave(): void;
   onRefresh(): void;
   onClear(): void;
@@ -142,8 +127,6 @@ export function HistoryView(props: HistoryViewProps) {
         {props.busy && <span className="history-busy" role="status">{t('history.working')}</span>}
       </div>
       <div className="history-actions">
-        <button type="button" className="btn" disabled={props.busy} onClick={props.onOpenPuml}>{t('history.openPuml')}</button>
-        <button type="button" className="btn" disabled={props.busy} onClick={props.onOpenJava}>{t('history.javaFolder')}</button>
         <button type="button" className="btn" disabled={props.busy || !props.canSave} onClick={props.onSave}>{t('history.saveAs')}</button>
         <button type="button" className="btn" disabled={props.busy} onClick={props.onRefresh}>{t('history.reload')}</button>
         <button type="button" className="btn" disabled={props.busy || entries.length === 0} onClick={props.onClear}>{t('history.clear')}</button>
@@ -232,8 +215,6 @@ export function HistoryPanel({ api, source, suggestedName, refreshKey, onOpened,
       busy={busy}
       error={error}
       canSave={source !== null && source.length > 0}
-      onOpenPuml={() => void run(() => openPumlDialog(api, t))}
-      onOpenJava={() => void run(() => openJavaDialog(api, t))}
       onSave={() => void run(() => saveAs(api, source, suggestedName, t))}
       onRefresh={() => void run(async () => { await load(); return { status: null }; })}
       onClear={() => void run(() => clearHistory(api, ask, t))}

@@ -7,8 +7,6 @@ import {
   isPumlPath,
   javaMessage,
   openDroppedFiles,
-  openJavaDialog,
-  openPumlDialog,
   removeEntry,
   reopenEntry,
   saveAs,
@@ -57,8 +55,6 @@ function renderView(overrides: Partial<HistoryViewProps> = {}): string {
       busy={false}
       error={null}
       canSave={false}
-      onOpenPuml={noop}
-      onOpenJava={noop}
       onSave={noop}
       onRefresh={noop}
       onClear={noop}
@@ -165,22 +161,6 @@ describe('acciones del historial', () => {
     expect(api.clear).not.toHaveBeenCalled();
     expect((await clearHistory(api, () => true)).entries).toEqual([]);
     expect(api.clear).toHaveBeenCalledTimes(1);
-  });
-
-  it('trata cancelar abrir PUML como cancelación normal', async () => {
-    expect((await openPumlDialog(makeApi())).status).toBeNull();
-  });
-
-  it('propaga error al abrir PUML', async () => {
-    const api = makeApi({ openPumlFile: vi.fn(async () => ({ ok: false as const, error: 'Archivo grande' })) });
-    expect((await openPumlDialog(api)).status?.text).toBe('Archivo grande');
-  });
-
-  it('informa al elegir una carpeta Java sin crear un diagrama', async () => {
-    const api = makeApi({ openJavaProject: vi.fn(async () => ({ ok: true as const, value: entry({ kind: 'java' }) })) });
-    const outcome = await openJavaDialog(api);
-    expect(outcome.status?.kind).toBe('info');
-    expect(outcome.opened).toBeUndefined();
   });
 
   it('maneja guardar como sin texto, cancelación y éxito', async () => {

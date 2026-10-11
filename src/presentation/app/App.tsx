@@ -69,6 +69,7 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
+  const [resetSignal, setResetSignal] = useState(0);
   const [sourceLoading, setSourceLoading] = useState(false);
   const [layoutLoading, setLayoutLoading] = useState(false);
 
@@ -81,6 +82,7 @@ export default function App() {
   // Fuerza re-parseo en recarga.
   const [sourceTick, setSourceTick] = useState(0);
   const canvasRef = useRef<DiagramCanvasHandle | null>(null);
+  const renderAreaRef = useRef<HTMLElement | null>(null);
   const [externalName, setExternalName] = useState<string | null>(null);
   const [historyTick, setHistoryTick] = useState(0);
   const dropBusy = useRef(false);
@@ -476,6 +478,8 @@ export default function App() {
         setProject(meta.value);
         loadedFor.current = meta.value.meta.name + ':' + (meta.value.meta.pumlLoadedAt ?? '');
       }
+      // La rueda recarga el archivo y además restablece la vista (antes, botón "Restablecer" del visor).
+      if (ok) setResetSignal((n) => n + 1);
       setStatus(
         ok
           ? { kind: 'success', text: t('status.reloaded') }
@@ -593,7 +597,24 @@ export default function App() {
 
   const handleZoomIn = useCallback(() => canvasRef.current?.zoomIn(), []);
   const handleZoomOut = useCallback(() => canvasRef.current?.zoomOut(), []);
-  const handleFit = useCallback(() => canvasRef.current?.fit(), []);
+  // Botón del header: alterna pantalla completa del área de render (barra, paneles y atajos del visor
+  // siguen dentro). El reencuadre ocurre al cambiar la pantalla completa, cuando el lienzo ya tiene su tamaño.
+  const handleFit = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    const area = renderAreaRef.current;
+    if (area?.requestFullscreen) void area.requestFullscreen().catch(() => canvasRef.current?.fit());
+    else canvasRef.current?.fit();
+  }, []);
+  useEffect(() => {
+    const onFullscreen = (): void => {
+      requestAnimationFrame(() => canvasRef.current?.fit({ animate: false }));
+    };
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => document.removeEventListener('fullscreenchange', onFullscreen);
+  }, []);
   const handleRelayout = useCallback(() => {
     if (!canvasRef.current) return;
     canvasRef.current.resetPositions();
@@ -1032,13 +1053,11 @@ export default function App() {
       {storage?.warning && <div className="banner banner-warning">⚠ {storage.warning}</div>}
       <Header
         projectName={headerName}
-        canLoad={project !== null && !busy}
         canReload={project?.puml != null && !busy}
         sidebarVisible={sidebarVisible}
         editorVisible={editorVisible}
         canEdit={source !== null}
         onToggleEditor={toggleEditor}
-        onLoad={handleLoad}
         onReload={() => void handleReload()}
         canView={diagram !== null && diagram.types.length > 0}
         onToggleSidebar={toggleSidebar}
@@ -1098,6 +1117,7 @@ export default function App() {
           onAppAction={(a) => actionRef.current(a)}
           onThemeChange={setThemeMode}
           canvasRef={canvasRef}
+          areaRef={renderAreaRef}
           onLayoutLoadingChange={setLayoutLoading}
           onNewProject={handleNewProject}
           onOpenProject={handleNewProject}
@@ -1107,6 +1127,7 @@ export default function App() {
           analysisLayers={analysisLayers}
           reportTitle={docName}
           onExportReport={handleExportReport}
+          resetSignal={resetSignal}
         >
           <LoadingIntro
             active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })}

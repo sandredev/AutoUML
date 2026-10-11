@@ -14,6 +14,8 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   canvasRef: RefObject<DiagramCanvasHandle | null>;
+  /** Contenedor que pasa a pantalla completa (botón de ajustar del header). */
+  areaRef?: RefObject<HTMLElement | null>;
   onLayoutLoadingChange?: (loading: boolean) => void;
   /** Se pinta encima del área de render (la intro de carga). */
   children?: ReactNode;
@@ -39,6 +41,8 @@ interface Props {
   analysisLayers?: readonly string[] | null;
   reportTitle?: string;
   onExportReport?: (markdown: string) => void;
+  /** Cada incremento restablece el visor (tarjetas, opciones de vista y encuadre). */
+  resetSignal?: number;
 }
 
 export function RenderArea({
@@ -47,6 +51,7 @@ export function RenderArea({
   selectedId,
   onSelect,
   canvasRef,
+  areaRef,
   onLayoutLoadingChange,
   children,
   onNewProject,
@@ -64,6 +69,7 @@ export function RenderArea({
   analysisLayers = null,
   reportTitle,
   onExportReport,
+  resetSignal,
 }: Props): JSX.Element {
   const { t } = useLocalization();
   const labels = useMemo(() => viewerLabels(t), [t]);
@@ -106,7 +112,7 @@ export function RenderArea({
   }
 
   return (
-    <main className="render-area has-canvas">
+    <main ref={areaRef} className="render-area has-canvas">
       <PumlViewer
         model={model}
         selectedId={selectedId}
@@ -127,6 +133,7 @@ export function RenderArea({
         analysisLayers={analysisLayers}
         {...(reportTitle !== undefined ? { reportTitle } : {})}
         {...(onExportReport ? { onExportReport } : {})}
+        {...(resetSignal !== undefined ? { resetSignal } : {})}
       />
       {children}
     </main>
