@@ -64,6 +64,8 @@ npm ci
 npm run dev
 ```
 
+   En Linux, si el binario `chrome-sandbox` de Electron no tiene permisos SUID, `npm run dev` arranca solo en desarrollo con `--no-sandbox` y lo avisa por consola. Los paquetes generados con `npm run dist` no se ven afectados.
+
 4. Para revisar y compilar el proyecto:
 
 ```bash
