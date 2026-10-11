@@ -72,6 +72,11 @@ export interface DrawArgs {
   halo?: ReadonlyMap<string, number> | undefined;
   /** Capa de análisis (T9): solo dibujo, no cambia el layout. Sin valor: el diagrama de siempre. */
   analysis?: AnalysisOverlay | null | undefined;
+  /**
+   * Layout del que sale la agregación semántica. Durante una transición `layout` es una mezcla nueva en cada
+   * fotograma (la memoización por identidad no valdría): se pasa el layout estable de destino.
+   */
+  semanticLayout?: LayoutResult | undefined;
 }
 
 /** Tema claro fijo para exportar (mismos valores que los fallbacks de readTheme). */
@@ -326,7 +331,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   const showDetail = full || s >= LOD_DETAIL;
   // Zoom semántico (T10.5): en diagramas grandes, al alejar cada paquete se funde en un bloque "nombre ×n".
   // Depende solo del total de nodos y del zoom (fundido continuo); la agregación se memoiza por layout.
-  const sem = layout.nodes.length > FULL_DETAIL_MAX_NODES && layout.packages.length > 0 ? semanticOf(layout) : null;
+  const sem = layout.nodes.length > FULL_DETAIL_MAX_NODES && layout.packages.length > 0 ? semanticOf(a.semanticLayout ?? layout) : null;
   const ba = sem && sem.packages.length > 0 ? blockAlpha(s) : 0;
   /** Opacidad de lo que el bloque sustituye: tarjetas empaquetadas, sus aristas, marcos de paquete y notas. */
   const ca = 1 - ba;

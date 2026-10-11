@@ -1,6 +1,6 @@
 // tests/presentation/diagram/canvas/keyboardNav.test.ts — atajos de teclado del canvas (T10.6).
 import { describe, expect, it } from 'vitest';
-import { hoverAfterKeyNav, pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong } from '../../../../src/presentation/diagram/canvas/keyboardNav';
+import { hoverAfterKeyNav, pickEdge, visibleLinks, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong } from '../../../../src/presentation/diagram/canvas/keyboardNav';
 import type { NodeBox } from '../../../../src/presentation/diagram/types';
 import { rel } from '../../../helpers/diagramBuilders';
 
@@ -173,5 +173,29 @@ describe('hoverAfterKeyNav (#40: el resaltado no se queda en la entidad anterior
 
   it('sin hover sigue sin hover', () => {
     expect(hoverAfterKeyNav(null, 'B')).toBeNull();
+  });
+});
+
+describe('visibleLinks (el modo relaciones recorre lo que se ve)', () => {
+  const edges = [
+    { source: 'A', target: 'B', type: 'EXTENDS' as const },
+    { source: 'A', target: 'C', type: 'ASSOCIATION' as const },
+    { source: 'A', target: 'pkg:P', type: 'ASSOCIATION' as const },
+    { source: 'A', target: 'D', type: 'ASSOCIATION' as const },
+  ];
+
+  it('sin filtros devuelve todas las aristas del layout (incluidas las de paquetes plegados)', () => {
+    expect(visibleLinks(edges, null).map((e) => e.target)).toEqual(['B', 'C', 'pkg:P', 'D']);
+  });
+
+  it('descarta los tipos de relación ocultos y las que tocan una clase oculta', () => {
+    const hidden = { nodes: new Set(['D']), relTypes: new Set(['ASSOCIATION' as const]) };
+    expect(visibleLinks(edges, hidden).map((e) => e.target)).toEqual(['B']);
+    expect(visibleLinks(edges, { nodes: new Set(['D']), relTypes: new Set() }).map((e) => e.target)).toEqual(['B', 'C', 'pkg:P']);
+  });
+
+  it('con relatedNext, una clase enlazada solo con un paquete plegado llega a su tarjeta agregada', () => {
+    const boxes = [box('A', 0, 0), box('pkg:P', 200, 0)];
+    expect(relatedNext(boxes, visibleLinks(edges, null), 'A', null, 'right')).toBe('pkg:P');
   });
 });

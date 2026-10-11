@@ -1,5 +1,5 @@
 // src/presentation/diagram/canvas/keyboardNav.ts — atajos de teclado del canvas (T10.6, puro).
-import type { RelationshipModel, RelType } from '../../../domain/diagram/model';
+import type { RelType } from '../../../domain/diagram/model';
 import type { NodeBox } from '../types';
 
 export type SpatialDir = 'left' | 'right' | 'up' | 'down';
@@ -170,9 +170,28 @@ export function stepAlong(count: number, step: number, dir: SpatialDir): number 
  * más cercana en `dir`; si no hay, la primera (→/↓) o última (←/↑) por id. null sin vecinas. Sin `from`
  * (o fuera de `boxes`): la primera clase visible por id.
  */
+/** Relación entre dos cajas (RelationshipModel o arista del layout). */
+export interface Link {
+  source: string;
+  target: string;
+  type: RelType;
+}
+
+/**
+ * Aristas que se ven: las del layout mostrado (con paquetes plegados como una caja) sin las de tipos de
+ * relación ni clases ocultos por filtros. El modo relaciones recorre estas, no el modelo completo.
+ */
+export function visibleLinks<E extends Link>(
+  edges: readonly E[],
+  hidden: { nodes: ReadonlySet<string>; relTypes: ReadonlySet<RelType> } | null,
+): E[] {
+  if (hidden === null) return [...edges];
+  return edges.filter((e) => !hidden.relTypes.has(e.type) && !hidden.nodes.has(e.source) && !hidden.nodes.has(e.target));
+}
+
 export function relatedNext(
   boxes: readonly NodeBox[],
-  rels: readonly RelationshipModel[],
+  rels: readonly Link[],
   from: string | null,
   type: RelType | null,
   dir: SpatialDir,
