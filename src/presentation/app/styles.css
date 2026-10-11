@@ -333,3 +333,26 @@ p { margin: 0 0 8px; }
 @media (max-width: 900px) {
   .history-panel { width: 220px; }
 }
+
+/* Paleta de comandos (T10) */
+.command-palette-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; background: #0004; }
+.command-palette { display: flex; flex-direction: column; width: min(560px, calc(100vw - 32px)); max-height: 70vh; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); color: var(--fg); box-shadow: 0 12px 40px #0005; overflow: hidden; }
+.command-palette-input { padding: 12px 14px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: inherit; font-size: 15px; outline: none; }
+.command-palette-list { margin: 0; padding: 4px; list-style: none; overflow: auto; overscroll-behavior: contain; }
+.command-palette-option { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border-radius: var(--radius); cursor: pointer; font-size: 13px; }
+.command-palette-option.is-active { background: var(--accent); color: var(--bg, #fff); }
+.command-palette-option mark { background: transparent; color: inherit; font-weight: 700; text-decoration: underline; }
+.command-palette-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.command-palette-detail { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .7; font-size: 12px; }
+.command-palette-kind { margin-left: auto; opacity: .7; font-size: 11px; }
+.command-palette-foot { margin: 0; padding: 4px 12px 0; font-size: 11px; color: var(--fg-muted); }
+.command-palette-hint { margin: 0; padding: 2px 12px 8px; font-size: 11px; color: var(--fg-muted); }
+
+/* Vistas guardadas (T10) */
+.views-panel-form { display: flex; flex-direction: column; gap: 8px; }
+.views-panel-form fieldset { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.views-panel-title { flex-direction: column; align-items: stretch; }
+.views-panel-title input { padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); font-size: 12px; }
+.views-panel-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.views-panel-list li { display: flex; align-items: center; gap: 4px; }
+.views-panel-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SidecarFilters, SidecarState } from '../../application/ports/ipc';
-import { validateViews } from '../../presentation/diagram/presentation/views';
+import { validateViews } from '../../application/deckViews';
 
 /** Versión del esquema del sidecar (migrable en T11). */
 export const SIDECAR_VERSION = 1;

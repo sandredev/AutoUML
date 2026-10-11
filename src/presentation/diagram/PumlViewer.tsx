@@ -4,16 +4,19 @@ import { analyzeDiagram } from '../../domain/analysis/analyze';
 import { analysisReport } from '../../domain/analysis/report';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { SidecarState } from '../../application/ports/ipc';
+import { CommandPalette, type PaletteItem } from '../components/CommandPalette';
 import { AnalysisPanel } from './AnalysisPanel';
 import { buildOverlay, type HeatMetric } from './analysis/overlay';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
 import type { MenuAction, MenuSubject } from './contextMenu';
 import { FiltersPanel, withListItem } from './FiltersPanel';
 import { focusTargetOf, viewerShortcut } from './focusMode';
-import { drawHiddenOf, hasActiveFilters, type DiagramFilters } from './graph/filters';
+import { drawHiddenOf, hasActiveFilters, memberFiltersKey, type DiagramFilters } from './graph/filters';
 import { focusKey, type FocusDirection, type FocusSpec } from './graph/neighborhood';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from './labels';
-import { isPackageNode, packageNodeName } from './layout/aggregate';
+import { collapsedOwner, isPackageNode, PACKAGE_NODE_PREFIX, packageNodeName } from './layout/aggregate';
+import { addView, removeView, type DeckView } from './presentation/views';
+import { ViewsPanel, type SaveViewOptions } from './ViewsPanel';
 import { useDiagramLayout } from './layout/useDiagramLayout';
 import type { LayoutOptions, ViewState } from './types';
 import { initialViewOptions, resetViewOptions, type ViewOptionsState } from './viewOptions';
@@ -40,8 +43,8 @@ export interface PumlViewerProps {
   labels?: ViewerLabels;
   /** Estado persistido del sidecar (colapsados, overrides, vista). */
   initialSidecar?: SidecarState | null;
-  /** Avisa cuando cambian colapsados, filtros (T8), posiciones manuales o vista (para persistir). */
-  onViewStateChange?: (collapsed: ReadonlySet<string>, filters: DiagramFilters) => void;
+  /** Avisa cuando cambian colapsados, filtros (T8), vistas guardadas (T10), posiciones manuales o vista (para persistir). */
+  onViewStateChange?: (collapsed: ReadonlySet<string>, filters: DiagramFilters, views: readonly DeckView[]) => void;
   /** Línea de una relación cuya arista se resalta (T7: cursor del editor). */
   highlightLine?: number | null;
   /** Clic en una arista: línea de su relación (T7). */
@@ -64,6 +67,7 @@ export type CodeTarget = { kind: 'type'; id: string } | { kind: 'relation'; line
 
 const NO_COLLAPSED: ReadonlySet<string> = new Set();
 const NO_FILTERS: DiagramFilters = {};
+const NO_VIEWS: readonly DeckView[] = [];
 const FOCUS_DEPTHS = [1, 2, 3] as const;
 const FOCUS_DIRECTIONS: FocusDirection[] = ['both', 'out', 'in'];
 
@@ -96,6 +100,9 @@ export function PumlViewer({
   const [focusAnimate, setFocusAnimate] = useState(false);
   // Filtros semánticos (T8), por documento: llegan con el sidecar y se persisten con él.
   const [filters, setFilters] = useState<DiagramFilters>(NO_FILTERS);
+  // Vistas guardadas como diapositivas (T10), por documento: también viajan con el sidecar.
+  const [views, setViews] = useState<readonly DeckView[]>(NO_VIEWS);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // Diagnóstico de arquitectura (T9): capa opcional de SOLO dibujo. Se calcula sobre el documento entero
   // (no sobre lo filtrado o enfocado) y no entra en useDiagramLayout: activarla no recalcula posiciones.
   const [analysisOn, setAnalysisOn] = useState(false);
@@ -113,12 +120,15 @@ export function PumlViewer({
     setCollapsed(NO_COLLAPSED);
     setFocus(null);
     setFilters(NO_FILTERS);
+    setViews(NO_VIEWS);
+    setPaletteOpen(false);
   }
   if (sidecarKey !== null && initialSidecar !== undefined && lastAppliedSidecar.current !== initialSidecar) {
     lastAppliedSidecar.current = initialSidecar;
     const known = model ? new Set(model.packages.map((p) => p.name)) : null;
     setCollapsed(new Set((initialSidecar?.collapsed ?? []).filter((name) => !known || known.has(name))));
     setFilters(initialSidecar?.filters ?? NO_FILTERS);
+    setViews(initialSidecar?.views ?? NO_VIEWS);
   }
 
   // Paquetes plegados que siguen existiendo en el modelo (derivado: sin efecto ni render extra).
@@ -273,6 +283,77 @@ export function PumlViewer({
     selectRef.current?.(id);
   }, [handleRef]);
   const closeAnalysis = useCallback(() => setAnalysisOn(false), []);
+
+  // Paleta de comandos (T10): Ctrl+K. Al cerrar, el foco vuelve a donde estaba.
+  const paletteReturnFocus = useRef<HTMLElement | null>(null);
+  const openPalette = useCallback(() => {
+    paletteReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setPaletteOpen(true);
+  }, []);
+  const closePalette = useCallback(() => {
+    setPaletteOpen(false);
+    paletteReturnFocus.current?.focus();
+    paletteReturnFocus.current = null;
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'k') return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      e.preventDefault();
+      setPaletteOpen((open) => {
+        if (open) return false;
+        paletteReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        return true;
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const paletteItems = useMemo<PaletteItem[]>(() => {
+    if (!model) return [];
+    const classes = model.types.map((t): PaletteItem => ({ id: t.id, label: t.name, kind: 'class', detail: t.packageName }));
+    const packages = packageNames.map((name): PaletteItem => ({ id: name, label: name, kind: 'package' }));
+    return [...packages, ...classes];
+  }, [model, packageNames]);
+  const pickPaletteItem = useCallback((item: PaletteItem) => {
+    closePalette();
+    const canvas = handleRef.current;
+    if (item.kind === 'class') {
+      goToClass(item.id, true);
+      return;
+    }
+    // Paquete plegado (o dentro de uno): se lleva la cámara a su tarjeta agregada.
+    const owner = collapsedOwner(item.id, liveCollapsed);
+    if (owner !== null) canvas?.focusNode(PACKAGE_NODE_PREFIX + owner, { animate: true });
+    else if (!canvas?.fitPackage(item.id, { animate: true })) canvas?.fit();
+  }, [closePalette, goToClass, handleRef, liveCollapsed]);
+
+  // Vistas guardadas (T10): cámara + filtros, foco y plegados opcionales.
+  const saveView = useCallback((o: SaveViewOptions) => {
+    const snap = handleRef.current?.getSnapshot();
+    if (!snap) return;
+    const v: DeckView = { title: o.title, view: { ...snap.view } };
+    if (o.includeFilters) v.filters = filters;
+    if (o.includeFocus && activeFocus !== null) v.focusKey = activeFocus.id;
+    if (o.includeCollapsed) v.collapsed = [...liveCollapsed];
+    setViews((prev) => addView(prev, v));
+  }, [handleRef, filters, activeFocus, liveCollapsed]);
+  const removeSavedView = useCallback((index: number) => setViews((prev) => removeView(prev, index)), []);
+  const applyView = useCallback((index: number) => {
+    const v = views[index];
+    if (!v) return;
+    const known = model ? new Set(model.packages.map((p) => p.name)) : null;
+    const nextCollapsed = v.collapsed ? new Set(v.collapsed.filter((n) => !known || known.has(n))) : null;
+    const collapsedChanges = nextCollapsed !== null
+      && (nextCollapsed.size !== liveCollapsed.size || [...nextCollapsed].some((n) => !liveCollapsed.has(n)));
+    const filtersChange = v.filters !== undefined && memberFiltersKey(v.filters) !== memberFiltersKey(filters);
+    const focusChanges = v.focusKey !== undefined && v.focusKey !== activeFocus?.id;
+    // Si el layout va a cambiar, la cámara espera al layout nuevo; si el foco cambia, el foco reencuadra.
+    handleRef.current?.goToView(v.view, { animate: true, afterLayout: collapsedChanges || filtersChange || focusChanges });
+    if (nextCollapsed !== null && collapsedChanges) setCollapsed(nextCollapsed);
+    if (v.filters !== undefined) setFilters(v.filters);
+    if (v.focusKey !== undefined && focusChanges) focusOn(v.focusKey, true);
+  }, [views, model, liveCollapsed, filters, activeFocus, handleRef, focusOn]);
   const exportReport = useMemo(() => {
     if (!onExportReport || !model || !analysis) return undefined;
     return () => onExportReport(analysisReport(model, analysis, labels.analysis, reportTitle, { includeExternal }));
@@ -284,14 +365,14 @@ export function PumlViewer({
   // El host lee el snapshot del canvas al guardar; aquí solo se le despierta (él hace debounce).
   const notifyRef = useRef(onViewStateChange);
   notifyRef.current = onViewStateChange;
-  const persistRef = useRef({ collapsed: liveCollapsed, filters });
-  persistRef.current = { collapsed: liveCollapsed, filters };
+  const persistRef = useRef({ collapsed: liveCollapsed, filters, views });
+  persistRef.current = { collapsed: liveCollapsed, filters, views };
   const notify = useCallback(() => {
-    notifyRef.current?.(persistRef.current.collapsed, persistRef.current.filters);
+    notifyRef.current?.(persistRef.current.collapsed, persistRef.current.filters, persistRef.current.views);
   }, []);
   useEffect(() => {
     notify();
-  }, [liveCollapsed, filters, notify]);
+  }, [liveCollapsed, filters, views, notify]);
   const handleManualPositions = useCallback((has: boolean) => {
     setManual(has);
     notify();
@@ -346,6 +427,26 @@ export function PumlViewer({
           {engineInfo ? <span className="puml-viewer-bar-engine"> · {engineInfo}</span> : null}
           {fallback ? <span className="puml-viewer-bar-warn" title={fallback}> {labels.fallbackBadge}</span> : null}
         </span>
+        <button
+          type="button"
+          className="puml-viewer-reset"
+          title={labels.palette.toolbarTitle}
+          aria-keyshortcuts="Control+K"
+          aria-haspopup="dialog"
+          onClick={openPalette}
+        >
+          {labels.palette.toolbar}
+        </button>
+        <ViewsPanel
+          views={views}
+          labels={labels.views}
+          hasFilters={filtersActive}
+          hasFocus={activeFocus !== null}
+          hasCollapsed={liveCollapsed.size > 0}
+          onSave={saveView}
+          onApply={applyView}
+          onRemove={removeSavedView}
+        />
         <FiltersPanel filters={filters} packages={packageNames} labels={labels} onChange={setFilters} />
         <button
           type="button"
@@ -444,6 +545,9 @@ export function PumlViewer({
         />
       ) : null}
       </div>
+      {paletteOpen ? (
+        <CommandPalette items={paletteItems} labels={labels.palette} onPick={pickPaletteItem} onClose={closePalette} />
+      ) : null}
     </section>
   );
 }

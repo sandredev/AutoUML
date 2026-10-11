@@ -38,6 +38,13 @@ export interface DiagramCanvasHandle {
   fit(opts?: { animate?: boolean }): void;
   /** Centra una clase (anima por defecto; `{ animate: false }` para atajos de teclado). */
   focusNode(id: string, opts?: { animate?: boolean }): void;
+  /** Encuadra un paquete (T10). false si no está en el layout (p. ej. plegado: usar focusNode del paquete). */
+  fitPackage(name: string, opts?: { animate?: boolean }): boolean;
+  /**
+   * Lleva la cámara a una vista guardada (T10). Con `afterLayout` espera al layout nuevo (plegados que
+   * cambian) antes de moverla; el foco, si cambia, reencuadra por su cuenta.
+   */
+  goToView(view: ViewState, opts?: { animate?: boolean; afterLayout?: boolean }): void;
   exportPng(): Promise<Blob | null>;
   /** PNG con escala/tema/fondo configurables (T5: tema claro por defecto). */
   exportPngFull(opts?: { scale?: 1 | 2 | 4; theme?: 'app' | 'light'; transparent?: boolean }): Promise<Blob | null>;
@@ -592,6 +599,23 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           return next;
         });
       },
+      fitPackage: (name: string, opts) => {
+        const L = latest.current;
+        const box = L.layout.packages.find((p) => p.name === name);
+        const { w, h } = sizeRef.current;
+        if (!box || !canPaint({ w, h })) return false;
+        autoFitRef.current = false;
+        flyTo(fitToBounds(box, w, h, FIT_PADDING), opts?.animate ?? true);
+        return true;
+      },
+      goToView: (target: ViewState, opts) => {
+        autoFitRef.current = false;
+        if (opts?.afterLayout) {
+          pendingFitRef.current = { from: latest.current.sourceLayout, target: { ...target }, animate: opts.animate ?? true };
+          return;
+        }
+        flyTo({ ...target }, opts?.animate ?? true);
+      },
       exportPng: async () => {
         const canvas = renderOffscreen(2, 'app', false);
         if (!canvas) return null;
@@ -618,7 +642,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       },
       hasManualPositions: () => hasOverrides(latest.current.overrides),
     }),
-    [zoomBy, fit, focusNodeInView, updateCollapsed, themeOf],
+    [zoomBy, fit, flyTo, focusNodeInView, updateCollapsed, themeOf],
   );
 
   /** Pinta el diagrama visible en un canvas fuera de pantalla (exportación). */

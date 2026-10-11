@@ -112,6 +112,47 @@ export interface ViewerLabels {
   routePick: string;
   /** Diagnóstico de arquitectura (T9). */
   analysis: AnalysisLabels;
+  /** Paleta de comandos (T10). */
+  palette: PaletteLabels;
+  /** Vistas de presentación (T10). */
+  views: ViewsLabels;
+}
+
+/** Textos de la paleta de comandos (Ctrl+K). */
+export interface PaletteLabels {
+  title: string;
+  placeholder: string;
+  empty: string;
+  /** "{n} resultados" (anunciado al teclear). */
+  results: string;
+  kindClass: string;
+  kindPackage: string;
+  hint: string;
+  toolbar: string;
+  toolbarTitle: string;
+}
+
+/** Textos de las vistas guardadas como diapositivas (T10). */
+export interface ViewsLabels {
+  toggle: string;
+  toggleTitle: string;
+  panelAria: string;
+  saveHeading: string;
+  titleLabel: string;
+  /** Título por defecto: "Vista {n}". */
+  defaultTitle: string;
+  includeFilters: string;
+  includeFocus: string;
+  includeCollapsed: string;
+  save: string;
+  listHeading: string;
+  empty: string;
+  apply: string;
+  remove: string;
+  /** "Aplicar la vista «{title}»" */
+  applyAria: string;
+  removeAria: string;
+  close: string;
 }
 
 /** Textos del diagnóstico de arquitectura (T9): los del informe Markdown más los del panel. */
@@ -240,6 +281,36 @@ export const DEFAULT_LABELS: ViewerLabels = {
   menuExitFocus: 'Salir del foco',
   menuClearFilters: 'Quitar filtros',
   routePick: 'Ruta desde {from}: haz clic en la clase de destino',
+  palette: {
+    title: 'Paleta de comandos',
+    placeholder: 'Buscar clase o paquete…',
+    empty: 'Sin resultados',
+    results: '{n} resultados',
+    kindClass: 'Clase',
+    kindPackage: 'Paquete',
+    hint: '↑↓ navegar · Enter ir · Esc cerrar',
+    toolbar: 'Buscar',
+    toolbarTitle: 'Buscar clases y paquetes (Ctrl+K)',
+  },
+  views: {
+    toggle: 'Vistas',
+    toggleTitle: 'Guardar y aplicar vistas del diagrama',
+    panelAria: 'Vistas guardadas',
+    saveHeading: 'Guardar la vista actual',
+    titleLabel: 'Título',
+    defaultTitle: 'Vista {n}',
+    includeFilters: 'Incluir filtros',
+    includeFocus: 'Incluir clase en foco',
+    includeCollapsed: 'Incluir paquetes plegados',
+    save: 'Guardar vista',
+    listHeading: 'Vistas guardadas',
+    empty: 'Aún no hay vistas guardadas.',
+    apply: 'Aplicar',
+    remove: 'Eliminar',
+    applyAria: 'Aplicar la vista «{title}»',
+    removeAria: 'Eliminar la vista «{title}»',
+    close: 'Cerrar',
+  },
   analysis: {
     title: '{title}: diagnóstico de arquitectura',
     summary: '{types} tipos analizados · {deps} dependencias.',

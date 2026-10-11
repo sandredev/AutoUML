@@ -1,6 +1,6 @@
 import { useMemo, type JSX, type ReactNode, type RefObject } from 'react';
 import type { DiagramModel } from '../../domain/diagram/model';
-import type { ProjectInfo, SidecarFilters, SidecarState } from '../../application/ports/ipc';
+import type { ProjectInfo, SidecarFilters, SidecarState, SidecarView } from '../../application/ports/ipc';
 import { PumlViewer, type CodeTarget } from '../diagram/PumlViewer';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import { useLocalization } from '../localization/LocalizationProvider';
@@ -22,7 +22,7 @@ interface Props {
   /** Estado persistido del sidecar (colapsados, overrides, vista). */
   initialSidecar?: SidecarState | null;
   /** Avisa cuando cambian colapsados, posiciones manuales o vista (para persistir). */
-  onViewStateChange?: (collapsed: ReadonlySet<string>, filters: SidecarFilters) => void;
+  onViewStateChange?: (collapsed: ReadonlySet<string>, filters: SidecarFilters, views: readonly SidecarView[]) => void;
   /** Sincronización con el editor (T7). */
   highlightLine?: number | null;
   onRelationSelect?: (line: number | null) => void;

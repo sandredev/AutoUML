@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarFilters, SidecarState, StorageInfo } from '../../application/ports/ipc';
+import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarFilters, SidecarState, SidecarView, StorageInfo } from '../../application/ports/ipc';
 import type { OpenPumlFile } from '../../application/ports/history';
 import { buildTree, countByCategory } from '../../domain/diagram/classify';
 import { scanIncludes } from '../../application/puml/include';
@@ -21,6 +21,7 @@ import { StatusBar, type Status } from '../components/StatusBar';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import type { CodeTarget } from '../diagram/PumlViewer';
 import { hasActiveFilters } from '../diagram/graph/filters';
+import { serializeViews } from '../diagram/presentation/views';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { CloseConfirmModal } from '../components/CloseConfirmModal';
 import { createOpenGuard, type OpenChoice } from './openGuard';
@@ -88,6 +89,7 @@ export default function App() {
   const saveTimer = useRef<number | undefined>(undefined);
   const pendingCollapsed = useRef<ReadonlySet<string> | null>(null);
   const pendingFilters = useRef<SidecarFilters>({});
+  const pendingViews = useRef<readonly SidecarView[]>([]);
   // T5: texto combinado (con !include expandidos, lo que se parsea y muestra IssuesPanel),
   // archivos vigilados, ruta externa y sidecar.
   const [combined, setCombined] = useState<string | null>(null);
@@ -543,9 +545,10 @@ export default function App() {
     };
   }, [docKey, projectName, externalPath]);
 
-  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>, filters: SidecarFilters) => {
+  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>, filters: SidecarFilters, views: readonly SidecarView[]) => {
     pendingCollapsed.current = _collapsed;
     pendingFilters.current = filters;
+    pendingViews.current = views;
     if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = undefined;
@@ -561,6 +564,8 @@ export default function App() {
         view: snap.view,
         // Sin filtros activos no se escribe el campo: el sidecar queda igual que antes de T8.
         ...(hasActiveFilters(filters) ? { filters } : {}),
+        // Igual con las vistas (T10): sin ninguna guardada el sidecar no cambia.
+        ...(pendingViews.current.length > 0 ? { views: serializeViews(pendingViews.current) } : {}),
       });
     }, 800);
   }, []);
