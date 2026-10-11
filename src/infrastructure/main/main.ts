@@ -19,7 +19,21 @@ let menuState: MenuState = {
   themeMode: 'system',
 };
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+// En Wayland el compositor deja de pedir fotogramas durante la transición a pantalla completa y el lienzo se
+// queda sin repintar hasta la siguiente entrada (#38); bajo XWayland no pasa. El flag solo cuenta en la línea de
+// comandos (appendSwitch llega tarde y hasSwitch ya da "wayland"), así que el paquete se relanza con él.
+// En desarrollo lo pasa scripts/dev-electron.mjs. AUTOUML_OZONE elige otra plataforma.
+const needsOzoneRelaunch =
+  process.platform === 'linux' && app.isPackaged && !process.argv.some((a) => a.startsWith('--ozone-platform'));
+if (needsOzoneRelaunch) {
+  app.relaunch({
+    execPath: process.env.APPIMAGE || process.execPath,
+    args: [...process.argv.slice(1), `--ozone-platform=${process.env.AUTOUML_OZONE || 'x11'}`],
+  });
+  app.exit(0);
+}
+
+const hasSingleInstanceLock = !needsOzoneRelaunch && app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) {
   app.quit();
