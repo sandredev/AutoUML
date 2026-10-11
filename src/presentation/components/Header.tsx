@@ -1,22 +1,21 @@
 
 import type { JSX, ReactNode } from 'react';
 import type { MenuAction, MenuState } from '../../application/ports/ipc';
+import { keysOf } from '../../application/shortcuts';
 import { AppMenuBar } from './AppMenuBar';
-import { CodeIcon, ExportIcon, FitIcon, LoadIcon, RelayoutIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
+import { CodeIcon, ExportIcon, FitIcon, RelayoutIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { withShortcut } from '../localization/translations';
 import './settings.css';
 
 interface Props {
   projectName: string | null;
-  canLoad: boolean;
   canReload: boolean;
   sidebarVisible: boolean;
   /** Panel del editor de código (T7). */
   editorVisible: boolean;
   canEdit: boolean;
   onToggleEditor: () => void;
-  onLoad: () => void;
   onReload: () => void;
   canView: boolean;
   onToggleSidebar: () => void;
@@ -48,13 +47,11 @@ function ToolButton({ label, shortcut, icon, disabled, onClick }: ToolProps): JS
 
 export function Header({
   projectName,
-  canLoad,
   canReload,
   sidebarVisible,
   editorVisible,
   canEdit,
   onToggleEditor,
-  onLoad,
   onReload,
   canView,
   onToggleSidebar,
@@ -67,7 +64,7 @@ export function Header({
   onMenuAction,
 }: Props): JSX.Element {
   const { t } = useLocalization();
-  const sidebarTitle = withShortcut(sidebarVisible ? t('header.sidebarHide') : t('header.sidebarShow'), 'Ctrl+B');
+  const sidebarTitle = withShortcut(sidebarVisible ? t('header.sidebarHide') : t('header.sidebarShow'), keysOf('toggleSidebar'));
   return (
     <>
       <AppMenuBar state={menuState} onAction={onMenuAction} />
@@ -76,7 +73,7 @@ export function Header({
         type="button"
         className={sidebarVisible ? 'tool-btn active' : 'tool-btn'}
         title={sidebarTitle}
-        aria-label={withShortcut(t('header.sidebarToggle'), 'Ctrl+B')}
+        aria-label={withShortcut(t('header.sidebarToggle'), keysOf('toggleSidebar'))}
         aria-pressed={sidebarVisible}
         disabled={projectName === null}
         onClick={onToggleSidebar}
@@ -86,8 +83,8 @@ export function Header({
       <button
         type="button"
         className={editorVisible ? 'tool-btn active' : 'tool-btn'}
-        title={withShortcut(editorVisible ? t('header.editorHide') : t('header.editorShow'), 'Ctrl+E')}
-        aria-label={withShortcut(t('header.editorToggle'), 'Ctrl+E')}
+        title={withShortcut(editorVisible ? t('header.editorHide') : t('header.editorShow'), keysOf('toggleEditor'))}
+        aria-label={withShortcut(t('header.editorToggle'), keysOf('toggleEditor'))}
         aria-pressed={editorVisible}
         disabled={!canEdit}
         onClick={onToggleEditor}
@@ -103,13 +100,12 @@ export function Header({
       </div>
 
       <div className="toolbar" role="toolbar" aria-label={t('header.toolbar')}>
-        <ToolButton label={t('header.load')} shortcut="Ctrl+O" icon={<LoadIcon />} disabled={!canLoad} onClick={onLoad} />
-        <ToolButton label={t('header.reload')} shortcut="Ctrl+R" icon={<ReloadIcon />} disabled={!canReload} onClick={onReload} />
+        <ToolButton label={t('header.reload')} shortcut={keysOf('reload')} icon={<ReloadIcon />} disabled={!canReload} onClick={onReload} />
         <span className="toolbar-sep" aria-hidden="true" />
-        <ToolButton label={t('header.zoomIn')} shortcut="Ctrl+=" icon={<ZoomInIcon />} disabled={!canView} onClick={onZoomIn} />
-        <ToolButton label={t('header.zoomOut')} shortcut="Ctrl+-" icon={<ZoomOutIcon />} disabled={!canView} onClick={onZoomOut} />
-        <ToolButton label={t('header.fit')} shortcut="Ctrl+0" icon={<FitIcon />} disabled={!canView} onClick={onFit} />
-        <ToolButton label={t('header.relayout')} shortcut="Ctrl+Shift+L" icon={<RelayoutIcon />} disabled={!canView} onClick={onRelayout} />
+        <ToolButton label={t('header.zoomIn')} shortcut={keysOf('zoomIn')} icon={<ZoomInIcon />} disabled={!canView} onClick={onZoomIn} />
+        <ToolButton label={t('header.zoomOut')} shortcut={keysOf('zoomOut')} icon={<ZoomOutIcon />} disabled={!canView} onClick={onZoomOut} />
+        <ToolButton label={t('header.fit')} shortcut={keysOf('fullscreen')} icon={<FitIcon />} disabled={!canView} onClick={onFit} />
+        <ToolButton label={t('header.relayout')} shortcut={keysOf('relayout')} icon={<RelayoutIcon />} disabled={!canView} onClick={onRelayout} />
         <ToolButton label={t('header.export')} icon={<ExportIcon />} disabled={!canView} onClick={onExport} />
       </div>
     </header>

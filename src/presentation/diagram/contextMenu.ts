@@ -64,8 +64,8 @@ export function contextMenuEntries(subject: MenuSubject, ctx: MenuContext, label
       ];
     case 'background': {
       const out: MenuEntry[] = [{ action: 'fit', label: labels.menuFit }];
-      if (ctx.hasRoute) out.push({ action: 'clear-route', label: labels.menuClearRoute, shortcut: 'Esc' });
-      if (ctx.inFocus) out.push({ action: 'exit-focus', label: labels.menuExitFocus, shortcut: 'Esc' });
+      if (ctx.hasRoute) out.push({ action: 'clear-route', label: labels.menuClearRoute, shortcut: '⌫' });
+      if (ctx.inFocus) out.push({ action: 'exit-focus', label: labels.menuExitFocus, shortcut: '⌫' });
       if (ctx.hasFilters) out.push({ action: 'clear-filters', label: labels.menuClearFilters });
       return out;
     }

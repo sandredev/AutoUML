@@ -50,6 +50,21 @@ export interface SidecarState {
   view: { scale: number; tx: number; ty: number } | null;
   /** Filtros semánticos del visor (T8). Opcional: un sidecar antiguo no lo tiene y sigue siendo v1. */
   filters?: SidecarFilters;
+  /** Vistas de presentación (T10). Opcional: sin ellas el sidecar sigue siendo v1. */
+  views?: SidecarView[];
+}
+
+/** Una diapositiva del modo presentación (T10): cámara + estado opcional del visor. */
+export interface SidecarView {
+  title: string;
+  view: { scale: number; tx: number; ty: number };
+  filters?: SidecarFilters;
+  /** id del tipo enfocado al llegar a la vista. */
+  focusKey?: string;
+  /** Paquetes plegados en esta vista. */
+  collapsed?: string[];
+  /** Tamaño del lienzo al guardar: la cámara se recentra si se aplica en otro (p. ej. pantalla completa). */
+  frame?: { w: number; h: number };
 }
 
 /**

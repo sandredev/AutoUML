@@ -4,6 +4,7 @@ import { FALLBACK_HEAT, FALLBACK_MARK_CYCLE, FALLBACK_MARK_VIOLATION, markOfEdge
 import type { Focus } from '../graph/focus';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
 import { isPackageNode, packageNodeName } from '../layout/aggregate';
+import { blockAlpha, semanticOf, type SemanticAggregate } from '../semantic/aggregatePackages';
 import type { CardDisplay } from '../style/contract';
 import type { LayoutResult, NodeBox, ViewState } from '../types';
 import { drawCard } from './card';
@@ -71,6 +72,11 @@ export interface DrawArgs {
   halo?: ReadonlyMap<string, number> | undefined;
   /** Capa de análisis (T9): solo dibujo, no cambia el layout. Sin valor: el diagrama de siempre. */
   analysis?: AnalysisOverlay | null | undefined;
+  /**
+   * Layout del que sale la agregación semántica. Durante una transición `layout` es una mezcla nueva en cada
+   * fotograma (la memoización por identidad no valdría): se pasa el layout estable de destino.
+   */
+  semanticLayout?: LayoutResult | undefined;
 }
 
 /** Tema claro fijo para exportar (mismos valores que los fallbacks de readTheme). */
@@ -119,6 +125,10 @@ const SELECT_RADIUS = 4;
 /** Opacidad de lo que queda fuera del foco al seleccionar una clase o una arista. */
 export const DIM_ALPHA = 0.25;
 const NO_DASH: number[] = [];
+/** Zoom semántico: tamaño en pantalla (px) del nombre y del "×n" de cada bloque, y de la punta de sus aristas. */
+const BLOCK_NAME_PX = 13;
+const BLOCK_COUNT_PX = 11;
+const BLOCK_HEAD_PX = 7;
 
 // ---------- cachés ----------
 const typeMaps = new WeakMap<DiagramModel, Map<string, TypeNode>>();
@@ -197,6 +207,96 @@ function drawPackageNode(ctx: CanvasRenderingContext2D, b: NodeBox, px: number, 
   }
 }
 
+/** Punto donde el rayo desde el centro de `b` en dirección (dx, dy) sale de la caja (|d| = 1). */
+function exitPoint(b: { x: number; y: number; w: number; h: number }, dx: number, dy: number): [number, number] {
+  const hw = b.w / 2, hh = b.h / 2;
+  const t = Math.min(dx !== 0 ? hw / Math.abs(dx) : Infinity, dy !== 0 ? hh / Math.abs(dy) : Infinity);
+  return [b.x + hw + dx * t, b.y + hh + dy * t];
+}
+
+/**
+ * Capa de zoom semántico (T10.5): aristas agregadas (grosor según n, con punta) y un bloque "nombre ×n" por paquete.
+ * Solo dibujo sobre la agregación memoizada del layout; `alpha` es la de los bloques (fundido con las tarjetas).
+ */
+function drawSemantic(
+  ctx: CanvasRenderingContext2D,
+  sem: SemanticAggregate,
+  alpha: number,
+  a: DrawArgs,
+  r: { x: number; y: number; w: number; h: number },
+  dimOf: (name: string) => number,
+): void {
+  const { theme } = a;
+  const s = a.view.scale;
+  const px = 1 / s;
+  const rx1 = r.x + r.w, ry1 = r.y + r.h;
+  const byName = new Map(sem.packages.map((p) => [p.name, p.bounds]));
+  const fxOf = (name: string): number => a.fx?.packages.get(name) ?? 1;
+
+  // Aristas: de borde a borde, desplazadas a su derecha para que a→b y b→a no se pisen.
+  ctx.setLineDash(NO_DASH);
+  ctx.strokeStyle = theme.edge;
+  ctx.fillStyle = theme.edge;
+  for (const e of sem.edges) {
+    const sb = byName.get(e.source), tb = byName.get(e.target);
+    if (!sb || !tb) continue;
+    const scx = sb.x + sb.w / 2, scy = sb.y + sb.h / 2;
+    const dx0 = tb.x + tb.w / 2 - scx, dy0 = tb.y + tb.h / 2 - scy;
+    const len = Math.hypot(dx0, dy0);
+    if (len === 0) continue;
+    const dx = dx0 / len, dy = dy0 / len;
+    const off = (e.width / 2 + 1) * px;
+    const [x0, y0] = exitPoint(sb, dx, dy);
+    const [x1, y1] = exitPoint(tb, -dx, -dy);
+    const ox = -dy * off, oy = dx * off;
+    const ax = x0 + ox, ay = y0 + oy, bx = x1 + ox, by = y1 + oy;
+    if (Math.max(ax, bx) < r.x || Math.min(ax, bx) > rx1 || Math.max(ay, by) < r.y || Math.min(ay, by) > ry1) continue;
+    ctx.globalAlpha = alpha * Math.min(dimOf(e.source), dimOf(e.target)) * Math.min(fxOf(e.source), fxOf(e.target));
+    const head = (BLOCK_HEAD_PX + e.width) * px;
+    ctx.lineWidth = e.width * px;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx - dx * head, by - dy * head);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx - dx * head - dy * head * 0.5, by - dy * head + dx * head * 0.5);
+    ctx.lineTo(bx - dx * head + dy * head * 0.5, by - dy * head - dx * head * 0.5);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Bloques: caja del paquete rellena (tapa las tarjetas que se desvanecen debajo), nombre y ×n a tamaño fijo en pantalla.
+  const namePx = Math.round(BLOCK_NAME_PX * px);
+  const countPx = Math.round(BLOCK_COUNT_PX * px);
+  for (const p of sem.packages) {
+    const b = p.bounds;
+    if (b.x > rx1 || b.x + b.w < r.x || b.y > ry1 || b.y + b.h < r.y) continue;
+    ctx.globalAlpha = alpha * dimOf(p.name) * fxOf(p.name);
+    roundRectPath(ctx, b.x, b.y, b.w, b.h, SELECT_RADIUS * px);
+    ctx.fillStyle = theme.pkgBg ?? theme.card;
+    ctx.fill();
+    ctx.lineWidth = 2 * px;
+    ctx.strokeStyle = theme.pkg;
+    ctx.stroke();
+    const maxW = b.w - 16 * px;
+    if (maxW * s < 24) continue;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    const twoLines = b.h * s >= (BLOCK_NAME_PX + BLOCK_COUNT_PX) * 1.6;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `600 ${namePx}px system-ui, sans-serif`;
+    ctx.fillStyle = theme.cardFg;
+    ctx.fillText(fitText(ctx, twoLines ? p.name : `${p.name} ×${p.classCount}`, maxW), cx, twoLines ? cy - countPx * 0.6 : cy);
+    if (twoLines) {
+      ctx.font = `${countPx}px system-ui, sans-serif`;
+      ctx.fillStyle = theme.muted;
+      ctx.fillText(fitText(ctx, `×${p.classCount}`, maxW), cx, cy + namePx * 0.6);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
 export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   const { layout, index, view, viewW, viewH, dpr, selectedId, theme } = a;
   const focus = a.focus ?? null;
@@ -229,14 +329,22 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   const boxesOnly = !full && s < LOD_BOXES;
   const showMembers = full || s >= LOD_MEMBERS;
   const showDetail = full || s >= LOD_DETAIL;
+  // Zoom semántico (T10.5): en diagramas grandes, al alejar cada paquete se funde en un bloque "nombre ×n".
+  // Depende solo del total de nodos y del zoom (fundido continuo); la agregación se memoiza por layout.
+  const sem = layout.nodes.length > FULL_DETAIL_MAX_NODES && layout.packages.length > 0 ? semanticOf(a.semanticLayout ?? layout) : null;
+  const ba = sem && sem.packages.length > 0 ? blockAlpha(s) : 0;
+  /** Opacidad de lo que el bloque sustituye: tarjetas empaquetadas, sus aristas, marcos de paquete y notas. */
+  const ca = 1 - ba;
+  const packed = (id: string): boolean => ba > 0 && sem!.owners.has(id);
+  const edgeAlpha = (source: string, target: string): number => (packed(source) && packed(target) ? ca : 1);
 
   // Paquetes
   ctx.setLineDash(NO_DASH);
   ctx.lineWidth = px;
   ctx.globalAlpha = dim(false);
-  for (const p of layout.packages) {
+  for (const p of ca > 0 ? layout.packages : []) {
     if (p.x > rx1 || p.x + p.w < r.x || p.y > ry1 || p.y + p.h < r.y) continue;
-    ctx.globalAlpha = dim(false) * (a.fx?.packages.get(p.name) ?? 1);
+    ctx.globalAlpha = dim(false) * (a.fx?.packages.get(p.name) ?? 1) * ca;
     if (theme.pkgBg) {
       ctx.fillStyle = theme.pkgBg;
       ctx.fillRect(p.x, p.y, p.w, p.h);
@@ -264,31 +372,38 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   const edges = queryEdges(index, r);
   if (boxesOnly) {
     if (edges.length <= MAX_LOW_EDGES) {
-      ctx.beginPath();
-      for (const i of edges) {
-        const e = layout.edges[i];
-        if (e) tracePath(ctx, e.points);
-      }
-      ctx.strokeStyle = theme.edge;
-      ctx.lineWidth = px;
-      ctx.stroke();
-      // Capa de análisis: las aristas marcadas, encima y en su color (sin el detalle del trazo a este zoom).
-      if (analysis) {
-        for (const m of ['violation', 'cycle'] as const) {
-          ctx.beginPath();
-          let any = false;
-          for (const i of edges) {
-            const e = layout.edges[i];
-            if (e && markOfEdge(analysis, a.model, e) === m) {
-              tracePath(ctx, e.points);
-              any = true;
-            }
-          }
-          if (!any) continue;
-          ctx.strokeStyle = markColor(m);
-          ctx.lineWidth = 3 * px;
-          ctx.stroke();
+      // Sin zoom semántico, un solo grupo opaco; con él, las aristas entre empaquetadas se funden aparte.
+      for (const alpha of ba > 0 ? [1, ca] : [1]) {
+        if (alpha <= 0) continue;
+        const inGroup = (i: number): boolean => ba === 0 || edgeAlpha(layout.edges[i]!.source, layout.edges[i]!.target) === alpha;
+        if (alpha !== 1) ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        for (const i of edges) {
+          const e = layout.edges[i];
+          if (e && inGroup(i)) tracePath(ctx, e.points);
         }
+        ctx.strokeStyle = theme.edge;
+        ctx.lineWidth = px;
+        ctx.stroke();
+        // Capa de análisis: las aristas marcadas, encima y en su color (sin el detalle del trazo a este zoom).
+        if (analysis) {
+          for (const m of ['violation', 'cycle'] as const) {
+            ctx.beginPath();
+            let any = false;
+            for (const i of edges) {
+              const e = layout.edges[i];
+              if (e && inGroup(i) && markOfEdge(analysis, a.model, e) === m) {
+                tracePath(ctx, e.points);
+                any = true;
+              }
+            }
+            if (!any) continue;
+            ctx.strokeStyle = markColor(m);
+            ctx.lineWidth = 3 * px;
+            ctx.stroke();
+          }
+        }
+        if (alpha !== 1) ctx.globalAlpha = 1;
       }
     }
   } else {
@@ -296,9 +411,11 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     for (const i of edges) {
       const e = layout.edges[i];
       if (!e) continue;
+      const fade = edgeAlpha(e.source, e.target);
+      if (fade <= 0) continue;
       const inFocus = focus?.edges.has(i) ?? false;
       const hovered = a.hoverEdge === i;
-      ctx.globalAlpha = (hovered ? 1 : dim(inFocus)) * (a.fx?.edges.get(i) ?? 1);
+      ctx.globalAlpha = (hovered ? 1 : dim(inFocus)) * (a.fx?.edges.get(i) ?? 1) * fade;
       const hot = inFocus || hovered || (hoverId !== null && (e.source === hoverId || e.target === hoverId));
       const mark = analysis ? markOfEdge(analysis, a.model, e) : null;
       drawEdgeFull(
@@ -326,12 +443,14 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   for (const i of visibleNodes) {
     const b = layout.nodes[i];
     if (!b) continue;
+    if (b.id === selectedId) selBox = b;
+    const fade = packed(b.id) ? ca : 1;
+    if (fade <= 0) continue;
     const isPkg = isPackageNode(b.id);
     const t = isPkg ? undefined : (types.get(b.id) ?? a.extraTypes?.get(b.id));
-    if (b.id === selectedId) selBox = b;
     if (b.id === a.hoverId) hoverBox = b;
     const nfx = a.fx?.nodes.get(b.id);
-    ctx.globalAlpha = dim(focus?.nodes.has(b.id) ?? false) * (nfx?.alpha ?? 1);
+    ctx.globalAlpha = dim(focus?.nodes.has(b.id) ?? false) * (nfx?.alpha ?? 1) * fade;
     // Escala desde el centro (entrada de tarjetas nuevas): solo cuando no es 1.
     const scaled = nfx !== undefined && nfx.scale !== 1;
     if (scaled) {
@@ -361,22 +480,35 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   }
   ctx.globalAlpha = 1;
 
+  // Zoom semántico: aristas agregadas y bloques encima de las tarjetas que se desvanecen.
+  if (sem && ba > 0) {
+    let focusedBlocks: Set<string> | null = null;
+    if (focus) {
+      focusedBlocks = new Set();
+      for (const id of focus.nodes) {
+        const owner = sem.owners.get(id);
+        if (owner !== undefined) focusedBlocks.add(owner);
+      }
+    }
+    drawSemantic(ctx, sem, ba, a, r, (name) => dim(focusedBlocks?.has(name) ?? false));
+  }
+
   // Notas (encima de las tarjetas, como en PlantUML)
-  if (!boxesOnly && layout.notes && layout.notes.length > 0) {
+  if (!boxesOnly && ca > 0 && layout.notes && layout.notes.length > 0) {
     const byId = new Map<string, NodeBox>(layout.nodes.map((n) => [n.id, n]));
     const noteFx = a.fx?.notes;
     if (noteFx && noteFx.size > 0) {
       // Las que entran o salen llevan su propia opacidad; el resto se dibuja junto.
-      ctx.globalAlpha = dim(false);
+      ctx.globalAlpha = dim(false) * ca;
       drawNotes(ctx, layout.notes.filter((n) => !noteFx.has(n.id)), byId, theme, px, r);
       for (const n of layout.notes) {
         const al = noteFx.get(n.id);
         if (al === undefined) continue;
-        ctx.globalAlpha = dim(false) * al;
+        ctx.globalAlpha = dim(false) * al * ca;
         drawNotes(ctx, [n], byId, theme, px, r);
       }
     } else {
-      ctx.globalAlpha = dim(false);
+      ctx.globalAlpha = dim(false) * ca;
       drawNotes(ctx, layout.notes, byId, theme, px, r);
     }
     ctx.globalAlpha = 1;

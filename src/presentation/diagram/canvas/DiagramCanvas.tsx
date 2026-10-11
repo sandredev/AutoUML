@@ -16,12 +16,16 @@ import { applySkin, skinKey } from '../style/skin';
 import type { CardDisplay } from '../style/contract';
 import type { LayoutResult, ViewState } from '../types';
 import { diagramToSvg, type SvgCardContent } from '../svg';
+import { recenterView } from '../presentation/views';
 import { drawDiagram, LIGHT_THEME, type Theme } from './draw';
 import { collapsePackages, hitTestPackageHeader } from './collapse';
+import { labelAnchor } from './edgePath';
 import { hitTestEdge } from './edgeHit';
 import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './minimap';
 import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
+import { keysOf } from '../../../application/shortcuts';
+import { hoverAfterKeyNav, pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong, visibleLinks } from './keyboardNav';
 import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
 import {
   blendLayouts, canAnimate, changedTypes, EASE_IN_OUT, haloIntensity, layoutsDiffer, lerpView, LAYOUT_MS, REDUCED_LAYOUT_MS, snapshotOf, VIEW_MS,
@@ -38,6 +42,16 @@ export interface DiagramCanvasHandle {
   fit(opts?: { animate?: boolean }): void;
   /** Centra una clase (anima por defecto; `{ animate: false }` para atajos de teclado). */
   focusNode(id: string, opts?: { animate?: boolean }): void;
+  /** Encuadra un paquete (T10). false si no está en el layout (p. ej. plegado: usar focusNode del paquete). */
+  fitPackage(name: string, opts?: { animate?: boolean }): boolean;
+  /**
+   * Lleva la cámara a una vista guardada (T10). Con `afterLayout` espera al layout nuevo (plegados que
+   * cambian o el foco) antes de moverla. `frame` es el tamaño del lienzo al guardarla: en otro tamaño se
+   * recentra (pantalla completa).
+   */
+  goToView(view: ViewState, opts?: { animate?: boolean; afterLayout?: boolean; frame?: { w: number; h: number } }): void;
+  /** Cámara que se ve ahora (también en modo foco) y tamaño del lienzo: lo que guarda una vista. */
+  getCamera(): { view: ViewState; frame: { w: number; h: number } };
   exportPng(): Promise<Blob | null>;
   /** PNG con escala/tema/fondo configurables (T5: tema claro por defecto). */
   exportPngFull(opts?: { scale?: 1 | 2 | 4; theme?: 'app' | 'light'; transparent?: boolean }): Promise<Blob | null>;
@@ -45,12 +59,19 @@ export interface DiagramCanvasHandle {
   exportSvg(): { svg: string; width: number; height: number } | null;
   /** Vista y posiciones manuales actuales (para persistir el sidecar). */
   getSnapshot(): { view: ViewState; overrides: Record<string, { dx: number; dy: number }> };
-  /** Devuelve las tarjetas movidas a mano a la posición que calculó el layout. */
-  resetPositions(): void;
+  /**
+   * Devuelve las tarjetas movidas a mano a la posición que calculó el layout. Con `{ fit: true }`
+   * encuadra cuando llega el layout sin overrides (encuadrar enseguida usaría los límites viejos).
+   */
+  resetPositions(opts?: { fit?: boolean }): void;
   /** Quita la ruta resaltada (T8). true si había una (Esc la quita antes de salir del modo foco). */
   clearRoute(): boolean;
   /** true si hay alguna tarjeta movida a mano. */
   hasManualPositions(): boolean;
+  /** Ejecuta una acción del menú contextual sobre `subject` sin abrir el menú (paleta, T10.2). */
+  runMenuAction(action: MenuAction, subject: MenuSubject): void;
+  /** El lienzo va a cambiar de tamaño por pantalla completa (#38): el reencuadre se anima en vez de saltar. */
+  smoothNextResize(): void;
 }
 
 interface Props {
@@ -139,12 +160,15 @@ interface RouteRequest { model: DiagramModel; from: string; to: string | null; d
 /** Menú contextual abierto: punto (ventana) y sobre qué. */
 interface MenuState { x: number; y: number; subject: MenuSubject }
 /** Vista pendiente hasta que llegue un layout distinto de `from`: encuadrar o ir a `target`. */
-interface PendingView { from: LayoutResult; target?: ViewState; animate?: boolean }
+/** `requested`: la pidió goToView (una vista guardada); un cambio de foco simultáneo no la sustituye. */
+interface PendingView { from: LayoutResult; target?: ViewState; animate?: boolean; frame?: { w: number; h: number }; requested?: boolean }
 
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
 const MAX_EXPORT_SIDE = 16384;
 const DRAG_THRESHOLD = 4;
 const FIT_PADDING = 16;
+/** Margen para que llegue el cambio de tamaño de la pantalla completa (el gestor de ventanas tarda). */
+const SMOOTH_RESIZE_MS = 1000;
 /** Tolerancia del hit-test de aristas, en píxeles de pantalla. */
 const EDGE_TOL_PX = 6;
 const TIP_OFFSET = 14;
@@ -253,6 +277,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // true mientras la vista sea la del último "encuadrar": entonces un cambio de tamaño vuelve a encuadrar.
   // Se pone en false cuando el usuario hace zoom o mueve la vista.
   const autoFitRef = useRef(true);
+  /** Hasta este instante, los cambios de tamaño reencuadran con vuelo (pantalla completa, #38). */
+  const smoothResizeUntil = useRef(0);
   // Arrastre: 'pan' mueve la vista; con nodeId mueve una tarjeta.
   const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean; nodeId: string | null } | null>(null);
   /** Arrastre en el minimapa: (dx, dy) = centro de la vista − punto agarrado, en mundo. */
@@ -276,6 +302,16 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [rename, setRename] = useState<RenameDraft | null>(null);
   const [routeReq, setRouteReq] = useState<RouteRequest | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  /**
+   * Modo relaciones (Ctrl lo activa/desactiva): null = apagado. `edge` = relación elegida con Mayús + flechas
+   * (índice en las aristas visibles; null = todas) y `step` = paso del flujo padre → comentario → hija.
+   */
+  const [relMode, setRelMode] = useState<{ edge: number | null; step: number } | null>(null);
+  const relModeRef = useRef(relMode);
+  relModeRef.current = relMode;
+  /** Ctrl pulsado sin otra tecla todavía (al soltarlo alterna el modo relaciones). */
+  const ctrlAloneRef = useRef(false);
   /** Momento de la última apertura por teclado: el evento contextmenu que la sigue no abre otro. */
   const keyMenuAt = useRef(-Infinity);
   const inFocus = focusKey !== null;
@@ -304,10 +340,14 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (focusKey !== null && entering) focusViewRef.current = { view: { ...viewRef.current }, autoFit: autoFitRef.current };
     const saved = focusKey === null ? focusViewRef.current : null;
     if (focusKey === null) focusViewRef.current = null;
-    pendingFitRef.current = saved
-      ? { from: committedLayoutRef.current, target: saved.view, animate: focusAnimate }
-      : { from: committedLayoutRef.current, animate: focusAnimate };
-    if (saved) autoFitRef.current = saved.autoFit;
+    const requested = pendingFitRef.current?.requested ? pendingFitRef.current : null;
+    if (requested) pendingFitRef.current = { ...requested, from: committedLayoutRef.current };
+    else {
+      pendingFitRef.current = saved
+        ? { from: committedLayoutRef.current, target: saved.view, animate: focusAnimate }
+        : { from: committedLayoutRef.current, animate: focusAnimate };
+      if (saved) autoFitRef.current = saved.autoFit;
+    }
   }
 
   // Iniciales del sidecar: se aplican una vez por documento (aunque lleguen tarde por la
@@ -465,6 +505,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       drawDiagram(ctx, {
         model: L.model,
         layout,
+        semanticLayout: L.layout,
         index,
         view: viewRef.current,
         viewW: size.w,
@@ -523,6 +564,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     [setView, schedule],
   );
 
+  const fitAfterResetRef = useRef(false);
   const fit = useCallback((animate = false) => {
     const size = sizeRef.current;
     if (!canPaint(size)) return;
@@ -572,6 +614,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     [updateCollapsed],
   );
 
+  const runMenuRef = useRef<((action: MenuAction, subject: MenuSubject) => void) | null>(null);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -592,6 +636,30 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           return next;
         });
       },
+      fitPackage: (name: string, opts) => {
+        const L = latest.current;
+        const box = L.layout.packages.find((p) => p.name === name);
+        const { w, h } = sizeRef.current;
+        if (!box || !canPaint({ w, h })) return false;
+        autoFitRef.current = false;
+        flyTo(fitToBounds(box, w, h, FIT_PADDING), opts?.animate ?? true);
+        return true;
+      },
+      goToView: (target: ViewState, opts) => {
+        autoFitRef.current = false;
+        if (opts?.afterLayout) {
+          pendingFitRef.current = {
+            from: latest.current.sourceLayout,
+            target: { ...target },
+            animate: opts.animate ?? true,
+            requested: true,
+            ...(opts.frame ? { frame: opts.frame } : {}),
+          };
+          return;
+        }
+        flyTo(recenterView(target, opts?.frame, sizeRef.current), opts?.animate ?? true);
+      },
+      getCamera: () => ({ view: { ...(viewAnimRef.current?.to ?? viewRef.current) }, frame: { ...sizeRef.current } }),
       exportPng: async () => {
         const canvas = renderOffscreen(2, 'app', false);
         if (!canvas) return null;
@@ -610,15 +678,25 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       },
       // En modo foco se persiste la vista del diagrama completo, no la del foco.
       getSnapshot: () => ({ view: { ...(focusViewRef.current?.view ?? viewRef.current) }, overrides: overridesToRecord(latest.current.overrides) }),
-      resetPositions: () => setOverrides(EMPTY_OVERRIDES),
+      resetPositions: (opts) => {
+        // En modo foco el layout ignora los overrides: no cambiará, así que no hay layout nuevo que esperar
+        // (el flag quedaría armado y reencuadraría de golpe al salir del foco).
+        if (opts?.fit && hasOverrides(latest.current.overrides) && focusViewRef.current === null) fitAfterResetRef.current = true;
+        else if (opts?.fit) fit();
+        setOverrides(EMPTY_OVERRIDES);
+      },
       clearRoute: () => {
         if (latest.current.route === null) return false;
         setRouteReq(null);
         return true;
       },
       hasManualPositions: () => hasOverrides(latest.current.overrides),
+      runMenuAction: (action, subject) => runMenuRef.current?.(action, subject),
+      smoothNextResize: () => {
+        smoothResizeUntil.current = performance.now() + SMOOTH_RESIZE_MS;
+      },
     }),
-    [zoomBy, fit, focusNodeInView, updateCollapsed, themeOf],
+    [zoomBy, fit, flyTo, focusNodeInView, updateCollapsed, themeOf],
   );
 
   /** Pinta el diagrama visible en un canvas fuera de pantalla (exportación). */
@@ -654,6 +732,30 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     return off;
   }
 
+  // Pantalla completa (#36): el botón que la activa queda fuera del elemento a pantalla completa y se
+  // queda con el foco, así que las teclas no llegan al lienzo. Al entrar, el lienzo toma el foco.
+  useEffect(() => {
+    let raf = 0;
+    const onFullscreen = (): void => {
+      smoothResizeUntil.current = performance.now() + SMOOTH_RESIZE_MS;
+      // Tras el cambio el navegador aún puede mover el foco: tomarlo en el siguiente fotograma.
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const full = document.fullscreenElement;
+        const canvas = canvasRef.current;
+        if (!full || !canvas || !full.contains(canvas)) return;
+        const active = document.activeElement;
+        const typing = active instanceof HTMLElement && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
+        if (!typing) canvas.focus({ preventScroll: true });
+      });
+    };
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('fullscreenchange', onFullscreen);
+    };
+  }, []);
+
   // Tamaño del contenedor.
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -662,7 +764,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const apply = (): void => {
       const w = Math.max(0, Math.floor(wrap.clientWidth));
       const h = Math.max(0, Math.floor(wrap.clientHeight));
-      const first = !canPaint(sizeRef.current);
+      const prev = sizeRef.current;
+      const first = !canPaint(prev);
       sizeRef.current = { w, h };
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.max(1, Math.floor(w * dpr));
@@ -671,14 +774,40 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       canvas.style.height = h + 'px';
       // Si la vista no la ha tocado el usuario, se vuelve a encuadrar: el panel puede crecer después del
       // primer encuadre (paneles laterales, barra de herramientas) y el diagrama quedaba pequeño y corrido.
-      if ((first || autoFitRef.current) && w > 0 && h > 0) fit();
+      const smooth = !first && performance.now() < smoothResizeUntil.current && !prefersReducedMotion();
+      if (smooth && w > 0 && h > 0) {
+        // Pantalla completa (#38): el diagrama conserva su centro en el marco nuevo y, si la vista seguía el
+        // encuadre, vuela al encuadre nuevo. Con una vista elegida (zoom, paneo, diapositiva) solo se recentra:
+        // entrar o salir de pantalla completa no la descarta.
+        const dx = (w - prev.w) / 2;
+        const dy = (h - prev.h) / 2;
+        const va = viewAnimRef.current;
+        if (autoFitRef.current) {
+          const target = fitToBounds(latest.current.layout.bounds, w, h, FIT_PADDING);
+          if (va) viewAnimRef.current = { ...va, to: target };
+          else {
+            const v = viewRef.current;
+            viewRef.current = { ...v, tx: v.tx + dx, ty: v.ty + dy };
+            flyTo(target, true);
+          }
+        } else {
+          const v = viewRef.current;
+          viewRef.current = { ...v, tx: v.tx + dx, ty: v.ty + dy };
+          if (va) viewAnimRef.current = { ...va, to: { ...va.to, tx: va.to.tx + dx, ty: va.to.ty + dy } };
+        }
+      } else if ((first || autoFitRef.current) && w > 0 && h > 0) fit();
       else schedule();
+      // Cambiar canvas.width borra el lienzo: pintar ya para no dejar un fotograma en blanco.
+      if (!first && w > 0 && h > 0) {
+        if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current);
+        paint();
+      }
     };
     apply();
     const ro = new ResizeObserver(apply);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [fit, schedule]);
+  }, [fit, flyTo, paint, schedule]);
 
   // Documento nuevo ⇒ encuadrar. Con docKey, recargar el mismo documento conserva la vista;
   // sin docKey cuenta cada modelo nuevo. Ni mover tarjetas ni el refinado dagre→ELK reencuadran.
@@ -697,12 +826,25 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (pending && !(controlled && pending.from === layout)) {
       pendingFitRef.current = null;
       // La cámara se asienta a la vez que la transición del layout (sin vuelo si lo pidió el teclado).
-      if (pending.target) flyTo(pending.target, pending.animate ?? true);
+      if (pending.target) flyTo(recenterView(pending.target, pending.frame, sizeRef.current), pending.animate ?? true);
       else fit(pending.animate ?? true);
     }
     const id = pendingFocusRef.current;
     if (id && focusNodeInView(id)) pendingFocusRef.current = null;
   }, [layout, collapsedPackages, controlled, fit, flyTo, focusNodeInView]);
+
+  // resetPositions({ fit: true }): encuadra con los límites del layout ya sin overrides.
+  useEffect(() => {
+    if (!fitAfterResetRef.current) return;
+    fitAfterResetRef.current = false;
+    fit(true);
+  }, [visibleLayout, fit]);
+
+  // El modo relaciones guarda un índice de arista de visibleLayout: si cambia el layout de origen,
+  // los filtros o los plegados, ese índice ya no apunta a la misma relación (como edgeSel).
+  useEffect(() => {
+    setRelMode((rm) => (rm !== null && rm.edge !== null ? { edge: null, step: 0 } : rm));
+  }, [layout, hidden, collapsedPackages]);
 
   // Transición de layout (T6): cuando lo que se muestra cambia de geometría dentro del MISMO documento
   // (recarga, plegar/desplegar, Restablecer, refinado dagre→ELK) las tarjetas se desplazan, entran y salen
@@ -803,6 +945,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (!canvas) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
+      if (e.ctrlKey) ctrlAloneRef.current = false; // Ctrl+rueda es zoom: al soltar Ctrl no alterna el modo relaciones
       const rect = canvas.getBoundingClientRect();
       const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
       autoFitRef.current = false;
@@ -842,6 +985,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
+    ctrlAloneRef.current = false; // Ctrl+clic no alterna el modo relaciones
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     // Sobre una tarjeta (no un paquete plegado) se arrastra la tarjeta.
@@ -966,8 +1110,105 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     openMenu(e.clientX, e.clientY, subjectOf(pick(e.clientX - rect.left, e.clientY - rect.top)));
   };
 
+  /** Sale del modo relaciones y quita el resaltado de la relación elegida. */
+  const exitRelMode = (): void => {
+    if (relModeRef.current?.edge != null) {
+      setEdgeSel(null);
+      latest.current.onRelationSelect?.(null);
+    }
+    setRelMode(null);
+  };
+
+  const onCanvasKeyUp = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
+    if (e.key !== 'Control' || !ctrlAloneRef.current) return;
+    ctrlAloneRef.current = false;
+    if (relModeRef.current !== null) exitRelMode();
+    else setRelMode({ edge: null, step: 0 });
+  };
+
   /** Teclado en el lienzo: tecla Menú o Mayús+F10 abren el menú de la clase seleccionada (o del fondo). */
   const onCanvasKey = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
+    if ((e.key === 'Escape' || e.key === 'Backspace') && helpOpen) {
+      e.preventDefault();
+      setHelpOpen(false);
+      return;
+    }
+    // Ctrl solo (pulsar y soltar sin otra tecla) alterna el modo relaciones: Ctrl+K, Ctrl+Shift+L... no.
+    if (e.key === 'Control') {
+      if (!e.repeat) ctrlAloneRef.current = true;
+      return;
+    }
+    ctrlAloneRef.current = false;
+    if ((e.key === 'Backspace' || e.key === 'Escape') && relModeRef.current !== null) {
+      e.preventDefault();
+      exitRelMode();
+      return;
+    }
+    const action = shortcutOf(e.key, { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey });
+    if (action !== null) {
+      e.preventDefault();
+      if (action === 'zoomIn') zoomBy(1.25);
+      else if (action === 'zoomOut') zoomBy(1 / 1.25);
+      else if (action === 'fit') fit(true);
+      else if (action === 'help') setHelpOpen((open) => !open);
+      else {
+        // Flechas: clase más cercana en esa dirección. En modo relaciones (Ctrl): Mayús + flechas elige la
+        // relación de la clase (queda resaltada) y las flechas recorren su flujo padre → comentario → hija;
+        // sin relación elegida, solo por vecinas. Entre las visibles (en modo foco, el subgrafo enfocado).
+        const L = latest.current;
+        const rm = relModeRef.current;
+        const edges = L.layout.edges;
+        const flow = rm?.edge != null && edges[rm.edge] ? relationFlow(edges[rm.edge]) : null;
+        if (rm !== null && e.shiftKey) {
+          // Clase de partida: la del paso actual o, sobre el comentario, la anterior del flujo.
+          const here = flow?.[rm.step];
+          const before = flow?.[rm.step - 1];
+          const anchor = here?.kind === 'node' ? here.id : before?.kind === 'node' ? before.id : L.selectedId;
+          if (anchor === null) return;
+          const edge = pickEdge(relationOrder(edges, L.layout.nodes, anchor), flow === null ? null : rm.edge, action);
+          if (edge === null) return;
+          const steps = relationFlow(edges[edge]);
+          const step = steps.findIndex((st) => st.kind === 'node' && st.id === anchor);
+          setRelMode({ edge, step: Math.max(0, step) });
+          setEdgeSel({ layout: L.sourceLayout, hidden: L.hidden, index: edge });
+          const rel = edges[edge].rel;
+          L.onRelationSelect?.(rel !== undefined ? (L.model.relationships[rel]?.line ?? null) : null);
+          if (anchor !== L.selectedId) L.onSelect?.(anchor);
+          setHover(hoverAfterKeyNav(L.hover, anchor));
+          return;
+        }
+        if (rm !== null && flow !== null && rm.edge !== null) {
+          const step = stepAlong(flow.length, rm.step, action);
+          if (step === rm.step) return;
+          setRelMode({ edge: rm.edge, step });
+          const st = flow[step];
+          if (st.kind === 'node') {
+            L.onSelect?.(st.id);
+            setHover(hoverAfterKeyNav(L.hover, st.id));
+            focusNodeInView(st.id, true);
+          } else {
+            const pts = edges[rm.edge].points;
+            const at = labelAnchor(pts);
+            const { w, h } = sizeRef.current;
+            if (at && w > 0 && h > 0) {
+              const scale = Math.max(viewRef.current.scale, 0.8);
+              autoFitRef.current = false;
+              flyTo({ scale, tx: w / 2 - at.x * scale, ty: h / 2 - at.y * scale }, true);
+            }
+          }
+          return;
+        }
+        const next = rm !== null
+          ? relatedNext(L.layout.nodes, visibleLinks(L.layout.edges, L.hidden), L.selectedId, null, action)
+          : spatialNext(L.layout.nodes, L.selectedId, action);
+        if (next !== null && next !== L.selectedId) {
+          L.onSelect?.(next);
+          setHover(hoverAfterKeyNav(L.hover, next));
+          focusNodeInView(next, true);
+        }
+      }
+      return;
+    }
     if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
     e.preventDefault();
     keyMenuAt.current = e.timeStamp;
@@ -1011,6 +1252,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onMenuAction?.(action, subject);
     }
   };
+
+  runMenuRef.current = runMenu;
 
   const onPointerLeave = (): void => {
     if (!dragRef.current && latest.current.hover !== null) setHover(null);
@@ -1157,8 +1400,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
         onKeyDown={onCanvasKey}
+        onKeyUp={onCanvasKeyUp}
+        onBlur={() => { ctrlAloneRef.current = false; }}
         tabIndex={0}
-        aria-keyshortcuts="F Escape Shift+F10"
+        aria-keyshortcuts="F Enter Escape Backspace Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown Control Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
       />
       <canvas
         ref={minimapRef}
@@ -1171,6 +1416,46 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onPointerUp={onMiniUp}
         onPointerCancel={onMiniUp}
       />
+      {relMode !== null ? (
+        <div className="puml-viewer-relmode" role="status" style={{ position: 'absolute', left: 8, bottom: 8, padding: '2px 8px', borderRadius: 4, background: 'rgba(0,0,0,.65)', color: '#fff', font: '12px sans-serif', pointerEvents: 'none' }}>
+          {labels.relMode}
+          {relMode.edge !== null && visibleLayout.edges[relMode.edge]
+            ? relationFlow(visibleLayout.edges[relMode.edge]).map((st, i) => (
+                <span key={i} style={{ fontWeight: i === relMode.step ? 700 : 400, opacity: i === relMode.step ? 1 : 0.7 }}>
+                  {i === 0 ? ': ' : ' → '}{st.kind === 'node' ? st.id : `«${st.text}»`}
+                </span>
+              ))
+            : `: ${labels.relModeAll}`}
+        </div>
+      ) : null}
+      {helpOpen ? (
+        <div className="diagram-shortcuts" role="dialog" aria-label={labels.shortcutsTitle}>
+          <h2>{labels.shortcutsTitle}</h2>
+          <dl>
+            <dt><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
+            <dd>{labels.shortcutsNav}</dd>
+            <dt><kbd>Ctrl</kbd></dt>
+            <dd>{labels.shortcutsNavLinked}</dd>
+            <dt><kbd>Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
+            <dd>{labels.shortcutsNavRelation}</dd>
+            <dt><kbd>F</kbd> / <kbd>Enter</kbd></dt>
+            <dd>{labels.shortcutsFocus}</dd>
+            <dt><kbd>Esc</kbd> / <kbd>⌫</kbd></dt>
+            <dd>{labels.shortcutsEscape}</dd>
+            <dt><kbd>+</kbd> <kbd>−</kbd></dt>
+            <dd>{labels.shortcutsZoom}</dd>
+            <dt><kbd>0</kbd></dt>
+            <dd>{labels.shortcutsFit}</dd>
+            <dt><kbd>?</kbd></dt>
+            <dd>{labels.shortcutsHelp}</dd>
+            <dt><kbd>{keysOf('fullscreen')}</kbd></dt>
+            <dd>{labels.shortcutsFullscreen}</dd>
+            <dt><kbd>{keysOf('palette')}</kbd></dt>
+            <dd>{labels.shortcutsPalette}</dd>
+          </dl>
+          <button type="button" className="diagram-route-clear" onClick={() => setHelpOpen(false)}>{labels.shortcutsClose}</button>
+        </div>
+      ) : null}
       <div ref={tipRef} className="diagram-tooltip" role="tooltip" hidden={tip === null || rename !== null}>
         {tip}
       </div>

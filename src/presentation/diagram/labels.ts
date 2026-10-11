@@ -3,6 +3,7 @@
 // Son cadenas planas con marcadores {n}/{name}… para poder enviarlas al Worker si hace falta.
 import type { ReportLabels } from '../../domain/analysis/report';
 import type { Category, RelType } from '../../domain/diagram/model';
+import type { PaletteActionLabels } from './palette/actions';
 
 export interface ViewerLabels {
   // Lienzo
@@ -41,8 +42,6 @@ export interface ViewerLabels {
   fallbackBadge: string;
   manual: string;
   refining: string;
-  reset: string;
-  resetTitle: string;
   // Modo foco (T8)
   focus: string;
   focusTitle: string;
@@ -56,6 +55,21 @@ export interface ViewerLabels {
   focusDirBoth: string;
   focusExit: string;
   focusExitTitle: string;
+  // Atajos de teclado del canvas (T10.6)
+  shortcutsTitle: string;
+  shortcutsClose: string;
+  shortcutsNav: string;
+  shortcutsFocus: string;
+  shortcutsEscape: string;
+  shortcutsNavLinked: string;
+  shortcutsNavRelation: string;
+  relMode: string;
+  relModeAll: string;
+  shortcutsZoom: string;
+  shortcutsFit: string;
+  shortcutsHelp: string;
+  shortcutsFullscreen: string;
+  shortcutsPalette: string;
   // Ruta entre clases (T8)
   routeAria: string;
   /** "Ruta {from} → {to}: {n} saltos" */
@@ -112,6 +126,65 @@ export interface ViewerLabels {
   routePick: string;
   /** Diagnóstico de arquitectura (T9). */
   analysis: AnalysisLabels;
+  /** Paleta de comandos (T10). */
+  palette: PaletteLabels;
+  /** Vistas de presentación (T10). */
+  views: ViewsLabels;
+}
+
+/** Textos de la paleta de comandos (Ctrl+K). */
+export interface PaletteLabels {
+  title: string;
+  placeholder: string;
+  empty: string;
+  /** "{n} resultados" (anunciado al teclear). */
+  results: string;
+  kindClass: string;
+  kindPackage: string;
+  kindAction: string;
+  /** Acciones de la app (T10.2). */
+  actions: PaletteActionLabels;
+  hint: string;
+  toolbar: string;
+  toolbarTitle: string;
+}
+
+/** Textos de las vistas guardadas como diapositivas (T10). */
+export interface ViewsLabels {
+  toggle: string;
+  toggleTitle: string;
+  panelAria: string;
+  saveHeading: string;
+  titleLabel: string;
+  /** Título por defecto: "Vista {n}". */
+  defaultTitle: string;
+  includeFilters: string;
+  includeFocus: string;
+  includeCollapsed: string;
+  save: string;
+  listHeading: string;
+  empty: string;
+  apply: string;
+  remove: string;
+  /** "Aplicar la vista «{title}»" */
+  applyAria: string;
+  removeAria: string;
+  close: string;
+  /** Recorrido a pantalla completa (T10.4). */
+  present: string;
+  presentTitle: string;
+  rename: string;
+  /** "Renombrar la vista «{title}»" */
+  renameAria: string;
+  moveUp: string;
+  moveDown: string;
+  /** "Subir la vista «{title}»" / "Bajar la vista «{title}»" */
+  moveUpAria: string;
+  moveDownAria: string;
+  /** "{n} / {total}" */
+  slide: string;
+  presentHint: string;
+  exitPresent: string;
 }
 
 /** Textos del diagnóstico de arquitectura (T9): los del informe Markdown más los del panel. */
@@ -150,7 +223,7 @@ const DEFAULT_CATEGORIES: Record<Category, string> = {
 
 export const DEFAULT_LABELS: ViewerLabels = {
   canvasAria:
-    'Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo. Con una clase seleccionada, F muestra solo ella y sus vecinos y Mayús+clic en otra clase marca la ruta más corta; Esc vuelve.',
+    'Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo. Con una clase seleccionada, F muestra solo ella y sus vecinos y Mayús+clic en otra clase marca la ruta más corta; ⌫ vuelve.',
   minimapAria: 'Minimapa del diagrama. Haz clic para centrar la vista, arrastra el recuadro o usa las flechas para desplazarla.',
   paintError: 'No se pudo dibujar el diagrama: ',
   renameAria: 'Nuevo nombre del tipo',
@@ -183,8 +256,6 @@ export const DEFAULT_LABELS: ViewerLabels = {
   fallbackBadge: '⚠ respaldo',
   manual: 'Posiciones modificadas a mano',
   refining: 'refinando…',
-  reset: 'Restablecer',
-  resetTitle: 'Devolver las tarjetas a su posición inicial y reorganizar el diagrama',
   focus: 'Enfocar',
   focusTitle: 'Mostrar solo la clase seleccionada y sus vecinos (F)',
   focusGroupAria: 'Modo foco',
@@ -195,7 +266,21 @@ export const DEFAULT_LABELS: ViewerLabels = {
   focusDirIn: 'Entrantes',
   focusDirBoth: 'Ambas',
   focusExit: 'Salir del foco',
-  focusExitTitle: 'Volver al diagrama completo con la vista anterior (Esc)',
+  focusExitTitle: 'Volver al diagrama completo con la vista anterior (F sobre la misma clase o ⌫)',
+  shortcutsTitle: 'Atajos de teclado',
+  shortcutsClose: 'Cerrar',
+  shortcutsNav: 'Ir a la clase más cercana en esa dirección',
+  shortcutsNavLinked: 'Pulsar y soltar: activar/desactivar el modo relaciones (las flechas recorren la relación elegida: padre → comentario → hija)',
+  relMode: 'Modo relaciones',
+  relModeAll: 'todas',
+  shortcutsNavRelation: 'En modo relaciones, elegir relación: ←/→ las recorren (arriba primero, luego abajo); ↑/↓ saltan a las de arriba/abajo',
+  shortcutsFocus: 'Entrar en el foco de la selección; ya en foco, cambiar a otra o salir',
+  shortcutsEscape: 'Deshacer por capas: ayuda, modo relaciones, ruta y foco; al final, ⌫ vuelve al diagrama completo encuadrado y Esc sale de pantalla completa',
+  shortcutsZoom: 'Acercar / alejar',
+  shortcutsFit: 'Ajustar la vista al diagrama',
+  shortcutsHelp: 'Mostrar esta ayuda',
+  shortcutsFullscreen: 'Entrar o salir de pantalla completa',
+  shortcutsPalette: 'Abrir la paleta de comandos (buscar clases, paquetes y acciones)',
   routeAria: 'Ruta entre clases',
   routeInfo: 'Ruta {from} → {to}: {n} saltos',
   routeNone: 'No hay camino de {from} a {to}',
@@ -240,6 +325,58 @@ export const DEFAULT_LABELS: ViewerLabels = {
   menuExitFocus: 'Salir del foco',
   menuClearFilters: 'Quitar filtros',
   routePick: 'Ruta desde {from}: haz clic en la clase de destino',
+  palette: {
+    title: 'Paleta de comandos',
+    placeholder: 'Buscar clase, paquete o acción…',
+    empty: 'Sin resultados',
+    results: '{n} resultados',
+    kindClass: 'Clase',
+    kindPackage: 'Paquete',
+    kindAction: 'Acción',
+    actions: {
+      exportPng: 'Exportar PNG',
+      exportSvg: 'Exportar SVG',
+      exportPdf: 'Exportar PDF',
+      copyPng: 'Copiar PNG',
+      collapseAll: 'Plegar todos los paquetes',
+      expandAll: 'Desplegar todos los paquetes',
+      clearFilters: 'Quitar filtros',
+      theme: 'Tema: {name}',
+    },
+    hint: '↑↓ navegar · Enter ir · Esc cerrar',
+    toolbar: 'Buscar',
+    toolbarTitle: 'Buscar clases y paquetes (Ctrl+K)',
+  },
+  views: {
+    toggle: 'Vistas',
+    toggleTitle: 'Guardar y aplicar vistas del diagrama',
+    panelAria: 'Vistas guardadas',
+    saveHeading: 'Guardar la vista actual',
+    titleLabel: 'Título',
+    defaultTitle: 'Vista {n}',
+    includeFilters: 'Incluir filtros',
+    includeFocus: 'Incluir clase en foco',
+    includeCollapsed: 'Incluir paquetes plegados',
+    save: 'Guardar vista',
+    listHeading: 'Vistas guardadas',
+    empty: 'Aún no hay vistas guardadas.',
+    apply: 'Aplicar',
+    remove: 'Eliminar',
+    applyAria: 'Aplicar la vista «{title}»',
+    removeAria: 'Eliminar la vista «{title}»',
+    close: 'Cerrar',
+    present: 'Presentar',
+    presentTitle: 'Recorrer las vistas a pantalla completa (←/→, Esc para salir)',
+    rename: 'Renombrar',
+    renameAria: 'Renombrar la vista «{title}»',
+    moveUp: 'Subir',
+    moveDown: 'Bajar',
+    moveUpAria: 'Subir la vista «{title}»',
+    moveDownAria: 'Bajar la vista «{title}»',
+    slide: '{n} / {total}',
+    presentHint: '←/→ cambiar de vista · Esc salir',
+    exitPresent: 'Salir',
+  },
   analysis: {
     title: '{title}: diagnóstico de arquitectura',
     summary: '{types} tipos analizados · {deps} dependencias.',

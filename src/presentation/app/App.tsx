@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarFilters, SidecarState, StorageInfo } from '../../application/ports/ipc';
+import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarFilters, SidecarState, SidecarView, StorageInfo } from '../../application/ports/ipc';
+import { actionOfShortcut, isShortcutEnabled, matchShortcut } from '../../application/shortcuts';
 import type { OpenPumlFile } from '../../application/ports/history';
 import { buildTree, countByCategory } from '../../domain/diagram/classify';
 import { scanIncludes } from '../../application/puml/include';
@@ -21,6 +22,7 @@ import { StatusBar, type Status } from '../components/StatusBar';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import type { CodeTarget } from '../diagram/PumlViewer';
 import { hasActiveFilters } from '../diagram/graph/filters';
+import { serializeViews } from '../diagram/presentation/views';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { CloseConfirmModal } from '../components/CloseConfirmModal';
 import { createOpenGuard, type OpenChoice } from './openGuard';
@@ -68,6 +70,7 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
+  const [resetSignal, setResetSignal] = useState(0);
   const [sourceLoading, setSourceLoading] = useState(false);
   const [layoutLoading, setLayoutLoading] = useState(false);
 
@@ -77,9 +80,11 @@ export default function App() {
   const loadedFor = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [issuesOpen, setIssuesOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(true);
   // Fuerza re-parseo en recarga.
   const [sourceTick, setSourceTick] = useState(0);
   const canvasRef = useRef<DiagramCanvasHandle | null>(null);
+  const renderAreaRef = useRef<HTMLElement | null>(null);
   const [externalName, setExternalName] = useState<string | null>(null);
   const [historyTick, setHistoryTick] = useState(0);
   const dropBusy = useRef(false);
@@ -88,6 +93,7 @@ export default function App() {
   const saveTimer = useRef<number | undefined>(undefined);
   const pendingCollapsed = useRef<ReadonlySet<string> | null>(null);
   const pendingFilters = useRef<SidecarFilters>({});
+  const pendingViews = useRef<readonly SidecarView[]>([]);
   // T5: texto combinado (con !include expandidos, lo que se parsea y muestra IssuesPanel),
   // archivos vigilados, ruta externa y sidecar.
   const [combined, setCombined] = useState<string | null>(null);
@@ -143,7 +149,7 @@ export default function App() {
   const dragDepth = useRef(0);
   const tRef = useRef(t);
   const handleRelayoutRef = useRef<() => void>(() => undefined);
-  const handleCopyPngRef = useRef<() => void>(() => undefined);
+  const handleFitRef = useRef<() => void>(() => undefined);
 
   // Confirmación de cierre.
   const [closePromptOpen, setClosePromptOpen] = useState(false);
@@ -179,18 +185,18 @@ export default function App() {
   }, [project, externalName]);
 
   useEffect(() => {
+    // Despacho global de los atajos con Ctrl/Cmd (mapa único en application/shortcuts). El menú nativo solo
+    // los muestra: aquí se ejecutan una vez, con las mismas condiciones que sus opciones de menú.
     const onSettingsShortcut = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === ',') {
-        event.preventDefault();
-        setSettingsOpen(true);
-      }
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'L' || event.key === 'l')) {
-        event.preventDefault();
-        handleRelayoutRef.current();
-      }
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'C' || event.key === 'c')) {
-        event.preventDefault();
-        void handleCopyPngRef.current();
+      const id = matchShortcut(event);
+      if (id === null || !isShortcutEnabled(id, menuStateRef.current)) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      if (id === 'relayout') handleRelayoutRef.current();
+      else if (id === 'fullscreen') handleFitRef.current();
+      else {
+        const action = actionOfShortcut(id);
+        if (action !== null) actionRef.current(action);
       }
     };
     window.addEventListener('keydown', onSettingsShortcut);
@@ -222,6 +228,8 @@ export default function App() {
     }),
     [project, diagram, sidebarVisible, editorVisible, dirty, locale, themeMode],
   );
+  const menuStateRef = useRef(menuState);
+  menuStateRef.current = menuState;
   useEffect(() => {
     api.updateMenuState(menuState);
   }, [menuState]);
@@ -462,7 +470,8 @@ export default function App() {
     openGuard.request(() => void loadPumlNow());
   }, [project, busy, openGuard, loadPumlNow]);
 
-  const handleReload = useCallback(async () => {
+  // reset: solo la rueda del header restablece la vista; Ctrl+R / Archivo › Recargar conservan posiciones.
+  const handleReload = useCallback(async (opts?: { reset?: boolean }) => {
     if (!project?.puml || busy) return;
     setBusy(true);
     try {
@@ -474,6 +483,8 @@ export default function App() {
         setProject(meta.value);
         loadedFor.current = meta.value.meta.name + ':' + (meta.value.meta.pumlLoadedAt ?? '');
       }
+      // La rueda recarga el archivo y además restablece la vista (antes, botón "Restablecer" del visor).
+      if (ok && opts?.reset) setResetSignal((n) => n + 1);
       setStatus(
         ok
           ? { kind: 'success', text: t('status.reloaded') }
@@ -543,9 +554,10 @@ export default function App() {
     };
   }, [docKey, projectName, externalPath]);
 
-  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>, filters: SidecarFilters) => {
+  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>, filters: SidecarFilters, views: readonly SidecarView[]) => {
     pendingCollapsed.current = _collapsed;
     pendingFilters.current = filters;
+    pendingViews.current = views;
     if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = undefined;
@@ -561,6 +573,8 @@ export default function App() {
         view: snap.view,
         // Sin filtros activos no se escribe el campo: el sidecar queda igual que antes de T8.
         ...(hasActiveFilters(filters) ? { filters } : {}),
+        // Igual con las vistas (T10): sin ninguna guardada el sidecar no cambia.
+        ...(pendingViews.current.length > 0 ? { views: serializeViews(pendingViews.current) } : {}),
       });
     }, 800);
   }, []);
@@ -579,20 +593,27 @@ export default function App() {
 
   const toggleSidebar = useCallback(() => setSidebarVisible((v) => !v), []);
 
-  const handleNewProject = useCallback(() => {
-    setModal({ open: true, dismissable: project !== null || diagram !== null });
-  }, [project, diagram]);
-
   // handleStartModalOpened usa setModal({open:false}) al crear/abrir, así que
   // el estado vacío desaparece solo cuando hay proyecto o diagrama.
 
   const handleZoomIn = useCallback(() => canvasRef.current?.zoomIn(), []);
   const handleZoomOut = useCallback(() => canvasRef.current?.zoomOut(), []);
-  const handleFit = useCallback(() => canvasRef.current?.fit(), []);
+  // Botón del header: alterna pantalla completa del área de render (barra, paneles y atajos del visor
+  // siguen dentro). El reencuadre lo hace el lienzo al cambiar de tamaño (solo si la vista seguía el encuadre).
+  const handleFit = useCallback(() => {
+    canvasRef.current?.smoothNextResize();
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    const area = renderAreaRef.current;
+    if (area?.requestFullscreen) void area.requestFullscreen().catch(() => canvasRef.current?.fit());
+    else canvasRef.current?.fit();
+  }, []);
+  handleFitRef.current = handleFit;
   const handleRelayout = useCallback(() => {
     if (!canvasRef.current) return;
-    canvasRef.current.resetPositions();
-    canvasRef.current.fit();
+    canvasRef.current.resetPositions({ fit: true });
     setStatus({ kind: 'info', text: t('status.relayout') });
   }, [t]);
   handleRelayoutRef.current = handleRelayout;
@@ -654,7 +675,6 @@ export default function App() {
     if (!result.ok) setStatus({ kind: 'error', text: result.error });
     else setStatus({ kind: 'success', text: t('status.pngCopied') });
   }, [t]);
-  handleCopyPngRef.current = handleCopyPng;
 
   // ---------- T7: editor ----------
   const editorVisibleRef = useRef(editorVisible);
@@ -1027,14 +1047,12 @@ export default function App() {
       {storage?.warning && <div className="banner banner-warning">⚠ {storage.warning}</div>}
       <Header
         projectName={headerName}
-        canLoad={project !== null && !busy}
         canReload={project?.puml != null && !busy}
         sidebarVisible={sidebarVisible}
         editorVisible={editorVisible}
         canEdit={source !== null}
         onToggleEditor={toggleEditor}
-        onLoad={handleLoad}
-        onReload={() => void handleReload()}
+        onReload={() => void handleReload({ reset: true })}
         canView={diagram !== null && diagram.types.length > 0}
         onToggleSidebar={toggleSidebar}
         onZoomIn={handleZoomIn}
@@ -1090,16 +1108,18 @@ export default function App() {
           onRename={handleRename}
           {...(source !== null ? { onGoToCode: handleGoToCode } : {})}
           onCopyText={handleCopyText}
+          onAppAction={(a) => actionRef.current(a)}
+          onThemeChange={setThemeMode}
           canvasRef={canvasRef}
+          areaRef={renderAreaRef}
           onLayoutLoadingChange={setLayoutLoading}
-          onNewProject={handleNewProject}
-          onOpenProject={handleNewProject}
           {...(docKey !== undefined ? { docKey } : {})}
           {...(initialSidecar !== undefined ? { initialSidecar } : {})}
           onViewStateChange={handleViewStateChange}
           analysisLayers={analysisLayers}
           reportTitle={docName}
           onExportReport={handleExportReport}
+          resetSignal={resetSignal}
         >
           <LoadingIntro
             active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })}
@@ -1112,6 +1132,8 @@ export default function App() {
           refreshKey={historyTick}
           onOpened={handlePumlOpened}
           onStatus={setStatus}
+          open={historyOpen}
+          onToggle={() => setHistoryOpen((v) => !v)}
         />
         <DropOverlay phase={dropPhase} />
       </div>

@@ -99,3 +99,35 @@ describe('filtros por documento (T8, opcionales y sin subir version)', () => {
     expect(validateSidecar({ ...validState(), filters: 'roto' })).toEqual(validState());
   });
 });
+
+describe('vistas de presentación (T10, opcionales y sin subir version)', () => {
+  const views = [
+    { title: 'General', view: { scale: 0.5, tx: 10, ty: -4 } },
+    { title: 'Dominio', view: { scale: 1, tx: 0, ty: 0 }, filters: { hideExternal: true }, focusKey: 'Order', collapsed: ['app.ui'] },
+  ];
+
+  it('un sidecar sin views no inventa el campo', () => {
+    const state = validateSidecar(validState());
+    expect(state && 'views' in state).toBe(false);
+  });
+
+  it('acepta views válidas y hace round-trip en disco', () => {
+    const withViews = { ...validState(), views } as SidecarState;
+    expect(validateSidecar(withViews)).toEqual(withViews);
+    const file = path.join(tmpRoot, 'con-vistas.json');
+    writeSidecarFile(file, withViews);
+    expect(readSidecarFile(file)).toEqual({ state: withViews, corrupt: false });
+  });
+
+  it('una vista rota se descarta sin dar el sidecar por corrupto y sus filtros se validan igual que los globales', () => {
+    const raw = {
+      ...validState(),
+      views: [views[0], { title: 'mala' }, { ...views[0], title: 'f', filters: { minVisibility: '!', hideExternal: true, futuro: 1 } }],
+    };
+    expect(validateSidecar(raw)).toEqual({
+      ...validState(),
+      views: [views[0], { ...views[0], title: 'f', filters: { hideExternal: true } }],
+    });
+    expect(validateSidecar({ ...validState(), views: 'roto' })).toEqual(validState());
+  });
+});

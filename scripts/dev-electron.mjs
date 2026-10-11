@@ -25,6 +25,10 @@ if (process.platform === 'linux') {
   }
 }
 
+// En Wayland la pantalla completa deja el lienzo sin repintar hasta la siguiente entrada (#38): XWayland por
+// defecto, como en el paquete (main.ts). AUTOUML_OZONE elige otra plataforma.
+if (process.platform === 'linux') args.push(`--ozone-platform=${process.env.AUTOUML_OZONE || 'x11'}`);
+
 const child = spawn(electronBin, args, { stdio: 'inherit', env: process.env });
 child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
