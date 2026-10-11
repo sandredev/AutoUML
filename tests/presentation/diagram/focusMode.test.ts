@@ -46,6 +46,11 @@ describe('viewerShortcut', () => {
     expect(viewerShortcut(ev('Escape'))).toBe('escape');
   });
 
+  it('Enter enfoca solo cuando el objetivo es el canvas (no un botón)', () => {
+    expect(viewerShortcut(ev('Enter'))).toBe('focus');
+    expect(viewerShortcut(ev('Enter', { target: { tagName: 'BUTTON', isContentEditable: false } }))).toBeNull();
+  });
+
   it('con Ctrl, Meta o Alt no es un atajo del visor', () => {
     expect(viewerShortcut(ev('f', { ctrlKey: true }))).toBeNull();
     expect(viewerShortcut(ev('f', { metaKey: true }))).toBeNull();

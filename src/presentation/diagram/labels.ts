@@ -57,6 +57,14 @@ export interface ViewerLabels {
   focusDirBoth: string;
   focusExit: string;
   focusExitTitle: string;
+  // Atajos de teclado del canvas (T10.6)
+  shortcutsTitle: string;
+  shortcutsClose: string;
+  shortcutsNav: string;
+  shortcutsFocus: string;
+  shortcutsZoom: string;
+  shortcutsFit: string;
+  shortcutsHelp: string;
   // Ruta entre clases (T8)
   routeAria: string;
   /** "Ruta {from} → {to}: {n} saltos" */
@@ -256,6 +264,13 @@ export const DEFAULT_LABELS: ViewerLabels = {
   focusDirBoth: 'Ambas',
   focusExit: 'Salir del foco',
   focusExitTitle: 'Volver al diagrama completo con la vista anterior (Esc)',
+  shortcutsTitle: 'Atajos de teclado',
+  shortcutsClose: 'Cerrar',
+  shortcutsNav: 'Pasar a la siguiente / anterior clase conectada',
+  shortcutsFocus: 'Enfocar la clase seleccionada',
+  shortcutsZoom: 'Acercar / alejar',
+  shortcutsFit: 'Ajustar la vista al diagrama',
+  shortcutsHelp: 'Mostrar esta ayuda',
   routeAria: 'Ruta entre clases',
   routeInfo: 'Ruta {from} → {to}: {n} saltos',
   routeNone: 'No hay camino de {from} a {to}',

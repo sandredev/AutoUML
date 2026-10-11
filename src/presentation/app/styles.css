@@ -190,6 +190,11 @@ p { margin: 0 0 8px; }
 .analysis-actions { display: flex; justify-content: flex-end; }
 .analysis-panel select:focus-visible, .analysis-panel button:focus-visible, .analysis-panel input:focus-visible, .analysis-section summary:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
 .diagram-canvas .diagram-route { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev); box-shadow: 0 2px 12px #0002; font-size: 12px; }
+.diagram-canvas .diagram-shortcuts { position: absolute; top: 12px; right: 12px; max-width: min(360px, calc(100% - 24px)); padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev); box-shadow: 0 2px 12px #0002; font-size: 12px; }
+.diagram-shortcuts h2 { margin: 0 0 8px; font-size: 13px; }
+.diagram-shortcuts dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0 0 8px; }
+.diagram-shortcuts dd { margin: 0; color: var(--fg-muted); }
+.diagram-shortcuts kbd { padding: 0 5px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
 .diagram-route-info { min-width: 0; overflow-wrap: anywhere; color: var(--accent); font-weight: 600; }
 .diagram-route-info.is-empty { color: var(--fg-muted); font-weight: 400; }
 .diagram-route-directed { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-muted); }

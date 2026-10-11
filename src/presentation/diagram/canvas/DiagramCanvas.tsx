@@ -22,6 +22,7 @@ import { hitTestEdge } from './edgeHit';
 import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './minimap';
 import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
+import { nextConnected, shortcutOf } from './keyboardNav';
 import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
 import {
   blendLayouts, canAnimate, changedTypes, EASE_IN_OUT, haloIntensity, layoutsDiffer, lerpView, LAYOUT_MS, REDUCED_LAYOUT_MS, snapshotOf, VIEW_MS,
@@ -285,6 +286,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [rename, setRename] = useState<RenameDraft | null>(null);
   const [routeReq, setRouteReq] = useState<RouteRequest | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  /** Recorrido con flechas: clase de la que se parte y última visitada (se reinicia si la selección cambia por otra vía). */
+  const navRef = useRef<{ anchor: string; cur: string } | null>(null);
   /** Momento de la última apertura por teclado: el evento contextmenu que la sigue no abre otro. */
   const keyMenuAt = useRef(-Infinity);
   const inFocus = focusKey !== null;
@@ -997,6 +1001,31 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   /** Teclado en el lienzo: tecla Menú o Mayús+F10 abren el menú de la clase seleccionada (o del fondo). */
   const onCanvasKey = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
+    if (e.key === 'Escape' && helpOpen) {
+      e.preventDefault();
+      setHelpOpen(false);
+      return;
+    }
+    const action = shortcutOf(e.key, { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey });
+    if (action !== null && action !== 'focus') {
+      e.preventDefault();
+      if (action === 'zoomIn') zoomBy(1.25);
+      else if (action === 'zoomOut') zoomBy(1 / 1.25);
+      else if (action === 'fit') fit(true);
+      else if (action === 'help') setHelpOpen((open) => !open);
+      else {
+        const L = latest.current;
+        const nav = navRef.current !== null && navRef.current.cur === L.selectedId ? navRef.current : null;
+        const anchor = nav?.anchor ?? L.selectedId;
+        const next = nextConnected(adjacencyOf(L.model), anchor, action, nav === null ? null : nav.cur);
+        if (next !== null) {
+          navRef.current = { anchor: anchor ?? next, cur: next };
+          L.onSelect?.(next);
+          focusNodeInView(next, true);
+        }
+      }
+      return;
+    }
     if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
     e.preventDefault();
     keyMenuAt.current = e.timeStamp;
@@ -1189,7 +1218,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onContextMenu={onContextMenu}
         onKeyDown={onCanvasKey}
         tabIndex={0}
-        aria-keyshortcuts="F Escape Shift+F10"
+        aria-keyshortcuts="F Enter Escape Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown + - 0 ?"
       />
       <canvas
         ref={minimapRef}
@@ -1202,6 +1231,24 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onPointerUp={onMiniUp}
         onPointerCancel={onMiniUp}
       />
+      {helpOpen ? (
+        <div className="diagram-shortcuts" role="dialog" aria-label={labels.shortcutsTitle}>
+          <h2>{labels.shortcutsTitle}</h2>
+          <dl>
+            <dt><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
+            <dd>{labels.shortcutsNav}</dd>
+            <dt><kbd>Enter</kbd> / <kbd>F</kbd></dt>
+            <dd>{labels.shortcutsFocus}</dd>
+            <dt><kbd>+</kbd> <kbd>−</kbd></dt>
+            <dd>{labels.shortcutsZoom}</dd>
+            <dt><kbd>0</kbd></dt>
+            <dd>{labels.shortcutsFit}</dd>
+            <dt><kbd>?</kbd></dt>
+            <dd>{labels.shortcutsHelp}</dd>
+          </dl>
+          <button type="button" className="diagram-route-clear" onClick={() => setHelpOpen(false)}>{labels.shortcutsClose}</button>
+        </div>
+      ) : null}
       <div ref={tipRef} className="diagram-tooltip" role="tooltip" hidden={tip === null || rename !== null}>
         {tip}
       </div>
