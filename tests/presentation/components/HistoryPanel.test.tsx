@@ -77,6 +77,21 @@ describe('isPumlPath', () => {
 });
 
 describe('HistoryView', () => {
+  it('colapsado oculta el contenido y deja el botón para mostrarlo', () => {
+    const html = renderView({ open: false, onToggle: noop, entries: [entry()] });
+    expect(html).toContain('collapsed');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('Mostrar historial');
+    expect(html).not.toContain('/tmp/a.puml');
+  });
+
+  it('abierto expone el botón para ocultar', () => {
+    const html = renderView({ open: true, onToggle: noop, entries: [entry()] });
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('Ocultar historial');
+    expect(html).toContain('/tmp/a.puml');
+  });
+
   it('muestra el estado vacío y desactiva guardar sin contenido', () => {
     const html = renderView();
     expect(html).toContain('Historial vacío');

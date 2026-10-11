@@ -266,6 +266,11 @@ p { margin: 0 0 8px; }
 
 /* Historial de recursos */
 .history-panel { display: flex; flex-direction: column; width: 260px; flex-shrink: 0; background: var(--bg-elev); border-left: 1px solid var(--border); overflow: hidden; }
+.history-panel.collapsed { width: 36px; }
+.history-panel.collapsed .history-header { justify-content: center; padding: 8px 0; }
+.history-toggle { border: 0; background: transparent; color: var(--fg-muted); cursor: pointer; padding: 0 4px; margin-left: auto; }
+.history-panel.collapsed .history-toggle { margin-left: 0; }
+.history-toggle:hover { color: var(--fg); }
 .history-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-muted); border-bottom: 1px solid var(--border); background: var(--bg-chrome); }
 .history-busy { text-transform: none; letter-spacing: 0; color: var(--info); }
 .history-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }

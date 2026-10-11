@@ -115,17 +115,27 @@ export interface HistoryViewProps {
   onReopen(entry: HistoryEntry): void;
   onPin(entry: HistoryEntry): void;
   onRemove(entry: HistoryEntry): void;
+  open?: boolean;
+  onToggle?(): void;
 }
 
 export function HistoryView(props: HistoryViewProps) {
   const { t, locale } = useLocalization();
   const entries = props.entries ?? [];
+  const open = props.open ?? true;
+  const toggleLabel = open ? t('history.hide') : t('history.show');
   return (
-    <aside className="history-panel" aria-label={t('history.aria')} aria-busy={props.busy}>
+    <aside className={`history-panel${open ? '' : ' collapsed'}`} aria-label={t('history.aria')} aria-busy={props.busy}>
       <div className="history-header">
-        <span>{t('history.title')}</span>
-        {props.busy && <span className="history-busy" role="status">{t('history.working')}</span>}
+        {open && <span>{t('history.title')}</span>}
+        {open && props.busy && <span className="history-busy" role="status">{t('history.working')}</span>}
+        {props.onToggle && (
+          <button type="button" className="history-toggle" aria-expanded={open} aria-label={toggleLabel} title={toggleLabel} onClick={props.onToggle}>
+            {open ? '▸' : '◂'}
+          </button>
+        )}
       </div>
+      {open && (<>
       <div className="history-actions">
         <button type="button" className="btn" disabled={props.busy || !props.canSave} onClick={props.onSave}>{t('history.saveAs')}</button>
         <button type="button" className="btn" disabled={props.busy} onClick={props.onRefresh}>{t('history.reload')}</button>
@@ -151,6 +161,7 @@ export function HistoryView(props: HistoryViewProps) {
           </li>
         ))}
       </ul>
+      </>)}
     </aside>
   );
 }
@@ -163,9 +174,11 @@ export interface HistoryPanelProps {
   onOpened(file: OpenPumlFile): void;
   onStatus(status: Status | null): void;
   confirm?: (message: string) => boolean;
+  open?: boolean;
+  onToggle?(): void;
 }
 
-export function HistoryPanel({ api, source, suggestedName, refreshKey, onOpened, onStatus, confirm }: HistoryPanelProps) {
+export function HistoryPanel({ api, source, suggestedName, refreshKey, onOpened, onStatus, confirm, open, onToggle }: HistoryPanelProps) {
   const { t } = useLocalization();
   const [entries, setEntries] = useState<HistoryEntry[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -221,6 +234,8 @@ export function HistoryPanel({ api, source, suggestedName, refreshKey, onOpened,
       onReopen={(entry) => void run(() => reopenEntry(api, entry, t))}
       onPin={(entry) => void run(() => togglePin(api, entry))}
       onRemove={(entry) => void run(() => removeEntry(api, entry, t))}
+      {...(open !== undefined ? { open } : {})}
+      {...(onToggle !== undefined ? { onToggle } : {})}
     />
   );
 }

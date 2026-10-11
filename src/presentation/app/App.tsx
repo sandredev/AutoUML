@@ -79,6 +79,7 @@ export default function App() {
   const loadedFor = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [issuesOpen, setIssuesOpen] = useState(true);
+  const [historyOpen, setHistoryOpen] = useState(true);
   // Fuerza re-parseo en recarga.
   const [sourceTick, setSourceTick] = useState(0);
   const canvasRef = useRef<DiagramCanvasHandle | null>(null);
@@ -1140,6 +1141,8 @@ export default function App() {
           refreshKey={historyTick}
           onOpened={handlePumlOpened}
           onStatus={setStatus}
+          open={historyOpen}
+          onToggle={() => setHistoryOpen((v) => !v)}
         />
         <DropOverlay phase={dropPhase} />
       </div>
