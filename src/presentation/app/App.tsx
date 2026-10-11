@@ -617,7 +617,7 @@ export default function App() {
   useEffect(() => {
     const onFullscreen = (): void => {
       // Animado: si el cambio de tamaño ya inició el vuelo al mismo encuadre, no lo reinicia (#38).
-      requestAnimationFrame(() => canvasRef.current?.fit({ animate: true }));
+      requestAnimationFrame(() => canvasRef.current?.fit({ animate: true, onlyIfAuto: true }));
     };
     document.addEventListener('fullscreenchange', onFullscreen);
     return () => document.removeEventListener('fullscreenchange', onFullscreen);

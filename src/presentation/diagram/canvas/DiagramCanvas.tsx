@@ -24,7 +24,7 @@ import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './m
 import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
 import { keysOf } from '../../../application/shortcuts';
-import { hoverAfterKeyNav, pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong } from './keyboardNav';
+import { hoverAfterKeyNav, pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong, visibleLinks } from './keyboardNav';
 import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
 import {
   blendLayouts, canAnimate, changedTypes, EASE_IN_OUT, haloIntensity, layoutsDiffer, lerpView, LAYOUT_MS, REDUCED_LAYOUT_MS, snapshotOf, VIEW_MS,
@@ -38,7 +38,7 @@ export interface DiagramCanvasHandle {
    * Encuadra todo el diagrama. Anima la cámara por defecto; las acciones iniciadas con el teclado
    * (p. ej. Ctrl+0) deben pasar `{ animate: false }`: se repiten muchas veces y no deben hacerse esperar.
    */
-  fit(opts?: { animate?: boolean }): void;
+  fit(opts?: { animate?: boolean; onlyIfAuto?: boolean }): void;
   /** Centra una clase (anima por defecto; `{ animate: false }` para atajos de teclado). */
   focusNode(id: string, opts?: { animate?: boolean }): void;
   /** Encuadra un paquete (T10). false si no está en el layout (p. ej. plegado: usar focusNode del paquete). */
@@ -496,6 +496,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       drawDiagram(ctx, {
         model: L.model,
         layout,
+        semanticLayout: L.layout,
         index,
         view: viewRef.current,
         viewW: size.w,
@@ -613,7 +614,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     () => ({
       zoomIn: () => zoomBy(1.25),
       zoomOut: () => zoomBy(1 / 1.25),
-      fit: (opts) => fit(opts?.animate ?? true),
+      fit: (opts) => {
+        // onlyIfAuto: los reencuadres automáticos (p. ej. pantalla completa) no pisan una vista elegida.
+        if (opts?.onlyIfAuto && !autoFitRef.current) return;
+        fit(opts?.animate ?? true);
+      },
       focusNode: (id: string, opts) => {
         if (focusNodeInView(id, opts?.animate ?? true)) return;
         // En modo controlado `model` es el agregado (sin los tipos plegados): se busca en el original.
@@ -664,7 +669,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       // En modo foco se persiste la vista del diagrama completo, no la del foco.
       getSnapshot: () => ({ view: { ...(focusViewRef.current?.view ?? viewRef.current) }, overrides: overridesToRecord(latest.current.overrides) }),
       resetPositions: (opts) => {
-        if (opts?.fit && hasOverrides(latest.current.overrides)) fitAfterResetRef.current = true;
+        // En modo foco el layout ignora los overrides: no cambiará, así que no hay layout nuevo que esperar
+        // (el flag quedaría armado y reencuadraría de golpe al salir del foco).
+        if (opts?.fit && hasOverrides(latest.current.overrides) && focusViewRef.current === null) fitAfterResetRef.current = true;
         else if (opts?.fit) fit();
         setOverrides(EMPTY_OVERRIDES);
       },
@@ -759,16 +766,25 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       // primer encuadre (paneles laterales, barra de herramientas) y el diagrama quedaba pequeño y corrido.
       const smooth = !first && performance.now() < smoothResizeUntil.current && !prefersReducedMotion();
       if (smooth && w > 0 && h > 0) {
-        // Pantalla completa (#38): el diagrama conserva su centro en el marco nuevo y vuela al encuadre.
+        // Pantalla completa (#38): el diagrama conserva su centro en el marco nuevo y, si la vista seguía el
+        // encuadre, vuela al encuadre nuevo. Con una vista elegida (zoom, paneo, diapositiva) solo se recentra:
+        // entrar o salir de pantalla completa no la descarta.
+        const dx = (w - prev.w) / 2;
+        const dy = (h - prev.h) / 2;
         const va = viewAnimRef.current;
-        const target = fitToBounds(latest.current.layout.bounds, w, h, FIT_PADDING);
-        if (va) viewAnimRef.current = { ...va, to: target };
-        else {
+        if (autoFitRef.current) {
+          const target = fitToBounds(latest.current.layout.bounds, w, h, FIT_PADDING);
+          if (va) viewAnimRef.current = { ...va, to: target };
+          else {
+            const v = viewRef.current;
+            viewRef.current = { ...v, tx: v.tx + dx, ty: v.ty + dy };
+            flyTo(target, true);
+          }
+        } else {
           const v = viewRef.current;
-          viewRef.current = { ...v, tx: v.tx + (w - prev.w) / 2, ty: v.ty + (h - prev.h) / 2 };
-          flyTo(target, true);
+          viewRef.current = { ...v, tx: v.tx + dx, ty: v.ty + dy };
+          if (va) viewAnimRef.current = { ...va, to: { ...va.to, tx: va.to.tx + dx, ty: va.to.ty + dy } };
         }
-        autoFitRef.current = true;
       } else if ((first || autoFitRef.current) && w > 0 && h > 0) fit();
       else schedule();
       // Cambiar canvas.width borra el lienzo: pintar ya para no dejar un fotograma en blanco.
@@ -1173,7 +1189,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           return;
         }
         const next = rm !== null
-          ? relatedNext(L.layout.nodes, L.model.relationships, L.selectedId, null, action)
+          ? relatedNext(L.layout.nodes, visibleLinks(L.layout.edges, L.hidden), L.selectedId, null, action)
           : spatialNext(L.layout.nodes, L.selectedId, action);
         if (next !== null && next !== L.selectedId) {
           L.onSelect?.(next);
