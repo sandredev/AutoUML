@@ -666,7 +666,8 @@ export default function App() {
           handleZoomOut();
           break;
         case 'fit':
-          handleFit();
+          // Acción de menú/teclado (Ctrl+0): se repite mucho, sin animación. El botón del header sí anima.
+          canvasRef.current?.fit({ animate: false });
           break;
         case 'export':
           void handleExport();
@@ -682,7 +683,7 @@ export default function App() {
           break;
       }
     };
-  }, [project, diagram, modal.open, closePromptOpen, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleFit, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
+  }, [project, diagram, modal.open, closePromptOpen, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 

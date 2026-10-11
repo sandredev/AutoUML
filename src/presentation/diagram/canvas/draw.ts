@@ -6,6 +6,7 @@ import { isPackageNode, packageNodeName } from '../layout/aggregate';
 import type { CardDisplay } from '../style/contract';
 import type { LayoutResult, NodeBox, ViewState } from '../types';
 import { drawCard } from './card';
+import type { FrameFx } from './tween';
 import { drawEdgeFull } from './edgeDraw';
 import { drawNotes } from './notes';
 import { queryEdges, queryNodes, type SpatialIndex } from './spatial';
@@ -57,6 +58,12 @@ export interface DrawArgs {
   packageCounts?: ReadonlyMap<string, number> | undefined;
   /** Sin relleno de fondo (exportación con transparencia). */
   transparent?: boolean;
+  /** Opacidad y escala por elemento durante una transición de layout (T6). Sin valor: todo normal. */
+  fx?: FrameFx | undefined;
+  /** Tarjetas que están saliendo y ya no existen en `model`: se dibujan con el modelo anterior. */
+  extraTypes?: ReadonlyMap<string, TypeNode> | undefined;
+  /** Halo de lo que cambió al recargar: id de tarjeta → intensidad 0‒1. */
+  halo?: ReadonlyMap<string, number> | undefined;
 }
 
 /** Tema claro fijo para exportar (mismos valores que los fallbacks de readTheme). */
@@ -214,6 +221,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   ctx.globalAlpha = dim(false);
   for (const p of layout.packages) {
     if (p.x > rx1 || p.x + p.w < r.x || p.y > ry1 || p.y + p.h < r.y) continue;
+    ctx.globalAlpha = dim(false) * (a.fx?.packages.get(p.name) ?? 1);
     if (theme.pkgBg) {
       ctx.fillStyle = theme.pkgBg;
       ctx.fillRect(p.x, p.y, p.w, p.h);
@@ -257,7 +265,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       if (!e) continue;
       const inFocus = focus?.edges.has(i) ?? false;
       const hovered = a.hoverEdge === i;
-      ctx.globalAlpha = hovered ? 1 : dim(inFocus);
+      ctx.globalAlpha = (hovered ? 1 : dim(inFocus)) * (a.fx?.edges.get(i) ?? 1);
       const hot = inFocus || hovered || (hoverId !== null && (e.source === hoverId || e.target === hoverId));
       drawEdgeFull(
         ctx,
@@ -279,10 +287,19 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     const b = layout.nodes[i];
     if (!b) continue;
     const isPkg = isPackageNode(b.id);
-    const t = isPkg ? undefined : types.get(b.id);
+    const t = isPkg ? undefined : (types.get(b.id) ?? a.extraTypes?.get(b.id));
     if (b.id === selectedId) selBox = b;
     if (b.id === a.hoverId) hoverBox = b;
-    ctx.globalAlpha = dim(focus?.nodes.has(b.id) ?? false);
+    const nfx = a.fx?.nodes.get(b.id);
+    ctx.globalAlpha = dim(focus?.nodes.has(b.id) ?? false) * (nfx?.alpha ?? 1);
+    // Escala desde el centro (entrada de tarjetas nuevas): solo cuando no es 1.
+    const scaled = nfx !== undefined && nfx.scale !== 1;
+    if (scaled) {
+      ctx.save();
+      ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      ctx.scale(nfx.scale, nfx.scale);
+      ctx.translate(-(b.x + b.w / 2), -(b.y + b.h / 2));
+    }
     if (boxesOnly) {
       ctx.fillStyle = theme.cat[t?.category ?? 'class'];
       ctx.fillRect(b.x, b.y, b.w, b.h);
@@ -299,14 +316,28 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
         moreTemplate: labels.moreMembers,
       });
     }
+    if (scaled) ctx.restore();
   }
   ctx.globalAlpha = 1;
 
   // Notas (encima de las tarjetas, como en PlantUML)
   if (!boxesOnly && layout.notes && layout.notes.length > 0) {
     const byId = new Map<string, NodeBox>(layout.nodes.map((n) => [n.id, n]));
-    ctx.globalAlpha = dim(false);
-    drawNotes(ctx, layout.notes, byId, theme, px, r);
+    const noteFx = a.fx?.notes;
+    if (noteFx && noteFx.size > 0) {
+      // Las que entran o salen llevan su propia opacidad; el resto se dibuja junto.
+      ctx.globalAlpha = dim(false);
+      drawNotes(ctx, layout.notes.filter((n) => !noteFx.has(n.id)), byId, theme, px, r);
+      for (const n of layout.notes) {
+        const al = noteFx.get(n.id);
+        if (al === undefined) continue;
+        ctx.globalAlpha = dim(false) * al;
+        drawNotes(ctx, [n], byId, theme, px, r);
+      }
+    } else {
+      ctx.globalAlpha = dim(false);
+      drawNotes(ctx, layout.notes, byId, theme, px, r);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -321,5 +352,23 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     ctx.strokeStyle = theme.accent;
     ctx.lineWidth = 3 * px;
     ctx.stroke();
+  }
+
+  // Halo de lo que cambió al recargar: tres aros que se abren y se apagan (sin shadowBlur, que es caro).
+  if (a.halo && a.halo.size > 0) {
+    for (const b of layout.nodes) {
+      const k = a.halo.get(b.id);
+      if (k === undefined || k <= 0) continue;
+      if (b.x > rx1 || b.x + b.w < r.x || b.y > ry1 || b.y + b.h < r.y) continue;
+      for (let i = 0; i < 3; i++) {
+        const grow = (2 + i * 3) * px;
+        roundRectPath(ctx, b.x - grow, b.y - grow, b.w + 2 * grow, b.h + 2 * grow, SELECT_RADIUS + grow);
+        ctx.globalAlpha = k * (0.6 - 0.18 * i);
+        ctx.strokeStyle = theme.accent;
+        ctx.lineWidth = (3 - i * 0.5) * px;
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
   }
 }

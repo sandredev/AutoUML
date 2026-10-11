@@ -1,5 +1,6 @@
 // src/presentation/diagram/types.ts
 import type { RelType } from '../../domain/diagram/model';
+import type { LayoutHints } from './layout/stability';
 import type { CardDisplay } from './style/contract';
 
 export interface NodeBox {
@@ -69,6 +70,11 @@ export interface LayoutOptions {
   display?: CardDisplay;
   /** Plantilla traducida de "… +{n} más" para medir la fila igual que se dibuja. */
   moreTemplate?: string;
+  /**
+   * Posiciones del layout anterior (T6). Con ellas ELK pasa a modo interactivo y las tarjetas que ya
+   * existían se quedan donde estaban; dagre solo ancla el resultado. Sin pistas: layout desde cero.
+   */
+  hints?: LayoutHints;
 }
 
 export interface ViewState {

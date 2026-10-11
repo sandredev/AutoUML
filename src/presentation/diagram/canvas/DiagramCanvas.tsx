@@ -1,7 +1,7 @@
 // src/presentation/diagram/canvas/DiagramCanvas.tsx — componente React del lienzo.
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
-import type { Category, DiagramModel } from '../../../domain/diagram/model';
+import type { Category, DiagramModel, TypeNode } from '../../../domain/diagram/model';
 import type { Skinparams } from '../../../domain/diagram/skinparam';
 import { focusOf } from '../graph/focus';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
@@ -17,12 +17,21 @@ import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './m
 import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
 import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
+import {
+  blendLayouts, canAnimate, changedTypes, EASE_IN_OUT, haloIntensity, layoutsDiffer, lerpView, LAYOUT_MS, REDUCED_LAYOUT_MS, snapshotOf, VIEW_MS,
+  type Frame, type FrameFx, type Snapshot,
+} from './tween';
 
 export interface DiagramCanvasHandle {
   zoomIn(): void;
   zoomOut(): void;
-  fit(): void;
-  focusNode(id: string): void;
+  /**
+   * Encuadra todo el diagrama. Anima la cámara por defecto; las acciones iniciadas con el teclado
+   * (p. ej. Ctrl+0) deben pasar `{ animate: false }`: se repiten muchas veces y no deben hacerse esperar.
+   */
+  fit(opts?: { animate?: boolean }): void;
+  /** Centra una clase (anima por defecto; `{ animate: false }` para atajos de teclado). */
+  focusNode(id: string, opts?: { animate?: boolean }): void;
   exportPng(): Promise<Blob | null>;
   /** PNG con escala/tema/fondo configurables (T5: tema claro por defecto). */
   exportPngFull(opts?: { scale?: 1 | 2 | 4; theme?: 'app' | 'light'; transparent?: boolean }): Promise<Blob | null>;
@@ -89,6 +98,21 @@ const FIT_PADDING = 16;
 const EDGE_TOL_PX = 6;
 const TIP_OFFSET = 14;
 const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
+
+/** Transición de layout en curso (T6). */
+interface LayoutAnim {
+  from: Snapshot;
+  /** Tarjetas del layout anterior: las que salen ya no existen en el modelo nuevo y se dibujan con esto. */
+  types: ReadonlyMap<string, TypeNode>;
+  start: number;
+  duration: number;
+  reduce: boolean;
+}
+/** Vuelo de cámara en curso (T6). */
+interface ViewAnim { from: ViewState; to: ViewState; start: number; duration: number }
+
+const prefersReducedMotion = (): boolean =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function errorText(err: unknown): string {
   if (err instanceof Error) return err.message || err.name;
@@ -174,6 +198,15 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   /** Arrastre en el minimapa: (dx, dy) = centro de la vista − punto agarrado, en mundo. */
   const miniDragRef = useRef<{ id: number; dx: number; dy: number } | null>(null);
   const paintErrorRef = useRef<string | null>(null);
+  // Animación (T6). Todo en refs: un fotograma no pasa por React.
+  const animRef = useRef<LayoutAnim | null>(null);
+  const frameRef = useRef<Frame | null>(null);
+  const viewAnimRef = useRef<ViewAnim | null>(null);
+  const haloRef = useRef<{ ids: ReadonlySet<string>; start: number } | null>(null);
+  const shownRef = useRef<{ layout: LayoutResult; model: DiagramModel; docKey: string | undefined; modelKey: unknown } | null>(null);
+  const docModelRef = useRef<{ docKey: string | undefined; model: DiagramModel } | null>(null);
+  /** Los overrides iniciales del sidecar llegan después del layout: colocarlos no es una animación. */
+  const skipAnimRef = useRef(false);
   const [internalCollapsed, setInternalCollapsed] = useState<Set<string>>(() => new Set());
   const [paintError, setPaintError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Overrides>(EMPTY_OVERRIDES);
@@ -201,7 +234,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const fittedFor = useRef<string | undefined>(undefined);
   if (docKey !== undefined && initialsFor.current !== docKey && (initialOverrides !== undefined || initialView !== undefined)) {
     initialsFor.current = docKey;
-    if (initialOverrides !== undefined) setOverrides(overridesFromRecord(initialOverrides));
+    if (initialOverrides !== undefined) {
+      setOverrides(overridesFromRecord(initialOverrides));
+      skipAnimRef.current = true;
+    }
     if (initialView !== undefined && initialView !== null) {
       viewRef.current = { ...initialView };
       autoFitRef.current = false;
@@ -272,11 +308,61 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         return;
       }
       themeRef.current ??= themeOf(wrap);
+      const now = performance.now();
+      let more = false;
+
+      // Cámara: vuelo en curso (el usuario lo interrumpe con cualquier gesto: setView lo cancela).
+      const va = viewAnimRef.current;
+      if (va) {
+        const t = (now - va.start) / va.duration;
+        if (t >= 1) {
+          viewRef.current = va.to;
+          viewAnimRef.current = null;
+          L.onViewChange?.(va.to);
+        } else {
+          viewRef.current = lerpView(va.from, va.to, EASE_IN_OUT(t), size.w, size.h);
+          more = true;
+        }
+      }
+
+      // Layout: transición entre el anterior y el actual (el índice se rehace por fotograma).
+      let layout = L.layout;
+      let index = L.index;
+      let fx: FrameFx | undefined;
+      let extraTypes: ReadonlyMap<string, TypeNode> | undefined;
+      const an = animRef.current;
+      if (an) {
+        const frame = blendLayouts(an.from, L.layout, (now - an.start) / an.duration, { reduceMotion: an.reduce });
+        if (frame.done) {
+          animRef.current = null;
+          frameRef.current = null;
+        } else {
+          frameRef.current = frame;
+          layout = frame.layout;
+          index = buildIndex(frame.layout);
+          fx = frame.fx;
+          extraTypes = an.types;
+          more = true;
+        }
+      }
+
+      // Halo de lo que cambió al recargar.
+      let halo: ReadonlyMap<string, number> | undefined;
+      const hr = haloRef.current;
+      if (hr) {
+        const k = haloIntensity(now - hr.start);
+        if (k <= 0) haloRef.current = null;
+        else {
+          halo = new Map([...hr.ids].map((id) => [id, k] as const));
+          more = true;
+        }
+      }
+
       const h = L.hover;
       drawDiagram(ctx, {
         model: L.model,
-        layout: L.layout,
-        index: L.index,
+        layout,
+        index,
         view: viewRef.current,
         viewW: size.w,
         viewH: size.h,
@@ -289,10 +375,14 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         display: L.display,
         labels: L.labels,
         packageCounts: L.packageCounts,
+        fx,
+        extraTypes,
+        halo,
       });
       const minimap = minimapRef.current;
-      if (minimap) drawMinimap(minimap, L.layout, viewRef.current, size.w, size.h, themeRef.current);
+      if (minimap) drawMinimap(minimap, layout, viewRef.current, size.w, size.h, themeRef.current);
       reportPaint(null);
+      if (more && rafRef.current === 0) rafRef.current = requestAnimationFrame(paint);
     } catch (err) {
       console.error('[DiagramCanvas] Error al dibujar', err);
       reportPaint(errorText(err));
@@ -305,6 +395,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   const setView = useCallback(
     (v: ViewState) => {
+      viewAnimRef.current = null; // cualquier gesto del usuario interrumpe el vuelo
       viewRef.current = v;
       latest.current.onViewChange?.(v);
       schedule();
@@ -312,23 +403,39 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     [schedule],
   );
 
-  const fit = useCallback(() => {
+  /** Lleva la cámara a `target`: vuelo suave, o salto directo (teclado, movimiento reducido, ya está ahí). */
+  const flyTo = useCallback(
+    (target: ViewState, animate: boolean) => {
+      const cur = viewRef.current;
+      const size = sizeRef.current;
+      const same = Math.abs(cur.tx - target.tx) < 0.5 && Math.abs(cur.ty - target.ty) < 0.5 && Math.abs(cur.scale / target.scale - 1) < 1e-3;
+      if (!animate || same || !canPaint(size) || prefersReducedMotion()) {
+        setView(target);
+        return;
+      }
+      viewAnimRef.current = { from: { ...cur }, to: target, start: performance.now(), duration: VIEW_MS };
+      schedule();
+    },
+    [setView, schedule],
+  );
+
+  const fit = useCallback((animate = false) => {
     const size = sizeRef.current;
     if (!canPaint(size)) return;
     // Margen pequeño: la vista completa aprovecha casi todo el lienzo (más zoom = más detalle legible).
-    setView(fitToBounds(latest.current.layout.bounds, size.w, size.h, FIT_PADDING));
+    flyTo(fitToBounds(latest.current.layout.bounds, size.w, size.h, FIT_PADDING), animate);
     autoFitRef.current = true;
-  }, [setView]);
+  }, [flyTo]);
 
-  const focusNodeInView = useCallback((id: string): boolean => {
+  const focusNodeInView = useCallback((id: string, animate = true): boolean => {
     const b = latest.current.layout.nodes.find((n) => n.id === id);
     const { w, h } = sizeRef.current;
     if (!b || w <= 0 || h <= 0) return false;
     const scale = Math.max(viewRef.current.scale, 0.8);
     autoFitRef.current = false;
-    setView({ scale, tx: w / 2 - (b.x + b.w / 2) * scale, ty: h / 2 - (b.y + b.h / 2) * scale });
+    flyTo({ scale, tx: w / 2 - (b.x + b.w / 2) * scale, ty: h / 2 - (b.y + b.h / 2) * scale }, animate);
     return true;
-  }, [setView]);
+  }, [flyTo]);
 
   const zoomBy = useCallback(
     (factor: number) => {
@@ -366,9 +473,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     () => ({
       zoomIn: () => zoomBy(1.25),
       zoomOut: () => zoomBy(1 / 1.25),
-      fit,
-      focusNode: (id: string) => {
-        if (focusNodeInView(id)) return;
+      fit: (opts) => fit(opts?.animate ?? true),
+      focusNode: (id: string, opts) => {
+        if (focusNodeInView(id, opts?.animate ?? true)) return;
         // En modo controlado `model` es el agregado (sin los tipos plegados): se busca en el original.
         const L = latest.current;
         const pkg = (L.sourceModel ?? L.model).types.find((node) => node.id === id)?.packageName;
@@ -478,11 +585,56 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const pending = pendingFitRef.current;
     if (pending && !(controlled && pending.from === layout)) {
       pendingFitRef.current = null;
-      fit();
+      fit(true); // la cámara se asienta a la vez que la transición del layout
     }
     const id = pendingFocusRef.current;
     if (id && focusNodeInView(id)) pendingFocusRef.current = null;
   }, [layout, collapsedPackages, controlled, fit, focusNodeInView]);
+
+  // Transición de layout (T6): cuando lo que se muestra cambia de geometría dentro del MISMO documento
+  // (recarga, plegar/desplegar, Restablecer, refinado dagre→ELK) las tarjetas se desplazan, entran y salen
+  // en vez de saltar. No anima: el primer layout de un documento, un documento nuevo, los overrides
+  // iniciales del sidecar ni el arrastre de una tarjeta (manipulación directa). Va en un efecto de layout
+  // para que el primer fotograma ya parta del estado anterior, no del final.
+  useLayoutEffect(() => {
+    const prev = shownRef.current;
+    shownRef.current = { layout: visibleLayout, model, docKey, modelKey };
+    if (!prev || prev.layout === visibleLayout) return;
+    const skip = skipAnimRef.current;
+    skipAnimRef.current = false;
+    const sameDoc = docKey !== undefined ? prev.docKey === docKey : prev.modelKey === modelKey;
+    if (skip || !sameDoc || dragRef.current?.nodeId != null) {
+      animRef.current = null;
+      frameRef.current = null;
+      return;
+    }
+    // Si ya había una transición a medias, la nueva parte de lo que se ve ahora (se puede interrumpir).
+    const running = animRef.current !== null && frameRef.current !== null;
+    const from: Snapshot = running && frameRef.current ? snapshotOf(frameRef.current) : { layout: prev.layout };
+    if (!layoutsDiffer(from.layout, visibleLayout) || !canAnimate(from.layout, visibleLayout)) {
+      animRef.current = null;
+      frameRef.current = null;
+      return;
+    }
+    const types = new Map<string, TypeNode>(animRef.current?.types ?? []);
+    for (const t of prev.model.types) types.set(t.id, t);
+    const reduce = prefersReducedMotion();
+    animRef.current = { from, types, start: performance.now(), duration: reduce ? REDUCED_LAYOUT_MS : LAYOUT_MS, reduce };
+    schedule();
+  }, [visibleLayout, model, docKey, modelKey, schedule]);
+
+  // Halo (T6): al recargar el mismo documento se resaltan unos segundos las tarjetas nuevas o cuyo
+  // contenido cambió. Se compara el modelo ORIGINAL del layout mostrado: plegar un paquete no lo cambia.
+  useEffect(() => {
+    if (!layoutModel) return;
+    const prev = docModelRef.current;
+    docModelRef.current = { docKey, model: layoutModel };
+    if (!prev || prev.model === layoutModel || docKey === undefined || prev.docKey !== docKey) return;
+    const { added, modified } = changedTypes(prev.model, layoutModel);
+    if (added.size + modified.size === 0) return;
+    haloRef.current = { ids: new Set([...added, ...modified]), start: performance.now() };
+    schedule();
+  }, [layoutModel, docKey, schedule]);
 
   // Cualquier cambio de lo que se dibuja ⇒ repintar.
   useEffect(() => {
@@ -599,7 +751,12 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
     if (!d.moved) {
-      if (d.nodeId !== null) setDraggingNode(true);
+      if (d.nodeId !== null) {
+        setDraggingNode(true);
+        // Manipulación directa: la tarjeta sigue al puntero, sin transición.
+        animRef.current = null;
+        frameRef.current = null;
+      }
       if (latest.current.hover !== null) setHover(null);
     }
     d.moved = true;
@@ -655,7 +812,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const rect = e.currentTarget.getBoundingClientRect();
     const p = screenToWorld(viewRef.current, e.clientX - rect.left, e.clientY - rect.top);
     const L = latest.current;
-    if (hitTestNode(L.index, L.layout, p.x, p.y) === null && !hitTestPackageHeader(L.layout, p.x, p.y)) fit();
+    if (hitTestNode(L.index, L.layout, p.x, p.y) === null && !hitTestPackageHeader(L.layout, p.x, p.y)) fit(true);
   };
 
   // ---------- Minimapa: clic para centrar, arrastrar el recuadro para desplazar ----------
