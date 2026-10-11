@@ -21,6 +21,7 @@ import { StatusBar, type Status } from '../components/StatusBar';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { CloseConfirmModal } from '../components/CloseConfirmModal';
+import { createOpenGuard, type OpenChoice } from './openGuard';
 import { DropOverlay, type DropPhase } from '../components/DropOverlay';
 import { LoadingIntro } from '../components/LoadingIntro';
 import { isIntroActive } from '../components/introState';
@@ -98,6 +99,22 @@ export default function App() {
   // Cambia al abrir otro documento: el editor se monta de nuevo (texto e historial limpios).
   const [docGen, setDocGen] = useState(0);
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const handleSaveRef = useRef<() => Promise<boolean>>(async () => false);
+  // Abrir otro documento con cambios sin guardar pregunta antes (mismo modal que el cierre).
+  const [openPromptOpen, setOpenPromptOpen] = useState(false);
+  const [openSaving, setOpenSaving] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const [openGuard] = useState(() => createOpenGuard({
+    isDirty: () => dirtyRef.current,
+    save: () => handleSaveRef.current(),
+    onPrompt: () => {
+      setOpenError(null);
+      setOpenPromptOpen(true);
+    },
+    onSettled: () => setOpenPromptOpen(false),
+  }));
   const [stale, setStale] = useState(false);
   const [hasIncludes, setHasIncludes] = useState(false);
   /** Issues del último texto parseado (con errores graves no son los del diagrama mostrado). */
@@ -303,12 +320,14 @@ export default function App() {
   runLiveParseRef.current = runLiveParse;
 
   const handlePumlOpened = useCallback((file: OpenPumlFile) => {
-    setSelectedId(null);
-    setExternalName(file.entry.name);
-    setExternalPath(file.entry.path);
-    setModal((current) => current.open ? { open: false, dismissable: true } : current);
-    void loadDocument({ file: file.entry.path }, 'open');
-  }, [loadDocument]);
+    openGuard.request(() => {
+      setSelectedId(null);
+      setExternalName(file.entry.name);
+      setExternalPath(file.entry.path);
+      setModal((current) => current.open ? { open: false, dismissable: true } : current);
+      void loadDocument({ file: file.entry.path }, 'open');
+    });
+  }, [loadDocument, openGuard]);
 
   // Ruta global única de drop. El overlay solo refleja la fase; nunca recibe eventos.
   useEffect(() => {
@@ -418,7 +437,7 @@ export default function App() {
     void loadDocument({ project: project.meta.name }, 'open');
   }, [project, externalName, loadDocument, liveParse]);
 
-  const handleLoad = useCallback(async () => {
+  const loadPumlNow = useCallback(async () => {
     if (!project || busy) return;
     setBusy(true);
     try {
@@ -432,6 +451,11 @@ export default function App() {
       setBusy(false);
     }
   }, [project, busy, t]);
+  // Cargar/Reemplazar PUML sustituye el documento: con cambios sin guardar se pregunta antes del diálogo.
+  const handleLoad = useCallback(() => {
+    if (!project || busy) return;
+    openGuard.request(() => void loadPumlNow());
+  }, [project, busy, openGuard, loadPumlNow]);
 
   const handleReload = useCallback(async () => {
     if (!project?.puml || busy) return;
@@ -611,8 +635,6 @@ export default function App() {
   handleCopyPngRef.current = handleCopyPng;
 
   // ---------- T7: editor ----------
-  const dirtyRef = useRef(dirty);
-  dirtyRef.current = dirty;
   const editorVisibleRef = useRef(editorVisible);
   editorVisibleRef.current = editorVisible;
   const entryPathRef = useRef(entryPath);
@@ -662,6 +684,21 @@ export default function App() {
       savingRef.current = false;
     }
   }, [liveParse]);
+  handleSaveRef.current = handleSave;
+
+  /** Respuesta del modal "abrir otro documento": Guardar escribe el .puml y abre; si falla, el modal sigue. */
+  const handleOpenChoice = useCallback((choice: OpenChoice) => {
+    if (choice !== 'save') {
+      void openGuard.resolve(choice);
+      return;
+    }
+    setOpenSaving(true);
+    setOpenError(null);
+    void openGuard.resolve('save').then((opened) => {
+      setOpenSaving(false);
+      if (!opened && openGuard.pending()) setOpenError(tRef.current('openDirty.saveFailed'));
+    });
+  }, [openGuard]);
 
   /** Salta en el editor a líneas del modelo (si vienen de un !include no están en el editor). */
   const revealInEditor = useCallback((line: number, endLine = line) => {
@@ -803,7 +840,10 @@ export default function App() {
 
   const handleStartModalOpened = useCallback((opened: ProjectInfo) => {
     if (!closeSaveProjectPending) {
-      onProjectOpened(opened);
+      // Otro proyecto sustituye al documento abierto: con cambios sin guardar se pregunta antes.
+      setModal({ open: false, dismissable: true });
+      if (opened.meta.name === project?.meta.name && !externalName) onProjectOpened(opened);
+      else openGuard.request(() => onProjectOpened(opened));
       return;
     }
     const text = closeSaveSourceRef.current;
@@ -818,7 +858,7 @@ export default function App() {
       return;
     }
     void saveCloseSourceToProject(opened, text);
-  }, [closeSaveProjectPending, onProjectOpened, saveCloseSourceToProject, t]);
+  }, [closeSaveProjectPending, onProjectOpened, saveCloseSourceToProject, project, externalName, openGuard, t]);
 
   const handleStartModalClose = useCallback(() => {
     setModal({ open: false, dismissable: true });
@@ -869,7 +909,7 @@ export default function App() {
   const actionRef = useRef<(a: MenuAction) => void>(() => undefined);
   useEffect(() => {
     actionRef.current = (action) => {
-      if (closePromptOpen) return;
+      if (closePromptOpen || openPromptOpen) return;
       if (action === 'new-project' || action === 'open-project') {
         setModal({ open: true, dismissable: project !== null || diagram !== null });
         return;
@@ -896,7 +936,7 @@ export default function App() {
       switch (action) {
         case 'load-puml':
         case 'replace-puml':
-          void handleLoad();
+          handleLoad();
           break;
         case 'reload-puml':
           void handleReload();
@@ -935,7 +975,7 @@ export default function App() {
           break;
       }
     };
-  }, [project, diagram, source, modal.open, closePromptOpen, handleLoad, handleReload, handleSave, toggleSidebar, toggleEditor, handleZoomIn, handleZoomOut, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
+  }, [project, diagram, source, modal.open, closePromptOpen, openPromptOpen, handleLoad, handleReload, handleSave, toggleSidebar, toggleEditor, handleZoomIn, handleZoomOut, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 
@@ -952,7 +992,7 @@ export default function App() {
         editorVisible={editorVisible}
         canEdit={source !== null}
         onToggleEditor={toggleEditor}
-        onLoad={() => void handleLoad()}
+        onLoad={handleLoad}
         onReload={() => void handleReload()}
         canView={diagram !== null && diagram.types.length > 0}
         onToggleSidebar={toggleSidebar}
@@ -1053,6 +1093,17 @@ export default function App() {
           onSave={() => void handleCloseSave()}
           onDiscard={handleCloseDiscard}
           onCancel={handleCloseCancel}
+        />
+      )}
+      {openPromptOpen && !closePromptOpen && (
+        <CloseConfirmModal
+          purpose="open"
+          saving={openSaving}
+          error={openError}
+          dirty
+          onSave={() => handleOpenChoice('save')}
+          onDiscard={() => handleOpenChoice('discard')}
+          onCancel={() => handleOpenChoice('cancel')}
         />
       )}
     </div>
