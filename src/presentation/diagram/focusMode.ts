@@ -30,7 +30,7 @@ export function focusToggle(current: string | null, target: string | null): 'ent
   return target !== null ? 'enter' : null;
 }
 
-export type ViewerShortcut = 'toggle-focus' | 'escape';
+export type ViewerShortcut = 'toggle-focus' | 'escape' | 'back';
 
 interface KeyLike {
   key: string;
@@ -51,10 +51,17 @@ function isEditable(target: unknown): boolean {
 
 /** Atajo del visor de una pulsación, o null (con modificadores, escribiendo en un campo/editor o ya atendida). */
 export function viewerShortcut(e: KeyLike): ViewerShortcut | null {
-  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return null;
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return null;
+  // Esc y Retroceso también valen con el foco en un desplegable (profundidad/dirección del foco).
+  const onSelect = (e.target as { tagName?: unknown } | null)?.tagName === 'SELECT';
+  if (onSelect && e.key === 'Escape') return 'escape';
+  if (onSelect && e.key === 'Backspace') return 'back';
+  if (isEditable(e.target)) return null;
   if (e.key === 'f' || e.key === 'F') return 'toggle-focus';
   // Enter alterna el foco solo desde el canvas: en un botón o enlace activa el control.
   if (e.key === 'Enter' && (e.target as { tagName?: unknown }).tagName === 'CANVAS') return 'toggle-focus';
+  // Esc deshace por capas y, como última, sale de pantalla completa; Retroceso es lo mismo sin esa última.
   if (e.key === 'Escape') return 'escape';
+  if (e.key === 'Backspace') return 'back';
   return null;
 }

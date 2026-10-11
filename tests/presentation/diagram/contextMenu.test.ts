@@ -43,6 +43,6 @@ describe('contextMenuEntries', () => {
     expect(actions(contextMenuEntries({ kind: 'background' }, ctx, DEFAULT_LABELS))).toEqual(['fit']);
     const all = contextMenuEntries({ kind: 'background' }, { ...ctx, hasRoute: true, inFocus: true, hasFilters: true }, DEFAULT_LABELS);
     expect(actions(all)).toEqual(['fit', 'clear-route', 'exit-focus', 'clear-filters']);
-    expect(entry(all, 'exit-focus')?.shortcut).toBe('Esc');
+    expect(entry(all, 'exit-focus')?.shortcut).toBe('⌫');
   });
 });

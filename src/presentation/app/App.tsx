@@ -618,8 +618,7 @@ export default function App() {
   }, []);
   const handleRelayout = useCallback(() => {
     if (!canvasRef.current) return;
-    canvasRef.current.resetPositions();
-    canvasRef.current.fit();
+    canvasRef.current.resetPositions({ fit: true });
     setStatus({ kind: 'info', text: t('status.relayout') });
   }, [t]);
   handleRelayoutRef.current = handleRelayout;

@@ -71,6 +71,23 @@ function createWindow(): void {
     if (url !== win?.webContents.getURL()) event.preventDefault();
   });
 
+  // Pantalla completa HTML (#36): Chromium consume Esc para salir antes de que lo vea la página. Mientras
+  // dura, Esc se entrega al renderer, que deshace por capas y, al final, sale él mismo de pantalla completa.
+  let htmlFullscreen = false;
+  win.webContents.on('enter-html-full-screen', () => {
+    htmlFullscreen = true;
+  });
+  win.webContents.on('leave-html-full-screen', () => {
+    htmlFullscreen = false;
+  });
+  win.webContents.on('before-input-event', (event, input) => {
+    if (!htmlFullscreen || input.type !== 'keyDown' || input.key !== 'Escape') return;
+    event.preventDefault();
+    void win?.webContents.executeJavaScript(
+      "(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))",
+    );
+  });
+
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (!app.isPackaged && devUrl) {
     void win.loadURL(devUrl);

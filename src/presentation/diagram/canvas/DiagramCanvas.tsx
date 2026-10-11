@@ -706,15 +706,24 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // Pantalla completa (#36): el botón que la activa queda fuera del elemento a pantalla completa y se
   // queda con el foco, así que las teclas no llegan al lienzo. Al entrar, el lienzo toma el foco.
   useEffect(() => {
+    let raf = 0;
     const onFullscreen = (): void => {
-      const full = document.fullscreenElement;
-      const canvas = canvasRef.current;
-      if (!full || !canvas || !full.contains(canvas)) return;
-      if (document.activeElement instanceof Node && full.contains(document.activeElement)) return;
-      canvas.focus({ preventScroll: true });
+      // Tras el cambio el navegador aún puede mover el foco: tomarlo en el siguiente fotograma.
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const full = document.fullscreenElement;
+        const canvas = canvasRef.current;
+        if (!full || !canvas || !full.contains(canvas)) return;
+        const active = document.activeElement;
+        const typing = active instanceof HTMLElement && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName));
+        if (!typing) canvas.focus({ preventScroll: true });
+      });
     };
     document.addEventListener('fullscreenchange', onFullscreen);
-    return () => document.removeEventListener('fullscreenchange', onFullscreen);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('fullscreenchange', onFullscreen);
+    };
   }, []);
 
   // Tamaño del contenedor.
@@ -1062,7 +1071,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   /** Teclado en el lienzo: tecla Menú o Mayús+F10 abren el menú de la clase seleccionada (o del fondo). */
   const onCanvasKey = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
-    if (e.key === 'Escape' && helpOpen) {
+    if ((e.key === 'Escape' || e.key === 'Backspace') && helpOpen) {
       e.preventDefault();
       setHelpOpen(false);
       return;
@@ -1073,7 +1082,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       return;
     }
     ctrlAloneRef.current = false;
-    if (e.key === 'Escape' && relModeRef.current !== null) {
+    if ((e.key === 'Backspace' || e.key === 'Escape') && relModeRef.current !== null) {
       e.preventDefault();
       exitRelMode();
       return;
@@ -1334,7 +1343,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onKeyUp={onCanvasKeyUp}
         onBlur={() => { ctrlAloneRef.current = false; }}
         tabIndex={0}
-        aria-keyshortcuts="F Enter Escape Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown Control Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
+        aria-keyshortcuts="F Enter Escape Backspace Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown Control Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
       />
       <canvas
         ref={minimapRef}
@@ -1371,7 +1380,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
             <dd>{labels.shortcutsNavRelation}</dd>
             <dt><kbd>F</kbd> / <kbd>Enter</kbd></dt>
             <dd>{labels.shortcutsFocus}</dd>
-            <dt><kbd>Esc</kbd></dt>
+            <dt><kbd>Esc</kbd> / <kbd>⌫</kbd></dt>
             <dd>{labels.shortcutsEscape}</dd>
             <dt><kbd>+</kbd> <kbd>−</kbd></dt>
             <dd>{labels.shortcutsZoom}</dd>

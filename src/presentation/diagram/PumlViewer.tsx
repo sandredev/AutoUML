@@ -218,7 +218,7 @@ export function PumlViewer({
   const handleRef = canvasRef ?? ownRef;
 
   // F entra en el foco de la selección; ya en foco, cambia a la nueva selección o, si es la misma, sale.
-  // Esc deshace por capas: quita la ruta, luego sale del foco y, sin nada más, restablece la disposición
+  // Esc / Retroceso deshacen por capas: quita la ruta, luego sale del foco y, sin nada más, restablece la disposición
   // (tarjetas movidas a mano a su sitio). La ayuda y el modo relaciones los cierra antes el lienzo.
   // Atajos de alta frecuencia: la cámara no vuela (la transición del layout sí). No actúan escribiendo ni
   // con un diálogo modal abierto.
@@ -244,16 +244,33 @@ export function PumlViewer({
         exitFocus(false);
         return;
       }
-      // Última capa (destructiva): solo con el teclado dentro del visor, no con un Esc suelto de otro sitio.
-      const canvas = handleRef.current;
-      const inViewer = e.target instanceof Node && rootRef.current?.contains(e.target) === true;
-      if (inViewer && canvas?.hasManualPositions()) {
+      // Última capa de Retroceso: el diagrama en su estado normal (sin selección y encuadrado completo).
+      if (shortcut === 'back') {
         e.preventDefault();
-        canvas.resetPositions({ fit: true });
+        selectRef.current?.(null);
+        handleRef.current?.fit({ animate: true });
+        // Sin aro de foco naranja en el lienzo hasta la siguiente tecla (distinta de Retroceso) o clic.
+        rootRef.current?.classList.add('is-reset');
+        return;
+      }
+      // Última capa de Esc: en pantalla completa, salir de ella (en ventana, nada).
+      if (document.fullscreenElement) {
+        e.preventDefault();
+        void document.exitFullscreen().catch(() => undefined);
       }
     };
+    const clearReset = (e: Event): void => {
+      if (e instanceof KeyboardEvent && e.key === 'Backspace') return;
+      rootRef.current?.classList.remove('is-reset');
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', clearReset, true);
+    window.addEventListener('pointerdown', clearReset, true);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', clearReset, true);
+      window.removeEventListener('pointerdown', clearReset, true);
+    };
   }, [enterFocus, exitFocus, handleRef]);
 
   // Reset por señal (recarga): tarjetas a su posición, opciones por defecto y layout recalculado (layoutVersion++).
@@ -609,7 +626,7 @@ export function PumlViewer({
                 {FOCUS_DIRECTIONS.map((d) => <option key={d} value={d}>{directionLabel[d]}</option>)}
               </select>
             </label>
-            <button type="button" className="puml-viewer-reset" onClick={() => exitFocus(true)} title={labels.focusExitTitle} aria-keyshortcuts="F Escape">
+            <button type="button" className="puml-viewer-reset" onClick={() => exitFocus(true)} title={labels.focusExitTitle} aria-keyshortcuts="F Escape Backspace">
               {labels.focusExit}
             </button>
           </div>

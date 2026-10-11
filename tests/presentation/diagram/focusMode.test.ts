@@ -40,10 +40,11 @@ describe('viewerShortcut', () => {
   const ev = (key: string, extra: Record<string, unknown> = {}) =>
     ({ key, ctrlKey: false, metaKey: false, altKey: false, defaultPrevented: false, target: canvas, ...extra });
 
-  it('F (mayúscula o minúscula) alterna el foco; Esc sale', () => {
+  it('F (mayúscula o minúscula) alterna el foco; ⌫ sale', () => {
     expect(viewerShortcut(ev('f'))).toBe('toggle-focus');
     expect(viewerShortcut(ev('F'))).toBe('toggle-focus');
     expect(viewerShortcut(ev('Escape'))).toBe('escape');
+    expect(viewerShortcut(ev('Backspace'))).toBe('back');
   });
 
   it('Enter alterna el foco solo cuando el objetivo es el canvas (no un botón)', () => {
@@ -60,12 +61,19 @@ describe('viewerShortcut', () => {
   it('escribiendo en un campo o en el editor (contenteditable) no se intercepta', () => {
     expect(viewerShortcut(ev('f', { target: { tagName: 'INPUT', isContentEditable: false } }))).toBeNull();
     expect(viewerShortcut(ev('f', { target: { tagName: 'TEXTAREA', isContentEditable: false } }))).toBeNull();
-    expect(viewerShortcut(ev('Escape', { target: { tagName: 'SELECT', isContentEditable: false } }))).toBeNull();
+    expect(viewerShortcut(ev('Backspace', { target: { tagName: 'INPUT', isContentEditable: false } }))).toBeNull();
     expect(viewerShortcut(ev('f', { target: { tagName: 'DIV', isContentEditable: true } }))).toBeNull();
   });
 
+  it('Retroceso con el foco en un desplegable sale por capas (F no)', () => {
+    const select = { tagName: 'SELECT', isContentEditable: false };
+    expect(viewerShortcut(ev('Escape', { target: select }))).toBe('escape');
+    expect(viewerShortcut(ev('Backspace', { target: select }))).toBe('back');
+    expect(viewerShortcut(ev('f', { target: select }))).toBeNull();
+  });
+
   it('un evento ya atendido (defaultPrevented) se ignora; otras teclas también', () => {
-    expect(viewerShortcut(ev('Escape', { defaultPrevented: true }))).toBeNull();
+    expect(viewerShortcut(ev('Backspace', { defaultPrevented: true }))).toBeNull();
     expect(viewerShortcut(ev('g'))).toBeNull();
   });
 });

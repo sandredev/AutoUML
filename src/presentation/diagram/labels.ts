@@ -221,7 +221,7 @@ const DEFAULT_CATEGORIES: Record<Category, string> = {
 
 export const DEFAULT_LABELS: ViewerLabels = {
   canvasAria:
-    'Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo. Con una clase seleccionada, F muestra solo ella y sus vecinos y Mayús+clic en otra clase marca la ruta más corta; Esc vuelve.',
+    'Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo. Con una clase seleccionada, F muestra solo ella y sus vecinos y Mayús+clic en otra clase marca la ruta más corta; ⌫ vuelve.',
   minimapAria: 'Minimapa del diagrama. Haz clic para centrar la vista, arrastra el recuadro o usa las flechas para desplazarla.',
   paintError: 'No se pudo dibujar el diagrama: ',
   renameAria: 'Nuevo nombre del tipo',
@@ -264,7 +264,7 @@ export const DEFAULT_LABELS: ViewerLabels = {
   focusDirIn: 'Entrantes',
   focusDirBoth: 'Ambas',
   focusExit: 'Salir del foco',
-  focusExitTitle: 'Volver al diagrama completo con la vista anterior (F sobre la misma clase o Esc)',
+  focusExitTitle: 'Volver al diagrama completo con la vista anterior (F sobre la misma clase o ⌫)',
   shortcutsTitle: 'Atajos de teclado',
   shortcutsClose: 'Cerrar',
   shortcutsNav: 'Ir a la clase más cercana en esa dirección',
@@ -273,7 +273,7 @@ export const DEFAULT_LABELS: ViewerLabels = {
   relModeAll: 'todas',
   shortcutsNavRelation: 'En modo relaciones, elegir relación: ←/→ las recorren (arriba primero, luego abajo); ↑/↓ saltan a las de arriba/abajo',
   shortcutsFocus: 'Entrar en el foco de la selección; ya en foco, cambiar a otra o salir',
-  shortcutsEscape: 'Deshacer por capas: modo relaciones, ruta, foco y, al final, la disposición original',
+  shortcutsEscape: 'Deshacer por capas: ayuda, modo relaciones, ruta y foco; al final, ⌫ vuelve al diagrama completo encuadrado y Esc sale de pantalla completa',
   shortcutsZoom: 'Acercar / alejar',
   shortcutsFit: 'Ajustar la vista al diagrama',
   shortcutsHelp: 'Mostrar esta ayuda',
