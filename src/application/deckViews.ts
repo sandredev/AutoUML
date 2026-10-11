@@ -25,6 +25,9 @@ function validateView(v: unknown, filtersOf: (f: unknown) => SidecarFilters | un
   if (Array.isArray(v.collapsed)) {
     out.collapsed = v.collapsed.filter((s): s is string => typeof s === 'string').slice(0, MAX_COLLAPSED);
   }
+  if (isRecord(v.frame) && isFiniteNumber(v.frame.w) && isFiniteNumber(v.frame.h) && v.frame.w > 0 && v.frame.h > 0) {
+    out.frame = { w: v.frame.w, h: v.frame.h };
+  }
   return out;
 }
 

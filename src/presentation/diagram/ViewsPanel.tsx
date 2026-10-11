@@ -142,6 +142,8 @@ export function ViewsPanel({ views, labels, hasFilters, hasFocus, hasCollapsed, 
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') e.currentTarget.blur();
                           else if (e.key === 'Escape') {
+                            // preventDefault: en pantalla completa, un Esc no atendido la cierra (main.ts).
+                            e.preventDefault();
                             e.stopPropagation();
                             setRenaming(null);
                           }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addView,
   moveView,
+  recenterView,
   removeView,
   renameView,
   serializeViews,
@@ -20,7 +21,7 @@ describe('validateViews', () => {
   });
 
   it('acepta una vista mínima y una completa', () => {
-    const full = view('B', { filters: { hideExternal: true }, focusKey: 'T1', collapsed: ['p'] });
+    const full = view('B', { filters: { hideExternal: true }, focusKey: 'T1', collapsed: ['p'], frame: { w: 800, h: 600 } });
     expect(validateViews([view('A'), full])).toEqual([view('A'), full]);
   });
 
@@ -41,6 +42,11 @@ describe('validateViews', () => {
     expect(r).toEqual([{ title: 'x', view: { scale: 1, tx: 0, ty: 0 }, collapsed: ['a', 'b'] }]);
   });
 
+  it('descarta un frame sin tamaño positivo y finito', () => {
+    const bad = [{ w: 0, h: 600 }, { w: 800 }, { w: Number.POSITIVE_INFINITY, h: 1 }, 'x'];
+    for (const frame of bad) expect(validateViews([{ ...view('x'), frame }])).toEqual([view('x')]);
+  });
+
   it('usa el validador de filtros inyectado', () => {
     const r = validateViews([{ ...view('x'), filters: { hideExternal: true, raro: 1 } }], () => ({ hideExternal: true }));
     expect(r?.[0].filters).toEqual({ hideExternal: true });
@@ -49,7 +55,7 @@ describe('validateViews', () => {
 
 describe('serializeViews', () => {
   it('ida y vuelta sin pérdidas', () => {
-    const vs = [view('A', { focusKey: 'T', collapsed: [] }), view('B', { filters: { hiddenTypes: ['X'] } })];
+    const vs = [view('A', { focusKey: 'T', collapsed: [], frame: { w: 1000, h: 600 } }), view('B', { filters: { hiddenTypes: ['X'] } })];
     expect(validateViews(JSON.parse(JSON.stringify(serializeViews(vs))))).toEqual(vs);
   });
 
@@ -82,5 +88,18 @@ describe('operaciones (inmutables)', () => {
     expect(stepView(2, 3, 1)).toBe(2);
     expect(stepView(0, 3, -1)).toBe(0);
     expect(stepView(0, 0, 1)).toBe(-1);
+  });
+});
+
+describe('recenterView', () => {
+  it('conserva el centro al aplicar la vista en un lienzo de otro tamaño', () => {
+    const v = { scale: 2, tx: 100, ty: 50 };
+    expect(recenterView(v, { w: 1000, h: 600 }, { w: 1920, h: 1080 })).toEqual({ scale: 2, tx: 560, ty: 290 });
+  });
+
+  it('sin frame guardado o con el mismo tamaño la deja igual', () => {
+    const v = { scale: 1, tx: 3, ty: 4 };
+    expect(recenterView(v, undefined, { w: 500, h: 500 })).toEqual(v);
+    expect(recenterView(v, { w: 500, h: 500 }, { w: 500, h: 500 })).toEqual(v);
   });
 });

@@ -19,8 +19,6 @@ interface Props {
   onLayoutLoadingChange?: (loading: boolean) => void;
   /** Se pinta encima del área de render (la intro de carga). */
   children?: ReactNode;
-  onNewProject?: () => void;
-  onOpenProject?: () => void;
   /** Identidad del documento abierto: recargarlo conserva la vista y las posiciones manuales. */
   docKey?: string;
   /** Estado persistido del sidecar (colapsados, overrides, vista). */

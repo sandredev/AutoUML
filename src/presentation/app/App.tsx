@@ -470,7 +470,8 @@ export default function App() {
     openGuard.request(() => void loadPumlNow());
   }, [project, busy, openGuard, loadPumlNow]);
 
-  const handleReload = useCallback(async () => {
+  // reset: solo la rueda del header restablece la vista; Ctrl+R / Archivo › Recargar conservan posiciones.
+  const handleReload = useCallback(async (opts?: { reset?: boolean }) => {
     if (!project?.puml || busy) return;
     setBusy(true);
     try {
@@ -483,7 +484,7 @@ export default function App() {
         loadedFor.current = meta.value.meta.name + ':' + (meta.value.meta.pumlLoadedAt ?? '');
       }
       // La rueda recarga el archivo y además restablece la vista (antes, botón "Restablecer" del visor).
-      if (ok) setResetSignal((n) => n + 1);
+      if (ok && opts?.reset) setResetSignal((n) => n + 1);
       setStatus(
         ok
           ? { kind: 'success', text: t('status.reloaded') }
@@ -592,17 +593,13 @@ export default function App() {
 
   const toggleSidebar = useCallback(() => setSidebarVisible((v) => !v), []);
 
-  const handleNewProject = useCallback(() => {
-    setModal({ open: true, dismissable: project !== null || diagram !== null });
-  }, [project, diagram]);
-
   // handleStartModalOpened usa setModal({open:false}) al crear/abrir, así que
   // el estado vacío desaparece solo cuando hay proyecto o diagrama.
 
   const handleZoomIn = useCallback(() => canvasRef.current?.zoomIn(), []);
   const handleZoomOut = useCallback(() => canvasRef.current?.zoomOut(), []);
   // Botón del header: alterna pantalla completa del área de render (barra, paneles y atajos del visor
-  // siguen dentro). El reencuadre ocurre al cambiar la pantalla completa, cuando el lienzo ya tiene su tamaño.
+  // siguen dentro). El reencuadre lo hace el lienzo al cambiar de tamaño (solo si la vista seguía el encuadre).
   const handleFit = useCallback(() => {
     canvasRef.current?.smoothNextResize();
     if (document.fullscreenElement) {
@@ -614,14 +611,6 @@ export default function App() {
     else canvasRef.current?.fit();
   }, []);
   handleFitRef.current = handleFit;
-  useEffect(() => {
-    const onFullscreen = (): void => {
-      // Animado: si el cambio de tamaño ya inició el vuelo al mismo encuadre, no lo reinicia (#38).
-      requestAnimationFrame(() => canvasRef.current?.fit({ animate: true, onlyIfAuto: true }));
-    };
-    document.addEventListener('fullscreenchange', onFullscreen);
-    return () => document.removeEventListener('fullscreenchange', onFullscreen);
-  }, []);
   const handleRelayout = useCallback(() => {
     if (!canvasRef.current) return;
     canvasRef.current.resetPositions({ fit: true });
@@ -1063,7 +1052,7 @@ export default function App() {
         editorVisible={editorVisible}
         canEdit={source !== null}
         onToggleEditor={toggleEditor}
-        onReload={() => void handleReload()}
+        onReload={() => void handleReload({ reset: true })}
         canView={diagram !== null && diagram.types.length > 0}
         onToggleSidebar={toggleSidebar}
         onZoomIn={handleZoomIn}
@@ -1124,8 +1113,6 @@ export default function App() {
           canvasRef={canvasRef}
           areaRef={renderAreaRef}
           onLayoutLoadingChange={setLayoutLoading}
-          onNewProject={handleNewProject}
-          onOpenProject={handleNewProject}
           {...(docKey !== undefined ? { docKey } : {})}
           {...(initialSidecar !== undefined ? { initialSidecar } : {})}
           onViewStateChange={handleViewStateChange}

@@ -63,6 +63,8 @@ export interface SidecarView {
   focusKey?: string;
   /** Paquetes plegados en esta vista. */
   collapsed?: string[];
+  /** Tamaño del lienzo al guardar: la cámara se recentra si se aplica en otro (p. ej. pantalla completa). */
+  frame?: { w: number; h: number };
 }
 
 /**

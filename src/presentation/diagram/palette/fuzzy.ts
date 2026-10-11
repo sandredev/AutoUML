@@ -63,7 +63,25 @@ function range(start: number, len: number): number[] {
   return Array.from({ length: len }, (_, k) => start + k);
 }
 
+/**
+ * Con varias palabras cada una puntúa por su cuenta y cuenta la media ("export pdf" → "Exportar PDF"
+ * casa por prefijo e inicio de palabra; juntas serían solo subsecuencia). Todas tienen que casar.
+ */
 export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return matchWord(query, text);
+  let score = 0;
+  const indices = new Set<number>();
+  for (const w of words) {
+    const m = matchWord(w, text);
+    if (!m) return null;
+    score += m.score;
+    for (const i of m.indices) indices.add(i);
+  }
+  return { score: Math.round(score / words.length), indices: [...indices].sort((a, b) => a - b) };
+}
+
+function matchWord(query: string, text: string): FuzzyMatch | null {
   const q = [...query].map(fold).join('').replace(/\s+/g, '');
   if (!q) return { score: 0, indices: [] };
   const f = foldText(text);

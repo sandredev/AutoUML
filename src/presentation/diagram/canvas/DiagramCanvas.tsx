@@ -16,6 +16,7 @@ import { applySkin, skinKey } from '../style/skin';
 import type { CardDisplay } from '../style/contract';
 import type { LayoutResult, ViewState } from '../types';
 import { diagramToSvg, type SvgCardContent } from '../svg';
+import { recenterView } from '../presentation/views';
 import { drawDiagram, LIGHT_THEME, type Theme } from './draw';
 import { collapsePackages, hitTestPackageHeader } from './collapse';
 import { labelAnchor } from './edgePath';
@@ -38,16 +39,19 @@ export interface DiagramCanvasHandle {
    * Encuadra todo el diagrama. Anima la cámara por defecto; las acciones iniciadas con el teclado
    * (p. ej. Ctrl+0) deben pasar `{ animate: false }`: se repiten muchas veces y no deben hacerse esperar.
    */
-  fit(opts?: { animate?: boolean; onlyIfAuto?: boolean }): void;
+  fit(opts?: { animate?: boolean }): void;
   /** Centra una clase (anima por defecto; `{ animate: false }` para atajos de teclado). */
   focusNode(id: string, opts?: { animate?: boolean }): void;
   /** Encuadra un paquete (T10). false si no está en el layout (p. ej. plegado: usar focusNode del paquete). */
   fitPackage(name: string, opts?: { animate?: boolean }): boolean;
   /**
    * Lleva la cámara a una vista guardada (T10). Con `afterLayout` espera al layout nuevo (plegados que
-   * cambian) antes de moverla; el foco, si cambia, reencuadra por su cuenta.
+   * cambian o el foco) antes de moverla. `frame` es el tamaño del lienzo al guardarla: en otro tamaño se
+   * recentra (pantalla completa).
    */
-  goToView(view: ViewState, opts?: { animate?: boolean; afterLayout?: boolean }): void;
+  goToView(view: ViewState, opts?: { animate?: boolean; afterLayout?: boolean; frame?: { w: number; h: number } }): void;
+  /** Cámara que se ve ahora (también en modo foco) y tamaño del lienzo: lo que guarda una vista. */
+  getCamera(): { view: ViewState; frame: { w: number; h: number } };
   exportPng(): Promise<Blob | null>;
   /** PNG con escala/tema/fondo configurables (T5: tema claro por defecto). */
   exportPngFull(opts?: { scale?: 1 | 2 | 4; theme?: 'app' | 'light'; transparent?: boolean }): Promise<Blob | null>;
@@ -156,7 +160,8 @@ interface RouteRequest { model: DiagramModel; from: string; to: string | null; d
 /** Menú contextual abierto: punto (ventana) y sobre qué. */
 interface MenuState { x: number; y: number; subject: MenuSubject }
 /** Vista pendiente hasta que llegue un layout distinto de `from`: encuadrar o ir a `target`. */
-interface PendingView { from: LayoutResult; target?: ViewState; animate?: boolean }
+/** `requested`: la pidió goToView (una vista guardada); un cambio de foco simultáneo no la sustituye. */
+interface PendingView { from: LayoutResult; target?: ViewState; animate?: boolean; frame?: { w: number; h: number }; requested?: boolean }
 
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
 const MAX_EXPORT_SIDE = 16384;
@@ -335,10 +340,14 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (focusKey !== null && entering) focusViewRef.current = { view: { ...viewRef.current }, autoFit: autoFitRef.current };
     const saved = focusKey === null ? focusViewRef.current : null;
     if (focusKey === null) focusViewRef.current = null;
-    pendingFitRef.current = saved
-      ? { from: committedLayoutRef.current, target: saved.view, animate: focusAnimate }
-      : { from: committedLayoutRef.current, animate: focusAnimate };
-    if (saved) autoFitRef.current = saved.autoFit;
+    const requested = pendingFitRef.current?.requested ? pendingFitRef.current : null;
+    if (requested) pendingFitRef.current = { ...requested, from: committedLayoutRef.current };
+    else {
+      pendingFitRef.current = saved
+        ? { from: committedLayoutRef.current, target: saved.view, animate: focusAnimate }
+        : { from: committedLayoutRef.current, animate: focusAnimate };
+      if (saved) autoFitRef.current = saved.autoFit;
+    }
   }
 
   // Iniciales del sidecar: se aplican una vez por documento (aunque lleguen tarde por la
@@ -549,8 +558,6 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         setView(target);
         return;
       }
-      const va = viewAnimRef.current;
-      if (va && Math.abs(va.to.tx - target.tx) < 0.5 && Math.abs(va.to.ty - target.ty) < 0.5 && Math.abs(va.to.scale / target.scale - 1) < 1e-3) return;
       viewAnimRef.current = { from: { ...cur }, to: target, start: performance.now(), duration: VIEW_MS };
       schedule();
     },
@@ -614,11 +621,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     () => ({
       zoomIn: () => zoomBy(1.25),
       zoomOut: () => zoomBy(1 / 1.25),
-      fit: (opts) => {
-        // onlyIfAuto: los reencuadres automáticos (p. ej. pantalla completa) no pisan una vista elegida.
-        if (opts?.onlyIfAuto && !autoFitRef.current) return;
-        fit(opts?.animate ?? true);
-      },
+      fit: (opts) => fit(opts?.animate ?? true),
       focusNode: (id: string, opts) => {
         if (focusNodeInView(id, opts?.animate ?? true)) return;
         // En modo controlado `model` es el agregado (sin los tipos plegados): se busca en el original.
@@ -645,11 +648,18 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       goToView: (target: ViewState, opts) => {
         autoFitRef.current = false;
         if (opts?.afterLayout) {
-          pendingFitRef.current = { from: latest.current.sourceLayout, target: { ...target }, animate: opts.animate ?? true };
+          pendingFitRef.current = {
+            from: latest.current.sourceLayout,
+            target: { ...target },
+            animate: opts.animate ?? true,
+            requested: true,
+            ...(opts.frame ? { frame: opts.frame } : {}),
+          };
           return;
         }
-        flyTo({ ...target }, opts?.animate ?? true);
+        flyTo(recenterView(target, opts?.frame, sizeRef.current), opts?.animate ?? true);
       },
+      getCamera: () => ({ view: { ...(viewAnimRef.current?.to ?? viewRef.current) }, frame: { ...sizeRef.current } }),
       exportPng: async () => {
         const canvas = renderOffscreen(2, 'app', false);
         if (!canvas) return null;
@@ -816,7 +826,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (pending && !(controlled && pending.from === layout)) {
       pendingFitRef.current = null;
       // La cámara se asienta a la vez que la transición del layout (sin vuelo si lo pidió el teclado).
-      if (pending.target) flyTo(pending.target, pending.animate ?? true);
+      if (pending.target) flyTo(recenterView(pending.target, pending.frame, sizeRef.current), pending.animate ?? true);
       else fit(pending.animate ?? true);
     }
     const id = pendingFocusRef.current;

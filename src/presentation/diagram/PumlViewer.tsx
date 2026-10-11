@@ -349,20 +349,20 @@ export function PumlViewer({
     paletteReturnFocus.current?.focus();
     paletteReturnFocus.current = null;
   }, []);
+  // Ctrl+K alterna: cerrar por aquí también devuelve el foco (si no, queda en body y el lienzo no oye teclas).
+  const paletteOpenRef = useRef(paletteOpen);
+  paletteOpenRef.current = paletteOpen;
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'k') return;
       if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
-      setPaletteOpen((open) => {
-        if (open) return false;
-        paletteReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        return true;
-      });
+      if (paletteOpenRef.current) closePalette();
+      else openPalette();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [openPalette, closePalette]);
   const paletteItems = useMemo<PaletteItem[]>(() => {
     if (!model) return [];
     const classes = model.types.map((t): PaletteItem => ({ id: t.id, label: t.name, kind: 'class', detail: t.packageName }));
@@ -419,12 +419,18 @@ export function PumlViewer({
 
   // Vistas guardadas (T10): cámara + filtros, foco y plegados opcionales.
   const saveView = useCallback((o: SaveViewOptions) => {
-    const snap = handleRef.current?.getSnapshot();
-    if (!snap) return;
-    const v: DeckView = { title: o.title, view: { ...snap.view } };
-    if (o.includeFilters) v.filters = filters;
-    if (o.includeFocus && activeFocus !== null) v.focusKey = activeFocus.id;
-    if (o.includeCollapsed) v.collapsed = [...liveCollapsed];
+    const canvas = handleRef.current;
+    if (!canvas) return;
+    const withFocus = o.includeFocus && activeFocus !== null;
+    // Con foco se guarda la cámara que se ve; sin él, la del diagrama completo (al aplicarla se sale del foco).
+    const cam = canvas.getCamera();
+    const view = withFocus ? cam.view : canvas.getSnapshot().view;
+    const v: DeckView = { title: o.title, view: { ...view }, frame: cam.frame };
+    // Sin filtros ni plegados también se guardan (vacíos): la cámara es de ese layout. Ausentes = el usuario
+    // los desmarcó y la vista no los toca.
+    if (o.includeFilters || !hasActiveFilters(filters)) v.filters = filters;
+    if (withFocus) v.focusKey = activeFocus.id;
+    if (o.includeCollapsed || liveCollapsed.size === 0) v.collapsed = [...liveCollapsed];
     setViews((prev) => addView(prev, v));
   }, [handleRef, filters, activeFocus, liveCollapsed]);
   const removeSavedView = useCallback((index: number) => setViews((prev) => removeView(prev, index)), []);
@@ -444,7 +450,11 @@ export function PumlViewer({
     // Una vista sin foco se guardó sobre el diagrama completo: con un foco activo, su cámara caería en el subgrafo.
     const leavesFocus = v.focusKey === undefined && activeFocus !== null;
     // Si el layout va a cambiar, la cámara espera al layout nuevo; si el foco cambia, el foco reencuadra.
-    handleRef.current?.goToView(v.view, { animate, afterLayout: collapsedChanges || filtersChange || focusChanges || leavesFocus });
+    handleRef.current?.goToView(v.view, {
+      animate,
+      afterLayout: collapsedChanges || filtersChange || focusChanges || leavesFocus,
+      ...(v.frame ? { frame: v.frame } : {}),
+    });
     if (nextCollapsed !== null && collapsedChanges) setCollapsed(nextCollapsed);
     if (v.filters !== undefined) setFilters(v.filters);
     if (leavesFocus) exitFocus(animate);

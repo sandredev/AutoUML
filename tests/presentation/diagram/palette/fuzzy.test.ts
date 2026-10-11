@@ -59,6 +59,13 @@ describe('fuzzySearch', () => {
     expect(fuzzySearch('', items('a', 'b', 'c'), 2)).toHaveLength(2);
   });
 
+  it('varias palabras: cada una puntúa por su cuenta (una etiqueta con espacios no cae a subsecuencia)', () => {
+    expect(labels(fuzzySearch('export pdf', items('ExportPdfService', 'Exportar PDF')))[0]).toBe('Exportar PDF');
+    expect(fuzzyMatch('plegar todo', 'Plegar todo')!.score).toBeGreaterThan(fuzzyMatch('plegartodo', 'Plegar todo')!.score);
+    expect(fuzzyMatch('plegar todo', 'Plegar todo')?.indices).toEqual([0, 1, 2, 3, 4, 5, 7, 8, 9, 10]);
+    expect(fuzzyMatch('export xyz', 'Exportar PDF')).toBeNull();
+  });
+
   it('es determinista', () => {
     const list = items('OrderLine', 'Order', 'ordinal', 'Border', 'OrderRepository');
     expect(labels(fuzzySearch('ord', list))).toEqual(labels(fuzzySearch('ord', [...list])));
