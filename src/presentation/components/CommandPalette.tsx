@@ -1,4 +1,4 @@
-// Paleta de comandos (Ctrl+K, T10): búsqueda difusa sobre clases y paquetes. Combobox + listbox con
+// Paleta de comandos (Ctrl+K, T10): búsqueda difusa sobre clases, paquetes y acciones. Combobox + listbox con
 // la opción activa anunciada (aria-activedescendant). Pura UI: quien la abre decide qué hace elegir.
 import { useEffect, useId, useMemo, useRef, useState, type JSX } from 'react';
 import { fill, type PaletteLabels } from '../diagram/labels';
@@ -7,9 +7,11 @@ import { fuzzySearch } from '../diagram/palette/fuzzy';
 export interface PaletteItem {
   id: string;
   label: string;
-  kind: 'class' | 'package';
+  kind: 'class' | 'package' | 'action';
   /** Texto secundario (paquete de la clase). */
   detail?: string;
+  /** Solo `kind: 'action'`: efecto al elegirla. */
+  run?: () => void;
 }
 
 interface Props {
@@ -128,7 +130,7 @@ export function CommandPalette({ items, labels, onPick, onClose }: Props): JSX.E
               <span className="command-palette-label" translate="no">{highlight(r.item.label, r.indices)}</span>
               {r.item.detail ? <span className="command-palette-detail" translate="no">{r.item.detail}</span> : null}
               <span className="command-palette-kind">
-                {r.item.kind === 'package' ? labels.kindPackage : labels.kindClass}
+                {r.item.kind === 'package' ? labels.kindPackage : r.item.kind === 'action' ? labels.kindAction : labels.kindClass}
               </span>
             </li>
           ))}

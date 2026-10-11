@@ -1095,6 +1095,8 @@ export default function App() {
           onRename={handleRename}
           {...(source !== null ? { onGoToCode: handleGoToCode } : {})}
           onCopyText={handleCopyText}
+          onAppAction={(a) => actionRef.current(a)}
+          onThemeChange={setThemeMode}
           canvasRef={canvasRef}
           onLayoutLoadingChange={setLayoutLoading}
           onNewProject={handleNewProject}

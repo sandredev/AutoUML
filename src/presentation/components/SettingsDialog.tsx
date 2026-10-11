@@ -14,7 +14,7 @@ interface Props {
 
 const focusableSelector = 'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-const themeOptions: { mode: ThemeMode; label: MessageKey }[] = [
+export const themeOptions: { mode: ThemeMode; label: MessageKey }[] = [
   { mode: 'system', label: 'settings.themeSystem' },
   { mode: 'light', label: 'settings.themeLight' },
   { mode: 'dark', label: 'settings.themeDark' },

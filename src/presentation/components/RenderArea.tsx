@@ -1,10 +1,12 @@
 import { useMemo, type JSX, type ReactNode, type RefObject } from 'react';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { ProjectInfo, SidecarFilters, SidecarState, SidecarView } from '../../application/ports/ipc';
-import { PumlViewer, type CodeTarget } from '../diagram/PumlViewer';
+import { PumlViewer, type CodeTarget, type PaletteHost } from '../diagram/PumlViewer';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { viewerLabels } from '../localization/viewerLabels';
+import { isThemeMode, type ThemeMode } from '../../domain/rules/themes';
+import { themeOptions } from './SettingsDialog';
 
 interface Props {
   project: ProjectInfo | null;
@@ -30,6 +32,9 @@ interface Props {
   /** Menú contextual (T8): ir al código y copiar nombre. */
   onGoToCode?: (target: CodeTarget) => void;
   onCopyText?: (text: string) => void;
+  /** Acciones de la app en la paleta (T10.2): exportar y cambiar de tema. */
+  onAppAction?: PaletteHost['onAppAction'];
+  onThemeChange?: (mode: ThemeMode) => void;
   /** Diagnóstico de arquitectura (T9): capas de layers.json, título y exportación del informe. */
   analysisLayers?: readonly string[] | null;
   reportTitle?: string;
@@ -54,12 +59,22 @@ export function RenderArea({
   onRename,
   onGoToCode,
   onCopyText,
+  onAppAction,
+  onThemeChange,
   analysisLayers = null,
   reportTitle,
   onExportReport,
 }: Props): JSX.Element {
   const { t } = useLocalization();
   const labels = useMemo(() => viewerLabels(t), [t]);
+  const paletteHost = useMemo<PaletteHost | undefined>(() => {
+    if (!onAppAction || !onThemeChange) return undefined;
+    return {
+      themes: themeOptions.map((o) => ({ mode: o.mode, name: t(o.label) })),
+      onAppAction,
+      onTheme: (mode) => isThemeMode(mode) && onThemeChange(mode),
+    };
+  }, [onAppAction, onThemeChange, t]);
   if (!project && !model) {
     return (
       <main className="render-area">
@@ -108,6 +123,7 @@ export function RenderArea({
         {...(onRename ? { onRename } : {})}
         {...(onGoToCode ? { onGoToCode } : {})}
         {...(onCopyText ? { onCopyText } : {})}
+        {...(paletteHost ? { paletteHost } : {})}
         analysisLayers={analysisLayers}
         {...(reportTitle !== undefined ? { reportTitle } : {})}
         {...(onExportReport ? { onExportReport } : {})}

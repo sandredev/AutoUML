@@ -58,6 +58,8 @@ export interface DiagramCanvasHandle {
   clearRoute(): boolean;
   /** true si hay alguna tarjeta movida a mano. */
   hasManualPositions(): boolean;
+  /** Ejecuta una acción del menú contextual sobre `subject` sin abrir el menú (paleta, T10.2). */
+  runMenuAction(action: MenuAction, subject: MenuSubject): void;
 }
 
 interface Props {
@@ -579,6 +581,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     [updateCollapsed],
   );
 
+  const runMenuRef = useRef<((action: MenuAction, subject: MenuSubject) => void) | null>(null);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -641,6 +645,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         return true;
       },
       hasManualPositions: () => hasOverrides(latest.current.overrides),
+      runMenuAction: (action, subject) => runMenuRef.current?.(action, subject),
     }),
     [zoomBy, fit, flyTo, focusNodeInView, updateCollapsed, themeOf],
   );
@@ -1035,6 +1040,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onMenuAction?.(action, subject);
     }
   };
+
+  runMenuRef.current = runMenu;
 
   const onPointerLeave = (): void => {
     if (!dragRef.current && latest.current.hover !== null) setHover(null);

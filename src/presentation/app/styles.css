@@ -356,3 +356,9 @@ p { margin: 0 0 8px; }
 .views-panel-list { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .views-panel-list li { display: flex; align-items: center; gap: 4px; }
 .views-panel-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Recorrido de presentación (T10.4) */
+.views-panel-rename { flex: 1; min-width: 0; padding: 2px 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); font-size: 12px; }
+.presentation-bar { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 12px; padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); font-size: 13px; }
+.presentation-bar-title { font-weight: 600; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presentation-bar-hint { opacity: 0.7; }

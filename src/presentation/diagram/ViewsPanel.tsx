@@ -22,14 +22,18 @@ interface Props {
   onSave: (opts: SaveViewOptions) => void;
   onApply: (index: number) => void;
   onRemove: (index: number) => void;
+  onRename: (index: number, title: string) => void;
+  onMove: (from: number, to: number) => void;
+  onPresent: () => void;
 }
 
-export function ViewsPanel({ views, labels, hasFilters, hasFocus, hasCollapsed, onSave, onApply, onRemove }: Props): JSX.Element {
+export function ViewsPanel({ views, labels, hasFilters, hasFocus, hasCollapsed, onSave, onApply, onRemove, onRename, onMove, onPresent }: Props): JSX.Element {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [inclFilters, setInclFilters] = useState(true);
   const [inclFocus, setInclFocus] = useState(true);
   const [inclCollapsed, setInclCollapsed] = useState(true);
+  const [renaming, setRenaming] = useState<number | null>(null);
   const panelId = useId();
   const wrapRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -113,13 +117,48 @@ export function ViewsPanel({ views, labels, hasFilters, hasFocus, hasCollapsed, 
           </form>
           <fieldset>
             <legend>{labels.listHeading}</legend>
+            <button type="button" className="puml-viewer-reset" title={labels.presentTitle} disabled={views.length === 0} onClick={onPresent}>
+              {labels.present}
+            </button>
             {views.length === 0 ? (
               <p className="filters-panel-hint">{labels.empty}</p>
             ) : (
               <ol className="views-panel-list">
                 {views.map((v, i) => (
                   <li key={i}>
-                    <span className="views-panel-name" translate="no" title={v.title}>{v.title}</span>
+                    {renaming === i ? (
+                      <input
+                        className="views-panel-rename"
+                        type="text"
+                        autoFocus
+                        maxLength={200}
+                        defaultValue={v.title}
+                        aria-label={fill(labels.renameAria, { title: v.title })}
+                        onBlur={(e) => {
+                          const next = e.currentTarget.value.trim();
+                          if (next && next !== v.title) onRename(i, next);
+                          setRenaming(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                          else if (e.key === 'Escape') {
+                            e.stopPropagation();
+                            setRenaming(null);
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span className="views-panel-name" translate="no" title={v.title}>{v.title}</span>
+                    )}
+                    <button type="button" className="puml-viewer-reset" aria-label={fill(labels.renameAria, { title: v.title })} onClick={() => setRenaming(i)}>
+                      {labels.rename}
+                    </button>
+                    <button type="button" className="puml-viewer-reset" aria-label={fill(labels.moveUpAria, { title: v.title })} disabled={i === 0} onClick={() => onMove(i, i - 1)}>
+                      ↑
+                    </button>
+                    <button type="button" className="puml-viewer-reset" aria-label={fill(labels.moveDownAria, { title: v.title })} disabled={i === views.length - 1} onClick={() => onMove(i, i + 1)}>
+                      ↓
+                    </button>
                     <button type="button" className="puml-viewer-reset" aria-label={fill(labels.applyAria, { title: v.title })} onClick={() => onApply(i)}>
                       {labels.apply}
                     </button>

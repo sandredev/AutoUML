@@ -15,7 +15,9 @@ import { drawHiddenOf, hasActiveFilters, memberFiltersKey, type DiagramFilters }
 import { focusKey, type FocusDirection, type FocusSpec } from './graph/neighborhood';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from './labels';
 import { collapsedOwner, isPackageNode, PACKAGE_NODE_PREFIX, packageNodeName } from './layout/aggregate';
-import { addView, removeView, type DeckView } from './presentation/views';
+import { buildPaletteActions, type AppAction } from './palette/actions';
+import { presentationReducer, startPresentation, transitionPlan, type PlayerEvent } from './presentation/player';
+import { addView, moveView, removeView, renameView, type DeckView } from './presentation/views';
 import { ViewsPanel, type SaveViewOptions } from './ViewsPanel';
 import { useDiagramLayout } from './layout/useDiagramLayout';
 import type { LayoutOptions, ViewState } from './types';
@@ -26,6 +28,13 @@ import { initialViewOptions, resetViewOptions, type ViewOptionsState } from './v
  * project selection, PUML loading, and model parsing; this component owns
  * layout and drawing.
  */
+/** Lo que la paleta necesita de la app para sus acciones (T10.2). */
+export interface PaletteHost {
+  themes: readonly { mode: string; name: string }[];
+  onAppAction: (action: AppAction) => void;
+  onTheme: (mode: string) => void;
+}
+
 export interface PumlViewerProps {
   model: DiagramModel | null;
   selectedId?: string | null;
@@ -55,6 +64,8 @@ export interface PumlViewerProps {
   onGoToCode?: (target: CodeTarget) => void;
   /** Menú contextual "Copiar nombre" (T8). */
   onCopyText?: (text: string) => void;
+  /** Acciones de la app en la paleta (T10.2): exportar y tema. Sin él, solo las del visor. */
+  paletteHost?: PaletteHost;
   /** Orden de capas de layers.json (T9); sin él, el de los paquetes del modelo. */
   analysisLayers?: readonly string[] | null;
   /** Título del informe de arquitectura (nombre del documento) (T9). */
@@ -87,6 +98,7 @@ export function PumlViewer({
   onRename,
   onGoToCode,
   onCopyText,
+  paletteHost,
   analysisLayers = null,
   reportTitle = '',
   onExportReport,
@@ -315,8 +327,42 @@ export function PumlViewer({
     const packages = packageNames.map((name): PaletteItem => ({ id: name, label: name, kind: 'package' }));
     return [...packages, ...classes];
   }, [model, packageNames]);
+  const hostApp = paletteHost;
+  const actionItems = useMemo<PaletteItem[]>(() => {
+    if (!model) return [];
+    const collapsible = packageNames.filter((n) => n !== '(default package)');
+    const sel = selectedId !== null && selectedId !== undefined ? model.types.find((t) => t.id === selectedId) : undefined;
+    const run = (fn: () => void) => () => fn();
+    const actions = buildPaletteActions({
+      labels: labels.palette.actions,
+      viewerLabels: labels,
+      themes: hostApp?.themes ?? [],
+      hasDocument: hostApp !== undefined,
+      packageCount: collapsible.length,
+      collapsedCount: liveCollapsed.size,
+      hasFilters: filtersActive,
+      focused: sel ? { kind: 'node', id: sel.id, name: sel.name, packageName: sel.packageName } : null,
+      menuContext: { canGoToCode: onGoToCode !== undefined, hasRoute: false, inFocus: activeFocus !== null, hasFilters: filtersActive },
+      host: {
+        app: (a) => hostApp?.onAppAction(a),
+        context: (a, s) => handleRef.current?.runMenuAction(a, s),
+        collapseAll: run(() => setCollapsed(new Set(collapsible))),
+        expandAll: run(() => setCollapsed(NO_COLLAPSED)),
+        clearFilters: run(() => setFilters(NO_FILTERS)),
+        theme: (m) => hostApp?.onTheme(m),
+      },
+    });
+    return actions
+      .filter((a) => a.enabled)
+      .map((a): PaletteItem => ({ id: a.id, label: a.label, kind: 'action', ...(a.detail ? { detail: a.detail } : {}), run: a.run }));
+  }, [model, packageNames, selectedId, labels, hostApp, liveCollapsed, filtersActive, onGoToCode, activeFocus, handleRef]);
+  const allPaletteItems = useMemo(() => [...paletteItems, ...actionItems], [paletteItems, actionItems]);
   const pickPaletteItem = useCallback((item: PaletteItem) => {
     closePalette();
+    if (item.kind === 'action') {
+      item.run?.();
+      return;
+    }
     const canvas = handleRef.current;
     if (item.kind === 'class') {
       goToClass(item.id, true);
@@ -339,7 +385,9 @@ export function PumlViewer({
     setViews((prev) => addView(prev, v));
   }, [handleRef, filters, activeFocus, liveCollapsed]);
   const removeSavedView = useCallback((index: number) => setViews((prev) => removeView(prev, index)), []);
-  const applyView = useCallback((index: number) => {
+  const renameSavedView = useCallback((index: number, title: string) => setViews((prev) => renameView(prev, index, title)), []);
+  const moveSavedView = useCallback((from: number, to: number) => setViews((prev) => moveView(prev, from, to)), []);
+  const applyView = useCallback((index: number, animate = true) => {
     const v = views[index];
     if (!v) return;
     const known = model ? new Set(model.packages.map((p) => p.name)) : null;
@@ -349,11 +397,72 @@ export function PumlViewer({
     const filtersChange = v.filters !== undefined && memberFiltersKey(v.filters) !== memberFiltersKey(filters);
     const focusChanges = v.focusKey !== undefined && v.focusKey !== activeFocus?.id;
     // Si el layout va a cambiar, la cámara espera al layout nuevo; si el foco cambia, el foco reencuadra.
-    handleRef.current?.goToView(v.view, { animate: true, afterLayout: collapsedChanges || filtersChange || focusChanges });
+    handleRef.current?.goToView(v.view, { animate, afterLayout: collapsedChanges || filtersChange || focusChanges });
     if (nextCollapsed !== null && collapsedChanges) setCollapsed(nextCollapsed);
     if (v.filters !== undefined) setFilters(v.filters);
     if (v.focusKey !== undefined && focusChanges) focusOn(v.focusKey, true);
   }, [views, model, liveCollapsed, filters, activeFocus, handleRef, focusOn]);
+
+  // Recorrido de presentación (T10.4): pantalla completa del visor y ←/→ entre vistas. El estado vive en
+  // `player`; aplicar la vista y la pantalla completa son efectos de aquí.
+  const rootRef = useRef<HTMLElement | null>(null);
+  const [player, setPlayer] = useState<ReturnType<typeof startPresentation> | null>(null);
+  const playing = player !== null && player.active;
+  const dispatchPlayer = useCallback((e: PlayerEvent) => {
+    setPlayer((p) => (p ? presentationReducer(p, e) : p));
+  }, []);
+  const present = useCallback(() => {
+    if (views.length === 0) return;
+    setPlayer(startPresentation(views));
+    void rootRef.current?.requestFullscreen?.().catch(() => undefined);
+  }, [views]);
+  const exitPresent = useCallback(() => {
+    setPlayer(null);
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+  }, []);
+  // La vista del recorrido sigue a la lista (renombrar/borrar desde el panel o el recorrido).
+  const appliedIndex = useRef<number | null>(null);
+  useEffect(() => {
+    if (!playing) {
+      appliedIndex.current = null;
+      return;
+    }
+    if (appliedIndex.current === player.index) return;
+    const first = appliedIndex.current === null;
+    appliedIndex.current = player.index;
+    const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    applyView(player.index, !first && transitionPlan(reduced).animate);
+  }, [playing, player, applyView]);
+  useEffect(() => {
+    if (!playing) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopPropagation();
+        dispatchPlayer({ type: e.key === 'ArrowRight' ? 'next' : 'prev' });
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        exitPresent();
+      }
+    };
+    const onFullscreen = (): void => {
+      if (!document.fullscreenElement) setPlayer(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('fullscreenchange', onFullscreen);
+    };
+  }, [playing, dispatchPlayer, exitPresent]);
+  // El panel sigue editable durante el recorrido: la lista del recorrido se mantiene al día.
+  useEffect(() => {
+    setPlayer((p) => (p && p.views !== views ? { ...p, views, index: Math.min(p.index, Math.max(0, views.length - 1)) } : p));
+  }, [views]);
+  // Si se borran las vistas desde el panel con el recorrido activo, se sale.
+  if (playing && views.length === 0) setPlayer(null);
+
   const exportReport = useMemo(() => {
     if (!onExportReport || !model || !analysis) return undefined;
     return () => onExportReport(analysisReport(model, analysis, labels.analysis, reportTitle, { includeExternal }));
@@ -420,7 +529,7 @@ export function PumlViewer({
     : '';
 
   return (
-    <section className={`${classes} has-canvas`}>
+    <section ref={rootRef} className={`${classes} has-canvas`}>
       <div className="puml-viewer-bar" role="toolbar" aria-label={labels.toolbarAria}>
         <span className="puml-viewer-bar-info" title={fallback} aria-live="polite">
           {loading ? labels.relayouting : fallback ? fill(labels.fallback, { reason: fallback }) : manual ? labels.manual : ''}
@@ -446,6 +555,9 @@ export function PumlViewer({
           onSave={saveView}
           onApply={applyView}
           onRemove={removeSavedView}
+          onRename={renameSavedView}
+          onMove={moveSavedView}
+          onPresent={present}
         />
         <FiltersPanel filters={filters} packages={packageNames} labels={labels} onChange={setFilters} />
         <button
@@ -545,8 +657,16 @@ export function PumlViewer({
         />
       ) : null}
       </div>
+      {playing && player ? (
+        <div className="presentation-bar" role="status" aria-live="polite">
+          <span className="presentation-bar-title" translate="no">{views[player.index]?.title ?? ''}</span>
+          <span>{fill(labels.views.slide, { n: String(player.index + 1), total: String(views.length) })}</span>
+          <span className="presentation-bar-hint">{labels.views.presentHint}</span>
+          <button type="button" className="puml-viewer-reset" onClick={exitPresent}>{labels.views.exitPresent}</button>
+        </div>
+      ) : null}
       {paletteOpen ? (
-        <CommandPalette items={paletteItems} labels={labels.palette} onPick={pickPaletteItem} onClose={closePalette} />
+        <CommandPalette items={allPaletteItems} labels={labels.palette} onPick={pickPaletteItem} onClose={closePalette} />
       ) : null}
     </section>
   );

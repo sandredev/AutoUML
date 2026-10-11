@@ -3,6 +3,7 @@
 // Son cadenas planas con marcadores {n}/{name}… para poder enviarlas al Worker si hace falta.
 import type { ReportLabels } from '../../domain/analysis/report';
 import type { Category, RelType } from '../../domain/diagram/model';
+import type { PaletteActionLabels } from './palette/actions';
 
 export interface ViewerLabels {
   // Lienzo
@@ -127,6 +128,9 @@ export interface PaletteLabels {
   results: string;
   kindClass: string;
   kindPackage: string;
+  kindAction: string;
+  /** Acciones de la app (T10.2). */
+  actions: PaletteActionLabels;
   hint: string;
   toolbar: string;
   toolbarTitle: string;
@@ -153,6 +157,21 @@ export interface ViewsLabels {
   applyAria: string;
   removeAria: string;
   close: string;
+  /** Recorrido a pantalla completa (T10.4). */
+  present: string;
+  presentTitle: string;
+  rename: string;
+  /** "Renombrar la vista «{title}»" */
+  renameAria: string;
+  moveUp: string;
+  moveDown: string;
+  /** "Subir la vista «{title}»" / "Bajar la vista «{title}»" */
+  moveUpAria: string;
+  moveDownAria: string;
+  /** "{n} / {total}" */
+  slide: string;
+  presentHint: string;
+  exitPresent: string;
 }
 
 /** Textos del diagnóstico de arquitectura (T9): los del informe Markdown más los del panel. */
@@ -283,11 +302,22 @@ export const DEFAULT_LABELS: ViewerLabels = {
   routePick: 'Ruta desde {from}: haz clic en la clase de destino',
   palette: {
     title: 'Paleta de comandos',
-    placeholder: 'Buscar clase o paquete…',
+    placeholder: 'Buscar clase, paquete o acción…',
     empty: 'Sin resultados',
     results: '{n} resultados',
     kindClass: 'Clase',
     kindPackage: 'Paquete',
+    kindAction: 'Acción',
+    actions: {
+      exportPng: 'Exportar PNG',
+      exportSvg: 'Exportar SVG',
+      exportPdf: 'Exportar PDF',
+      copyPng: 'Copiar PNG',
+      collapseAll: 'Plegar todos los paquetes',
+      expandAll: 'Desplegar todos los paquetes',
+      clearFilters: 'Quitar filtros',
+      theme: 'Tema: {name}',
+    },
     hint: '↑↓ navegar · Enter ir · Esc cerrar',
     toolbar: 'Buscar',
     toolbarTitle: 'Buscar clases y paquetes (Ctrl+K)',
@@ -310,6 +340,17 @@ export const DEFAULT_LABELS: ViewerLabels = {
     applyAria: 'Aplicar la vista «{title}»',
     removeAria: 'Eliminar la vista «{title}»',
     close: 'Cerrar',
+    present: 'Presentar',
+    presentTitle: 'Recorrer las vistas a pantalla completa (←/→, Esc para salir)',
+    rename: 'Renombrar',
+    renameAria: 'Renombrar la vista «{title}»',
+    moveUp: 'Subir',
+    moveDown: 'Bajar',
+    moveUpAria: 'Subir la vista «{title}»',
+    moveDownAria: 'Bajar la vista «{title}»',
+    slide: '{n} / {total}',
+    presentHint: '←/→ cambiar de vista · Esc salir',
+    exitPresent: 'Salir',
   },
   analysis: {
     title: '{title}: diagnóstico de arquitectura',
