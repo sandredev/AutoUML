@@ -65,6 +65,8 @@ export interface DiagramCanvasHandle {
   hasManualPositions(): boolean;
   /** Ejecuta una acción del menú contextual sobre `subject` sin abrir el menú (paleta, T10.2). */
   runMenuAction(action: MenuAction, subject: MenuSubject): void;
+  /** El lienzo va a cambiar de tamaño por pantalla completa (#38): el reencuadre se anima en vez de saltar. */
+  smoothNextResize(): void;
 }
 
 interface Props {
@@ -159,6 +161,8 @@ const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'reco
 const MAX_EXPORT_SIDE = 16384;
 const DRAG_THRESHOLD = 4;
 const FIT_PADDING = 16;
+/** Margen para que llegue el cambio de tamaño de la pantalla completa (el gestor de ventanas tarda). */
+const SMOOTH_RESIZE_MS = 1000;
 /** Tolerancia del hit-test de aristas, en píxeles de pantalla. */
 const EDGE_TOL_PX = 6;
 const TIP_OFFSET = 14;
@@ -267,6 +271,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // true mientras la vista sea la del último "encuadrar": entonces un cambio de tamaño vuelve a encuadrar.
   // Se pone en false cuando el usuario hace zoom o mueve la vista.
   const autoFitRef = useRef(true);
+  /** Hasta este instante, los cambios de tamaño reencuadran con vuelo (pantalla completa, #38). */
+  const smoothResizeUntil = useRef(0);
   // Arrastre: 'pan' mueve la vista; con nodeId mueve una tarjeta.
   const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean; nodeId: string | null } | null>(null);
   /** Arrastre en el minimapa: (dx, dy) = centro de la vista − punto agarrado, en mundo. */
@@ -541,6 +547,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         setView(target);
         return;
       }
+      const va = viewAnimRef.current;
+      if (va && Math.abs(va.to.tx - target.tx) < 0.5 && Math.abs(va.to.ty - target.ty) < 0.5 && Math.abs(va.to.scale / target.scale - 1) < 1e-3) return;
       viewAnimRef.current = { from: { ...cur }, to: target, start: performance.now(), duration: VIEW_MS };
       schedule();
     },
@@ -666,6 +674,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       },
       hasManualPositions: () => hasOverrides(latest.current.overrides),
       runMenuAction: (action, subject) => runMenuRef.current?.(action, subject),
+      smoothNextResize: () => {
+        smoothResizeUntil.current = performance.now() + SMOOTH_RESIZE_MS;
+      },
     }),
     [zoomBy, fit, flyTo, focusNodeInView, updateCollapsed, themeOf],
   );
@@ -708,6 +719,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   useEffect(() => {
     let raf = 0;
     const onFullscreen = (): void => {
+      smoothResizeUntil.current = performance.now() + SMOOTH_RESIZE_MS;
       // Tras el cambio el navegador aún puede mover el foco: tomarlo en el siguiente fotograma.
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
@@ -734,7 +746,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const apply = (): void => {
       const w = Math.max(0, Math.floor(wrap.clientWidth));
       const h = Math.max(0, Math.floor(wrap.clientHeight));
-      const first = !canPaint(sizeRef.current);
+      const prev = sizeRef.current;
+      const first = !canPaint(prev);
       sizeRef.current = { w, h };
       const dpr = window.devicePixelRatio || 1;
       canvas.width = Math.max(1, Math.floor(w * dpr));
@@ -743,14 +756,31 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       canvas.style.height = h + 'px';
       // Si la vista no la ha tocado el usuario, se vuelve a encuadrar: el panel puede crecer después del
       // primer encuadre (paneles laterales, barra de herramientas) y el diagrama quedaba pequeño y corrido.
-      if ((first || autoFitRef.current) && w > 0 && h > 0) fit();
+      const smooth = !first && performance.now() < smoothResizeUntil.current && !prefersReducedMotion();
+      if (smooth && w > 0 && h > 0) {
+        // Pantalla completa (#38): el diagrama conserva su centro en el marco nuevo y vuela al encuadre.
+        const va = viewAnimRef.current;
+        const target = fitToBounds(latest.current.layout.bounds, w, h, FIT_PADDING);
+        if (va) viewAnimRef.current = { ...va, to: target };
+        else {
+          const v = viewRef.current;
+          viewRef.current = { ...v, tx: v.tx + (w - prev.w) / 2, ty: v.ty + (h - prev.h) / 2 };
+          flyTo(target, true);
+        }
+        autoFitRef.current = true;
+      } else if ((first || autoFitRef.current) && w > 0 && h > 0) fit();
       else schedule();
+      // Cambiar canvas.width borra el lienzo: pintar ya para no dejar un fotograma en blanco.
+      if (!first && w > 0 && h > 0) {
+        if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current);
+        paint();
+      }
     };
     apply();
     const ro = new ResizeObserver(apply);
     ro.observe(wrap);
     return () => ro.disconnect();
-  }, [fit, schedule]);
+  }, [fit, flyTo, paint, schedule]);
 
   // Documento nuevo ⇒ encuadrar. Con docKey, recargar el mismo documento conserva la vista;
   // sin docKey cuenta cada modelo nuevo. Ni mover tarjetas ni el refinado dagre→ELK reencuadran.

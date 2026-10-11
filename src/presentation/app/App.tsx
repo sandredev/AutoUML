@@ -601,6 +601,7 @@ export default function App() {
   // Botón del header: alterna pantalla completa del área de render (barra, paneles y atajos del visor
   // siguen dentro). El reencuadre ocurre al cambiar la pantalla completa, cuando el lienzo ya tiene su tamaño.
   const handleFit = useCallback(() => {
+    canvasRef.current?.smoothNextResize();
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => undefined);
       return;
@@ -611,7 +612,8 @@ export default function App() {
   }, []);
   useEffect(() => {
     const onFullscreen = (): void => {
-      requestAnimationFrame(() => canvasRef.current?.fit({ animate: false }));
+      // Animado: si el cambio de tamaño ya inició el vuelo al mismo encuadre, no lo reinicia (#38).
+      requestAnimationFrame(() => canvasRef.current?.fit({ animate: true }));
     };
     document.addEventListener('fullscreenchange', onFullscreen);
     return () => document.removeEventListener('fullscreenchange', onFullscreen);
