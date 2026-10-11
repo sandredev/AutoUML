@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SidecarFilters, SidecarState } from '../../application/ports/ipc';
+import { validateViews } from '../../presentation/diagram/presentation/views';
 
 /** Versión del esquema del sidecar (migrable en T11). */
 export const SIDECAR_VERSION = 1;
@@ -83,8 +84,10 @@ export function validateSidecar(v: unknown): SidecarState | null {
     if (!isFiniteNumber(v.view.tx) || !isFiniteNumber(v.view.ty)) return null;
   }
   const filters = validateFilters(v.filters);
+  const views = validateViews(v.views, validateFilters);
   return {
     ...(filters ? { filters } : {}),
+    ...(views && views.length > 0 ? { views } : {}),
     version: 1,
     collapsed: [...(v.collapsed as string[])],
     overrides: Object.fromEntries(entries.map(([id, o]) => [id, { dx: (o as { dx: number }).dx, dy: (o as { dy: number }).dy }])),
