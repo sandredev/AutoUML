@@ -100,13 +100,21 @@ describe('blendLayouts', () => {
     expect(early.layout.nodes.find((n) => n.id === 'A')?.y).toBeLessThan(10); // arranca lento
   });
 
-  it('el tamaño de una tarjeta salta al final (el texto no cabe en una caja a medias); el de un paquete se interpola', () => {
+  it('el tamaño de una tarjeta no se interpola: si crece ya es el final; el de un paquete sí se interpola', () => {
     const a = layout([box('A', 0, 0, 100, 40)], [], { packages: [{ name: 'p', x: 0, y: 0, w: 100, h: 100 }] });
     const b = layout([box('A', 0, 100, 100, 90)], [], { packages: [{ name: 'p', x: 0, y: 0, w: 300, h: 100 }] });
     const f = blendLayouts({ layout: a }, b, 0.1);
-    expect(f.layout.nodes[0]).toMatchObject({ h: 90, w: 100 });
+    expect(f.layout.nodes[0]).toMatchObject({ h: 90, w: 100 }); // el contenido nuevo no cabría en la caja vieja
     expect(f.layout.packages[0]?.w).toBeGreaterThan(100);
     expect(f.layout.packages[0]?.w).toBeLessThan(300);
+  });
+
+  it('una tarjeta que encoge conserva su tamaño hasta la mitad y entonces salta; con movimiento reducido, ya es el final', () => {
+    const a = layout([box('A', 0, 0, 100, 90)]);
+    const b = layout([box('A', 0, 100, 100, 40)]);
+    expect(blendLayouts({ layout: a }, b, 0.3).layout.nodes[0]).toMatchObject({ h: 90 });
+    expect(blendLayouts({ layout: a }, b, 0.5).layout.nodes[0]).toMatchObject({ h: 40 });
+    expect(blendLayouts({ layout: a }, b, 0.3, { reduceMotion: true }).layout.nodes[0]).toMatchObject({ h: 40 });
   });
 
   it('las nuevas entran con opacidad y escala 0.95 → 1, nunca desde 0, y con un pequeño retardo', () => {

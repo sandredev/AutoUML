@@ -121,14 +121,27 @@ function lerpBox<T extends { x: number; y: number; w: number; h: number }>(a: T,
   return { ...b, x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), w: lerp(a.w, b.w, e), h: lerp(a.h, b.h, e) };
 }
 
-/** Solo se desplaza: el tamaño salta al final. El contenido (texto) se dibuja a su tamaño real; con la caja a medias se saldría. */
-function moveBox<T extends { x: number; y: number }>(a: T, b: T, e: number): T {
-  return { ...b, x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e) };
+/** Progreso a partir del cual una tarjeta que encoge adopta su tamaño final (mitad del recorrido: ease-in-out va más rápido y el salto se disimula). */
+const SHRINK_AT = 0.5;
+
+/**
+ * Solo se desplaza; el tamaño nunca se interpola (el texto se dibuja a su tamaño real y con la caja a medias se saldría).
+ * - Si crece, la caja ya tiene el tamaño final: el contenido nuevo no cabría en la vieja.
+ * - Si encoge, conserva el viejo hasta `settled` (el contenido cabe de sobra) y salta entonces.
+ */
+function moveBox<T extends { x: number; y: number; w: number; h: number }>(a: T, b: T, e: number, settled: boolean): T {
+  return {
+    ...b,
+    x: lerp(a.x, b.x, e),
+    y: lerp(a.y, b.y, e),
+    w: b.w >= a.w || settled ? b.w : a.w,
+    h: b.h >= a.h || settled ? b.h : a.h,
+  };
 }
 
 /**
  * Fotograma en el instante t ∈ [0, 1] de la transición `from` → `to`:
- * - tarjetas en los dos: se desplazan (ease-in-out); su tamaño salta al final (el texto no cabe en una caja a medias);
+ * - tarjetas en los dos: se desplazan (ease-in-out); su tamaño no se interpola: si crece ya es el final, si encoge salta a mitad (el texto no cabe en una caja a medias);
  * - tarjetas nuevas: aparecen con opacidad y escala 0.95 → 1 (ease-out, con un pequeño retardo);
  * - tarjetas que desaparecen: se desvanecen en un 60 % del tiempo, donde estaban;
  * - aristas: se interpolan si conservan el número de puntos; si no, la vieja se desvanece y la nueva aparece.
@@ -141,6 +154,7 @@ export function blendLayouts(from: Snapshot, to: LayoutResult, t: number, opts: 
   const enter = EASE_OUT(clamp01((tt - ENTER_DELAY) / (1 - ENTER_DELAY)));
   const leave = 1 - EASE_OUT(clamp01(tt / LEAVE_SPAN));
   const prevFx = from.fx;
+  const settled = reduce || tt >= SHRINK_AT;
 
   const nodeFx = new Map<string, NodeFx>();
   const prevNodes = new Map<string, NodeBox>(from.layout.nodes.map((n) => [n.id, n]));
@@ -157,7 +171,7 @@ export function blendLayouts(from: Snapshot, to: LayoutResult, t: number, opts: 
       // Venía a medias de otra animación: sigue desde ahí.
       nodeFx.set(n.id, { alpha: lerp(pf.alpha, 1, settle), scale: lerp(pf.scale, 1, settle) });
     }
-    return moveBox(p, n, move);
+    return moveBox(p, n, move, settled);
   });
   const leavingIds = new Set<string>();
   for (const p of from.layout.nodes) {
@@ -229,7 +243,7 @@ export function blendLayouts(from: Snapshot, to: LayoutResult, t: number, opts: 
       nextNotes.add(n.id);
       const p = prevNotes.get(n.id);
       if (!p) { noteFx.set(n.id, enter); return n; }
-      return moveBox(p, n, move);
+      return moveBox(p, n, move, settled);
     });
     for (const p of from.layout.notes ?? []) {
       if (nextNotes.has(p.id) || leave < FADED) continue;
