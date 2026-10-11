@@ -42,11 +42,78 @@ export interface ViewerLabels {
   refining: string;
   reset: string;
   resetTitle: string;
+  // Modo foco (T8)
+  focus: string;
+  focusTitle: string;
+  focusGroupAria: string;
+  /** "Foco: {name}" */
+  focusOn: string;
+  focusDepth: string;
+  focusDirection: string;
+  focusDirOut: string;
+  focusDirIn: string;
+  focusDirBoth: string;
+  focusExit: string;
+  focusExitTitle: string;
+  // Ruta entre clases (T8)
+  routeAria: string;
+  /** "Ruta {from} → {to}: {n} saltos" */
+  routeInfo: string;
+  /** "No hay camino de {from} a {to}" */
+  routeNone: string;
+  routeDirected: string;
+  routeClear: string;
+  // Filtros (T8)
+  filters: string;
+  /** "Filtros ({n})": n filtros activos. */
+  filtersActive: string;
+  filtersTitle: string;
+  filtersPanelAria: string;
+  filtersRelations: string;
+  filtersMembers: string;
+  filtersMinVisibility: string;
+  filtersVisAll: string;
+  filtersVisPackage: string;
+  filtersVisProtected: string;
+  filtersVisPublic: string;
+  filtersAccessors: string;
+  filtersConstructors: string;
+  filtersRelayoutHint: string;
+  filtersClasses: string;
+  filtersExternal: string;
+  filtersUndeclared: string;
+  /** "{n} clases ocultadas a mano" */
+  filtersHiddenTypes: string;
+  filtersShowTypes: string;
+  filtersPackages: string;
+  filtersAllPackages: string;
+  filtersNoPackages: string;
+  filtersClear: string;
+  filtersClose: string;
+  // Menú contextual (T8)
+  menuAria: string;
+  menuFocus: string;
+  menuRouteFrom: string;
+  menuCopyName: string;
+  menuGoToCode: string;
+  menuHideClass: string;
+  menuHidePackage: string;
+  /** "Plegar el paquete {name}" */
+  menuCollapsePackage: string;
+  menuExpandPackage: string;
+  /** "Ocultar relaciones de tipo {type}" */
+  menuHideRelType: string;
+  menuFit: string;
+  menuClearRoute: string;
+  menuExitFocus: string;
+  menuClearFilters: string;
+  /** "Ruta desde {from}: haz clic en la clase de destino" */
+  routePick: string;
 }
 
 export const DEFAULT_LABELS: ViewerLabels = {
   canvasAria:
-    'Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo.',
+    'Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo. Con una clase seleccionada, F muestra solo ella y sus vecinos y Mayús+clic en otra clase marca la ruta más corta; Esc vuelve.',
   minimapAria: 'Minimapa del diagrama. Haz clic para centrar la vista, arrastra el recuadro o usa las flechas para desplazarla.',
   paintError: 'No se pudo dibujar el diagrama: ',
   renameAria: 'Nuevo nombre del tipo',
@@ -91,6 +158,61 @@ export const DEFAULT_LABELS: ViewerLabels = {
   refining: 'refinando…',
   reset: 'Restablecer',
   resetTitle: 'Devolver las tarjetas a su posición inicial y reorganizar el diagrama',
+  focus: 'Enfocar',
+  focusTitle: 'Mostrar solo la clase seleccionada y sus vecinos (F)',
+  focusGroupAria: 'Modo foco',
+  focusOn: 'Foco: {name}',
+  focusDepth: 'Saltos',
+  focusDirection: 'Dirección',
+  focusDirOut: 'Salientes',
+  focusDirIn: 'Entrantes',
+  focusDirBoth: 'Ambas',
+  focusExit: 'Salir del foco',
+  focusExitTitle: 'Volver al diagrama completo con la vista anterior (Esc)',
+  routeAria: 'Ruta entre clases',
+  routeInfo: 'Ruta {from} → {to}: {n} saltos',
+  routeNone: 'No hay camino de {from} a {to}',
+  routeDirected: 'Seguir el sentido de las relaciones',
+  routeClear: 'Quitar ruta',
+  filters: 'Filtros',
+  filtersActive: 'Filtros ({n})',
+  filtersTitle: 'Filtrar relaciones, miembros, clases y paquetes de este documento',
+  filtersPanelAria: 'Filtros del diagrama',
+  filtersRelations: 'Relaciones',
+  filtersMembers: 'Miembros',
+  filtersMinVisibility: 'Visibilidad mínima',
+  filtersVisAll: 'Todos',
+  filtersVisPackage: 'Paquete o más',
+  filtersVisProtected: 'Protegidos o más',
+  filtersVisPublic: 'Solo públicos',
+  filtersAccessors: 'Ocultar getters y setters',
+  filtersConstructors: 'Ocultar constructores',
+  filtersRelayoutHint: 'Los filtros de miembros cambian el tamaño de las tarjetas y reorganizan el diagrama.',
+  filtersClasses: 'Clases',
+  filtersExternal: 'Ocultar externos',
+  filtersUndeclared: 'Ocultar sin declarar',
+  filtersHiddenTypes: '{n} clases ocultadas a mano',
+  filtersShowTypes: 'Mostrarlas',
+  filtersPackages: 'Paquetes',
+  filtersAllPackages: 'Todos',
+  filtersNoPackages: 'Ninguno',
+  filtersClear: 'Quitar filtros',
+  filtersClose: 'Cerrar',
+  menuAria: 'Acciones del diagrama',
+  menuFocus: 'Enfocar',
+  menuRouteFrom: 'Ruta desde aquí…',
+  menuCopyName: 'Copiar nombre',
+  menuGoToCode: 'Ir al código',
+  menuHideClass: 'Ocultar esta clase',
+  menuHidePackage: 'Ocultar este paquete',
+  menuCollapsePackage: 'Plegar el paquete {name}',
+  menuExpandPackage: 'Desplegar el paquete',
+  menuHideRelType: 'Ocultar relaciones de tipo {type}',
+  menuFit: 'Encuadrar el diagrama',
+  menuClearRoute: 'Quitar ruta',
+  menuExitFocus: 'Salir del foco',
+  menuClearFilters: 'Quitar filtros',
+  routePick: 'Ruta desde {from}: haz clic en la clase de destino',
 };
 
 /** Sustituye los marcadores {clave} de una etiqueta. */

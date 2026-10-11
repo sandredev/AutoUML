@@ -1,0 +1,49 @@
+// src/presentation/diagram/focusMode.ts — modo foco del visor: qué id se enfoca y qué teclas atiende (puro, T8).
+import type { DiagramModel } from '../../domain/diagram/model';
+import { collapsedOwner, PACKAGE_NODE_PREFIX } from './layout/aggregate';
+
+/**
+ * Id que se enfoca con la selección actual dentro del modelo agregado (`focusable`). Una clase escondida
+ * en un paquete plegado enfoca ese paquete: el foco trabaja con lo que se ve. null si no hay nada que enfocar.
+ */
+export function focusTargetOf(
+  selectedId: string | null,
+  focusable: DiagramModel,
+  source: DiagramModel,
+  collapsed: ReadonlySet<string>,
+): string | null {
+  if (selectedId === null) return null;
+  if (focusable.types.some((t) => t.id === selectedId)) return selectedId;
+  const pkg = source.types.find((t) => t.id === selectedId)?.packageName;
+  const owner = pkg !== undefined ? collapsedOwner(pkg, collapsed) : null;
+  if (owner === null) return null;
+  const id = PACKAGE_NODE_PREFIX + owner;
+  return focusable.types.some((t) => t.id === id) ? id : null;
+}
+
+export type ViewerShortcut = 'focus' | 'escape';
+
+interface KeyLike {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  defaultPrevented: boolean;
+  target: unknown;
+}
+
+const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
+
+function isEditable(target: unknown): boolean {
+  if (typeof target !== 'object' || target === null) return false;
+  const el = target as { tagName?: unknown; isContentEditable?: unknown };
+  return el.isContentEditable === true || (typeof el.tagName === 'string' && EDITABLE_TAGS.has(el.tagName));
+}
+
+/** Atajo del visor de una pulsación, o null (con modificadores, escribiendo en un campo/editor o ya atendida). */
+export function viewerShortcut(e: KeyLike): ViewerShortcut | null {
+  if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return null;
+  if (e.key === 'f' || e.key === 'F') return 'focus';
+  if (e.key === 'Escape') return 'escape';
+  return null;
+}

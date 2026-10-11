@@ -7,15 +7,18 @@ interface CloseConfirmModalProps {
   error: string | null;
   /** Hay cambios del editor sin guardar (T7): Guardar los escribe en el .puml abierto. */
   dirty?: boolean;
+  /** 'open' (T8): se va a abrir otro documento con cambios sin guardar; 'close' (defecto): se cierra la app. */
+  purpose?: 'close' | 'open';
   onSave: () => void;
   onDiscard: () => void;
   onCancel: () => void;
 }
 
-export function CloseConfirmModal({ saving, error, dirty = false, onSave, onDiscard, onCancel }: CloseConfirmModalProps): JSX.Element {
+export function CloseConfirmModal({ saving, error, dirty = false, purpose = 'close', onSave, onDiscard, onCancel }: CloseConfirmModalProps): JSX.Element {
   const { t } = useLocalization();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const opening = purpose === 'open';
 
   // Foco inicial en Cancelar y restauración del foco anterior al desmontar.
   useEffect(() => {
@@ -68,8 +71,8 @@ export function CloseConfirmModal({ saving, error, dirty = false, onSave, onDisc
         aria-describedby="close-confirm-message"
         onKeyDown={handleKeyDown}
       >
-        <h2 id="close-confirm-title" className="close-confirm__title">{t('close.title')}</h2>
-        <p id="close-confirm-message" className="close-confirm__message">{dirty ? t('close.messageDirty') : t('close.message')}</p>
+        <h2 id="close-confirm-title" className="close-confirm__title">{opening ? t('openDirty.title') : t('close.title')}</h2>
+        <p id="close-confirm-message" className="close-confirm__message">{opening ? t('openDirty.message') : dirty ? t('close.messageDirty') : t('close.message')}</p>
         {error && (
           <p className="close-confirm__error" role="alert">{error}</p>
         )}
@@ -98,7 +101,7 @@ export function CloseConfirmModal({ saving, error, dirty = false, onSave, onDisc
             onClick={onDiscard}
             disabled={saving}
           >
-            {t('close.discard')}
+            {opening ? t('openDirty.discard') : t('close.discard')}
           </button>
         </div>
       </div>

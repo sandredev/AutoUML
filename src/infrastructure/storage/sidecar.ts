@@ -2,7 +2,7 @@
 // Módulo puro de main: sin Electron (ni siquiera import type), testeable en Vitest.
 import fs from 'node:fs';
 import path from 'node:path';
-import type { SidecarState } from '../../application/ports/ipc';
+import type { SidecarFilters, SidecarState } from '../../application/ports/ipc';
 
 /** Versión del esquema del sidecar (migrable en T11). */
 export const SIDECAR_VERSION = 1;
@@ -20,6 +20,37 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function isFiniteNumber(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
+}
+
+const REL_TYPES: ReadonlySet<string> = new Set(['EXTENDS', 'IMPLEMENTS', 'ASSOCIATION', 'DEPENDENCY', 'COMPOSITION', 'AGGREGATION']);
+const VISIBILITIES: ReadonlySet<string> = new Set(['+', '#', '~', '-']);
+const MAX_FILTER_ITEMS = 10000;
+
+function stringList(v: unknown, allowed?: ReadonlySet<string>): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  return v.filter((s): s is string => typeof s === 'string' && (!allowed || allowed.has(s))).slice(0, MAX_FILTER_ITEMS);
+}
+
+/**
+ * Filtros (T8): tolerante. Lo que no se entiende se descarta campo a campo (no invalida el sidecar: la vista
+ * y las posiciones valen más que un filtro) y los campos desconocidos no se copian. undefined si no queda nada.
+ */
+function validateFilters(v: unknown): SidecarFilters | undefined {
+  if (!isRecord(v)) return undefined;
+  const out: SidecarFilters = {};
+  const rels = stringList(v.hiddenRelTypes, REL_TYPES);
+  if (rels) out.hiddenRelTypes = rels as NonNullable<SidecarFilters['hiddenRelTypes']>;
+  if (typeof v.minVisibility === 'string' && VISIBILITIES.has(v.minVisibility)) {
+    out.minVisibility = v.minVisibility as NonNullable<SidecarFilters['minVisibility']>;
+  }
+  for (const k of ['hideAccessors', 'hideConstructors', 'hideExternal', 'hideUndeclared'] as const) {
+    if (typeof v[k] === 'boolean') out[k] = v[k];
+  }
+  const pkgs = stringList(v.hiddenPackages);
+  if (pkgs) out.hiddenPackages = pkgs;
+  const types = stringList(v.hiddenTypes);
+  if (types) out.hiddenTypes = types;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Ruta del sidecar de un proyecto (junto a diagram.puml). */
@@ -51,7 +82,9 @@ export function validateSidecar(v: unknown): SidecarState | null {
     if (!isFiniteNumber(v.view.scale) || v.view.scale <= 0) return null;
     if (!isFiniteNumber(v.view.tx) || !isFiniteNumber(v.view.ty)) return null;
   }
+  const filters = validateFilters(v.filters);
   return {
+    ...(filters ? { filters } : {}),
     version: 1,
     collapsed: [...(v.collapsed as string[])],
     overrides: Object.fromEntries(entries.map(([id, o]) => [id, { dx: (o as { dx: number }).dx, dy: (o as { dy: number }).dy }])),

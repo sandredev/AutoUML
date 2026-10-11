@@ -3,7 +3,12 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import type { JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { Category, DiagramModel, TypeNode } from '../../../domain/diagram/model';
 import type { Skinparams } from '../../../domain/diagram/skinparam';
+import { ContextMenu } from '../../components/ContextMenu';
+import { contextMenuEntries, type MenuAction, type MenuSubject } from '../contextMenu';
+import { adjacencyOf } from '../graph/adjacency';
+import { filterLayout, type DrawHidden } from '../graph/filters';
 import { focusOf } from '../graph/focus';
+import { pathFocus, shortestPath } from '../graph/shortestPath';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
 import { collapsedOwner, isPackageNode, packageNodeName } from '../layout/aggregate';
 import { applySkin, skinKey } from '../style/skin';
@@ -41,6 +46,8 @@ export interface DiagramCanvasHandle {
   getSnapshot(): { view: ViewState; overrides: Record<string, { dx: number; dy: number }> };
   /** Devuelve las tarjetas movidas a mano a la posición que calculó el layout. */
   resetPositions(): void;
+  /** Quita la ruta resaltada (T8). true si había una (Esc la quita antes de salir del modo foco). */
+  clearRoute(): boolean;
   /** true si hay alguna tarjeta movida a mano. */
   hasManualPositions(): boolean;
 }
@@ -96,13 +103,40 @@ interface Props {
    * (el campo sigue abierto) o null si se aplicó. Sin esta prop el doble clic no renombra.
    */
   onRename?: (id: string, next: string) => string | null;
+  /**
+   * Modo foco (T8): clave del foco aplicado (null = diagrama completo). Al entrar se guarda la vista y se
+   * encuadra el layout enfocado cuando llegue; al salir se recupera la vista guardada. Mientras dura, las
+   * posiciones manuales no se aplican ni se pueden mover tarjetas (son del diagrama completo) y
+   * getSnapshot() devuelve la vista guardada.
+   */
+  focusKey?: string | null;
+  /** Si la cámara vuela al entrar/salir del foco (false cuando lo pide el teclado). */
+  focusAnimate?: boolean;
+  /**
+   * Filtros de dibujo (T8): nodos y tipos de relación que no se dibujan. No recalculan el layout: se quitan
+   * del layout ya calculado (tampoco se pueden señalar ni seleccionar).
+   */
+  hidden?: DrawHidden | null;
+  /** Menú contextual (T8): qué puede hacer el host. Sin `onMenuAction` solo hay acciones del lienzo. */
+  menuContext?: { canGoToCode: boolean; hasFilters: boolean };
+  /**
+   * Acciones del menú que no son del lienzo (enfocar, ocultar, filtros, copiar, ir al código). Las del lienzo
+   * (ruta desde aquí, plegar/desplegar, encuadrar, quitar ruta) se resuelven aquí.
+   */
+  onMenuAction?: (action: MenuAction, subject: MenuSubject) => void;
 }
 
 type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | null;
 /** Renombrado en curso: tarjeta, texto escrito, error de validación y posición en pantalla al abrirlo. */
 interface RenameDraft { id: string; value: string; error: string | null; x: number; y: number; w: number }
-/** Arista seleccionada; el índice solo vale para el layout en que se eligió. */
-interface EdgeSelection { layout: LayoutResult; index: number }
+/** Arista seleccionada; el índice solo vale para el layout y los filtros con que se eligió. */
+interface EdgeSelection { layout: LayoutResult; hidden: DrawHidden | null; index: number }
+/** Ruta entre dos clases (T8); vale para el modelo en que se pidió. `to` null: falta elegir el destino. */
+interface RouteRequest { model: DiagramModel; from: string; to: string | null; directed: boolean }
+/** Menú contextual abierto: punto (ventana) y sobre qué. */
+interface MenuState { x: number; y: number; subject: MenuSubject }
+/** Vista pendiente hasta que llegue un layout distinto de `from`: encuadrar o ir a `target`. */
+interface PendingView { from: LayoutResult; target?: ViewState; animate?: boolean }
 
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
 const MAX_EXPORT_SIDE = 16384;
@@ -190,6 +224,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
     labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename,
+    focusKey = null, focusAnimate = true, hidden = null, menuContext, onMenuAction,
   },
   ref,
 ) {
@@ -199,8 +234,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const tipRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<ViewState>({ scale: 1, tx: 0, ty: 0 });
   const pendingFocusRef = useRef<string | null>(null);
-  /** Plegado pedido: se encuadra cuando llegue un layout distinto de `from` (o enseguida sin control). */
-  const pendingFitRef = useRef<{ from: LayoutResult } | null>(null);
+  /** Plegado o foco pedido: se encuadra (o se va a `target`) cuando llegue un layout distinto de `from`. */
+  const pendingFitRef = useRef<PendingView | null>(null);
+  /** Layout del último commit: el que se veía al pedir el foco. */
+  const committedLayoutRef = useRef<LayoutResult>(layout);
+  /** Vista al entrar en el modo foco (T8). */
+  const focusViewRef = useRef<{ view: ViewState; autoFit: boolean } | null>(null);
+  const focusKeyRef = useRef<string | null>(null);
   const sizeRef = useRef({ w: 0, h: 0 });
   const themeRef = useRef<Theme | null>(null);
   const rafRef = useRef(0);
@@ -228,6 +268,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [hover, setHover] = useState<Hover>(null);
   const [edgeSel, setEdgeSel] = useState<EdgeSelection | null>(null);
   const [rename, setRename] = useState<RenameDraft | null>(null);
+  const [routeReq, setRouteReq] = useState<RouteRequest | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
+  /** Momento de la última apertura por teclado: el evento contextmenu que la sigue no abre otro. */
+  const keyMenuAt = useRef(-Infinity);
+  const inFocus = focusKey !== null;
 
   const controlled = collapsedProp !== undefined;
   const collapsedPackages = collapsedProp ?? internalCollapsed;
@@ -240,7 +285,23 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const sameDoc = docKey !== undefined && tracked.docKey === docKey;
     setTracked({ modelKey, docKey });
     const ids = layout.nodes.map((n) => n.id);
-    setOverrides((prev) => (sameDoc ? retainOverrides(prev, ids) : EMPTY_OVERRIDES));
+    // En modo foco el layout solo tiene una parte de las tarjetas: no se olvidan las demás.
+    setOverrides((prev) => (sameDoc ? (inFocus ? prev : retainOverrides(prev, ids)) : EMPTY_OVERRIDES));
+  }
+
+  // Entrar/salir del modo foco o cambiar su objetivo (T8). Se deriva en el render: el layout nuevo puede
+  // llegar en este mismo render (caché) y el efecto que encuadra tiene que encontrar ya la petición.
+  if (focusKey !== focusKeyRef.current) {
+    const entering = focusKeyRef.current === null;
+    focusKeyRef.current = focusKey;
+    setRouteReq(null); // la ruta era del modelo anterior: al volver de la caché reaparecería
+    if (focusKey !== null && entering) focusViewRef.current = { view: { ...viewRef.current }, autoFit: autoFitRef.current };
+    const saved = focusKey === null ? focusViewRef.current : null;
+    if (focusKey === null) focusViewRef.current = null;
+    pendingFitRef.current = saved
+      ? { from: committedLayoutRef.current, target: saved.view, animate: focusAnimate }
+      : { from: committedLayoutRef.current, animate: focusAnimate };
+    if (saved) autoFitRef.current = saved.autoFit;
   }
 
   // Iniciales del sidecar: se aplican una vez por documento (aunque lleguen tarde por la
@@ -260,13 +321,17 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     }
   }
 
-  const movedLayout = useMemo(() => applyOverrides(layout, overrides), [layout, overrides]);
+  const movedLayout = useMemo(() => (inFocus ? layout : applyOverrides(layout, overrides)), [inFocus, layout, overrides]);
   const visibleLayout = useMemo(
-    () => (controlled ? movedLayout : collapsePackages(model, movedLayout, collapsedPackages, labels.collapsedSubtitle)),
-    [controlled, model, movedLayout, collapsedPackages, labels.collapsedSubtitle],
+    () => filterLayout(
+      controlled ? movedLayout : collapsePackages(model, movedLayout, collapsedPackages, labels.collapsedSubtitle),
+      model,
+      hidden,
+    ),
+    [controlled, model, movedLayout, collapsedPackages, labels.collapsedSubtitle, hidden],
   );
   const index = useMemo(() => buildIndex(visibleLayout), [visibleLayout]);
-  const clickedEdge = edgeSel !== null && edgeSel.layout === layout ? edgeSel.index : null;
+  const clickedEdge = edgeSel !== null && edgeSel.layout === layout && edgeSel.hidden === hidden ? edgeSel.index : null;
   // Arista de la relación en la que está el cursor del editor (T7); el clic del ratón manda.
   const lineEdge = useMemo(() => {
     if (highlightLine === null) return null;
@@ -274,9 +339,18 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     return i >= 0 ? i : null;
   }, [visibleLayout, model, highlightLine]);
   const selectedEdge = clickedEdge ?? lineEdge;
+  // Ruta (T8): BFS sobre la adyacencia memoizada del modelo dibujado; manda sobre el foco de selección.
+  const route = routeReq !== null && routeReq.model === model ? routeReq : null;
+  const routePath = useMemo(
+    () => (route?.to != null ? shortestPath(adjacencyOf(route.model), route.from, route.to, route.directed) : null),
+    [route],
+  );
+  const routeDirected = route?.directed ?? false;
   const focus = useMemo(
-    () => focusOf(visibleLayout, selectedEdge === null ? selectedId : null, selectedEdge),
-    [visibleLayout, selectedId, selectedEdge],
+    () => (routePath
+      ? pathFocus(visibleLayout, routePath, routeDirected)
+      : focusOf(visibleLayout, selectedEdge === null ? selectedId : null, selectedEdge)),
+    [visibleLayout, selectedId, selectedEdge, routePath, routeDirected],
   );
   // Un hover de arista de otro layout ya no apunta a la misma arista.
   const liveHover: Hover = hover?.kind === 'edge' && !visibleLayout.edges[hover.index] ? null : hover;
@@ -295,6 +369,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const snapshot = {
     model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, onSelect, onViewChange,
     collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename,
+    inFocus, route, hidden,
   };
   const latest = useRef(snapshot);
   latest.current = snapshot;
@@ -526,8 +601,14 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         if (b.w <= 0 || b.h <= 0) return null;
         return diagramToSvg(L.layout, { cards: svgCardsOf(L.model) });
       },
-      getSnapshot: () => ({ view: { ...viewRef.current }, overrides: overridesToRecord(latest.current.overrides) }),
+      // En modo foco se persiste la vista del diagrama completo, no la del foco.
+      getSnapshot: () => ({ view: { ...(focusViewRef.current?.view ?? viewRef.current) }, overrides: overridesToRecord(latest.current.overrides) }),
       resetPositions: () => setOverrides(EMPTY_OVERRIDES),
+      clearRoute: () => {
+        if (latest.current.route === null) return false;
+        setRouteReq(null);
+        return true;
+      },
       hasManualPositions: () => hasOverrides(latest.current.overrides),
     }),
     [zoomBy, fit, focusNodeInView, updateCollapsed, themeOf],
@@ -605,13 +686,16 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // y después centrar la clase pendiente de focusNode si ya está visible.
   useEffect(() => {
     const pending = pendingFitRef.current;
+    committedLayoutRef.current = layout;
     if (pending && !(controlled && pending.from === layout)) {
       pendingFitRef.current = null;
-      fit(true); // la cámara se asienta a la vez que la transición del layout
+      // La cámara se asienta a la vez que la transición del layout (sin vuelo si lo pidió el teclado).
+      if (pending.target) flyTo(pending.target, pending.animate ?? true);
+      else fit(pending.animate ?? true);
     }
     const id = pendingFocusRef.current;
     if (id && focusNodeInView(id)) pendingFocusRef.current = null;
-  }, [layout, collapsedPackages, controlled, fit, focusNodeInView]);
+  }, [layout, collapsedPackages, controlled, fit, flyTo, focusNodeInView]);
 
   // Transición de layout (T6): cuando lo que se muestra cambia de geometría dentro del MISMO documento
   // (recarga, plegar/desplegar, Restablecer, refinado dagre→ELK) las tarjetas se desplazan, entran y salen
@@ -758,7 +842,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const p = screenToWorld(viewRef.current, e.clientX - rect.left, e.clientY - rect.top);
     const L = latest.current;
     const hit = hitTestNode(L.index, L.layout, p.x, p.y);
-    const nodeId = hit !== null && !isPackageNode(hit) ? hit : null;
+    // En modo foco no se mueven tarjetas: las posiciones manuales son del diagrama completo.
+    const nodeId = hit !== null && !isPackageNode(hit) && !L.inFocus ? hit : null;
     dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, nodeId };
   };
 
@@ -806,6 +891,19 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const sy = e.clientY - rect.top;
     const p = screenToWorld(viewRef.current, sx, sy);
     const L = latest.current;
+    // Mayús+clic en otra clase con una seleccionada, o clic tras "Ruta desde aquí": ruta más corta (T8).
+    // Un Mayús+clic que arrastra no llega aquí.
+    const pendingFrom = L.route !== null && L.route.to === null ? L.route.from : null;
+    if (pendingFrom !== null || (e.shiftKey && L.selectedId !== null)) {
+      const target = pick(sx, sy);
+      const from = pendingFrom ?? L.selectedId;
+      if (from !== null && target?.kind === 'node' && target.id !== from && L.model.types.some((t) => t.id === from)) {
+        setRouteReq((prev) => ({ model: L.model, from, to: target.id, directed: prev?.directed ?? false }));
+        return;
+      }
+    }
+    // Cualquier otro clic (fondo, tarjeta, arista, paquete) quita la ruta.
+    if (L.route !== null) setRouteReq(null);
     const packageName = hitTestPackageHeader(L.layout, p.x, p.y);
     if (packageName) {
       togglePackage(packageName);
@@ -818,7 +916,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     }
     if (hit?.kind === 'edge') {
       // Arista: se resalta con sus dos clases; la selección de clase del host se limpia.
-      setEdgeSel({ layout: L.sourceLayout, index: hit.index });
+      setEdgeSel({ layout: L.sourceLayout, hidden: L.hidden, index: hit.index });
       L.onSelect?.(null);
       const rel = L.layout.edges[hit.index]?.rel;
       L.onRelationSelect?.(rel !== undefined ? (L.model.relationships[rel]?.line ?? null) : null);
@@ -827,6 +925,84 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (edgeSel !== null) L.onRelationSelect?.(null);
     setEdgeSel(null);
     L.onSelect?.(hit?.kind === 'node' ? hit.id : null);
+  };
+
+  /** Objetivo del menú para lo que hay bajo un punto (o el fondo). */
+  const subjectOf = (hit: Hover): MenuSubject => {
+    const L = latest.current;
+    if (hit?.kind === 'node') {
+      if (isPackageNode(hit.id)) return { kind: 'package', id: hit.id, name: packageNodeName(hit.id) };
+      const t = L.model.types.find((x) => x.id === hit.id);
+      return { kind: 'node', id: hit.id, name: t?.name ?? hit.id, packageName: t?.packageName ?? '' };
+    }
+    if (hit?.kind === 'edge') {
+      const e = L.layout.edges[hit.index];
+      if (e) {
+        const rel = e.rel !== undefined ? L.model.relationships[e.rel] : undefined;
+        return { kind: 'edge', name: `${nameOfRef.current(e.source)} → ${nameOfRef.current(e.target)}`, relType: e.type, line: rel?.line ?? null };
+      }
+    }
+    return { kind: 'background' };
+  };
+
+  const openMenu = (x: number, y: number, subject: MenuSubject): void => {
+    setHover(null);
+    // Abrir el menú sobre una clase la selecciona (como en cualquier explorador).
+    if (subject.kind === 'node' && latest.current.selectedId !== subject.id) latest.current.onSelect?.(subject.id);
+    setMenu({ x, y, subject });
+  };
+
+  const onContextMenu = (e: ReactMouseEvent<HTMLCanvasElement>): void => {
+    e.preventDefault();
+    if (e.timeStamp - keyMenuAt.current < 500) return; // ya lo abrió el teclado
+    const rect = e.currentTarget.getBoundingClientRect();
+    openMenu(e.clientX, e.clientY, subjectOf(pick(e.clientX - rect.left, e.clientY - rect.top)));
+  };
+
+  /** Teclado en el lienzo: tecla Menú o Mayús+F10 abren el menú de la clase seleccionada (o del fondo). */
+  const onCanvasKey = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
+    if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+    e.preventDefault();
+    keyMenuAt.current = e.timeStamp;
+    const L = latest.current;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const v = viewRef.current;
+    const b = L.selectedId !== null ? L.layout.nodes.find((n) => n.id === L.selectedId) : undefined;
+    if (b) {
+      const x = rect.left + (b.x + b.w / 2) * v.scale + v.tx;
+      const y = rect.top + (b.y + b.h / 2) * v.scale + v.ty;
+      openMenu(Math.min(Math.max(x, rect.left), rect.right), Math.min(Math.max(y, rect.top), rect.bottom), subjectOf({ kind: 'node', id: b.id }));
+    } else openMenu(rect.left + rect.width / 2, rect.top + rect.height / 2, { kind: 'background' });
+  };
+
+  const runMenu = (action: MenuAction, subject: MenuSubject): void => {
+    setMenu(null);
+    const L = latest.current;
+    switch (action) {
+      case 'route-from':
+        if (subject.kind === 'node' || subject.kind === 'package') {
+          const from = subject.id;
+          setRouteReq((prev) => ({ model: L.model, from, to: null, directed: prev?.directed ?? false }));
+        }
+        return;
+      case 'collapse-package':
+        if (subject.kind === 'node' && subject.packageName) {
+          const name = subject.packageName;
+          updateCollapsed((prev) => new Set([...prev, name]));
+        }
+        return;
+      case 'expand-package':
+        if (subject.kind === 'package') togglePackage(subject.name);
+        return;
+      case 'fit':
+        fit(true);
+        return;
+      case 'clear-route':
+        setRouteReq(null);
+        return;
+      default:
+        onMenuAction?.(action, subject);
+    }
   };
 
   const onPointerLeave = (): void => {
@@ -914,6 +1090,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   // ---------- Tooltip ----------
   const typeById = useMemo(() => new Map(model.types.map((t) => [t.id, t] as const)), [model]);
+  const nameOf = (id: string): string => typeById.get(id)?.name ?? (isPackageNode(id) ? packageNodeName(id) : id);
+  const nameOfRef = useRef(nameOf);
+  nameOfRef.current = nameOf;
   let tip: JSX.Element | null = null;
   if (liveHover?.kind === 'node') {
     const id = liveHover.id;
@@ -944,7 +1123,6 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const e = visibleLayout.edges[liveHover.index];
     const r = e?.rel !== undefined ? model.relationships[e.rel] : undefined;
     if (e) {
-      const nameOf = (id: string): string => typeById.get(id)?.name ?? (isPackageNode(id) ? packageNodeName(id) : id);
       const mult = r?.sourceLabel || r?.targetLabel ? `${r.sourceLabel ?? '—'} → ${r.targetLabel ?? '—'}` : null;
       const label = r?.label ?? e.label;
       tip = (
@@ -970,6 +1148,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onPointerCancel={onPointerUp}
         onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
+        onKeyDown={onCanvasKey}
+        tabIndex={0}
+        aria-keyshortcuts="F Escape Shift+F10"
       />
       <canvas
         ref={minimapRef}
@@ -1011,6 +1193,45 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           />
           {rename.error !== null ? <p role="alert">{rename.error}</p> : null}
         </div>
+      ) : null}
+      {route !== null ? (
+        <div className="diagram-route" role="group" aria-label={labels.routeAria}>
+          <span role="status" className={routePath || route.to === null ? 'diagram-route-info' : 'diagram-route-info is-empty'}>
+            {route.to === null
+              ? fill(labels.routePick, { from: nameOf(route.from) })
+              : fill(routePath ? labels.routeInfo : labels.routeNone, {
+                from: nameOf(route.from),
+                to: nameOf(route.to),
+                n: (routePath?.length ?? 1) - 1,
+              })}
+          </span>
+          <label className="diagram-route-directed">
+            <input type="checkbox" checked={route.directed} onChange={(e) => setRouteReq({ ...route, directed: e.target.checked })} />
+            {labels.routeDirected}
+          </label>
+          <button type="button" className="diagram-route-clear" onClick={() => setRouteReq(null)}>
+            {labels.routeClear}
+          </button>
+        </div>
+      ) : null}
+      {menu !== null ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={labels.menuAria}
+          items={contextMenuEntries(
+            menu.subject,
+            {
+              canGoToCode: menuContext?.canGoToCode ?? false,
+              hasFilters: menuContext?.hasFilters ?? false,
+              hasRoute: route !== null,
+              inFocus,
+            },
+            labels,
+          ).map((it) => ({ id: it.action, label: it.label, ...(it.disabled ? { disabled: true } : {}), ...(it.shortcut ? { shortcut: it.shortcut } : {}) }))}
+          onSelect={(id) => runMenu(id as MenuAction, menu.subject)}
+          onClose={() => setMenu(null)}
+        />
       ) : null}
       {paintError !== null ? (
         <p

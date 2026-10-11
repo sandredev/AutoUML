@@ -48,7 +48,8 @@ export function fmtParams(ps: ParameterModel[], abbr?: number): string {
   return ps.map((p) => (p.name ? p.name + ': ' + p.type : p.type)).join(', ');
 }
 
-const accessorRe = /^(get|set|is)[A-Z]/;
+/** Getter/setter: get/set/is seguido de mayúscula ("island" no lo es). Lo usan el detalle y los filtros (T8). */
+export const ACCESSOR_RE = /^(get|set|is)[A-Z]/;
 
 function stereotypeOf(t: TypeNode): string {
   const list = [...t.stereotypes];
@@ -92,7 +93,7 @@ export function cardContentOf(
       }
     }
     for (const m of t.methods) {
-      if (detail.hideAccessors && accessorRe.test(m.name)) continue;
+      if (detail.hideAccessors && ACCESSOR_RE.test(m.name)) continue;
       const ret = m.returnType ? ': ' + m.returnType : '';
       const text = vis(m.visibility) + m.name + '(' + fmtParams(m.parameters, m.parametersAbbreviated) + ')' + ret;
       ops.push({ visibility: m.visibility, text, isStatic: m.isStatic, isAbstract: m.isAbstract });
