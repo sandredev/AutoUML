@@ -24,6 +24,8 @@ export interface SemanticAggregate {
   edges: AggregatedEdge[];
   /** Ids de nodos sin paquete: se siguen dibujando como cajas sueltas. */
   loose: string[];
+  /** Nodo empaquetado → nombre de su bloque (paquete más externo). */
+  owners: ReadonlyMap<string, string>;
 }
 
 /** Por debajo de SEMANTIC_LO solo bloques; por encima de SEMANTIC_HI solo tarjetas; en medio, fundido. */
@@ -89,5 +91,16 @@ export function aggregatePackages(layout: LayoutResult): SemanticAggregate {
   const edges = [...edgeCounts.values()]
     .sort((a, b) => byName(a.source, b.source) || byName(a.target, b.target))
     .map((e) => ({ ...e, width: edgeWidth(e.n) }));
-  return { packages, edges, loose };
+  return { packages, edges, loose, owners: nodeOwner };
+}
+
+const memo = new WeakMap<LayoutResult, SemanticAggregate>();
+/** aggregatePackages memoizado por layout: se recalcula solo cuando cambia el layout, nunca por zoom. */
+export function semanticOf(layout: LayoutResult): SemanticAggregate {
+  let hit = memo.get(layout);
+  if (!hit) {
+    hit = aggregatePackages(layout);
+    memo.set(layout, hit);
+  }
+  return hit;
 }

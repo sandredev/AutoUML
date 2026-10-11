@@ -7,6 +7,7 @@ import {
   edgeWidth,
   SEMANTIC_HI,
   SEMANTIC_LO,
+  semanticOf,
 } from '../../../../src/presentation/diagram/semantic/aggregatePackages';
 
 const node = (id: string, packageName?: string): NodeBox => ({ id, x: 0, y: 0, w: 10, h: 10, packageName });
@@ -53,11 +54,26 @@ describe('aggregatePackages', () => {
     expect(r.edges).toEqual([]);
   });
 
+  it('owners: cada clase con paquete apunta a su bloque; las sueltas no aparecen', () => {
+    const r = aggregatePackages(layout([node('A', 'a.x'), node('B', 'b'), node('L')], [pkg('a'), pkg('b')]));
+    expect([...r.owners]).toEqual([['A', 'a'], ['B', 'b']]);
+  });
+
   it('orden determinista', () => {
     const l = layout([node('A', 'z'), node('B', 'a')], [pkg('z'), pkg('a')], [edge('A', 'B'), edge('B', 'A')]);
     const r = aggregatePackages(l);
     expect(r.packages.map((p) => p.name)).toEqual(['a', 'z']);
     expect(r.edges.map((e) => e.source)).toEqual(['a', 'z']);
+  });
+});
+
+describe('semanticOf (memo por layout)', () => {
+  it('mismo layout → misma agregación; otro layout → otra', () => {
+    const l = layout([node('A', 'a')], [pkg('a')]);
+    const first = semanticOf(l);
+    expect(semanticOf(l)).toBe(first);
+    expect(first).toEqual(aggregatePackages(l));
+    expect(semanticOf(layout([node('A', 'a')], [pkg('a')]))).not.toBe(first);
   });
 });
 
