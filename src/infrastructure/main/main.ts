@@ -23,8 +23,14 @@ let menuState: MenuState = {
 // queda sin repintar hasta la siguiente entrada (#38); bajo XWayland no pasa. El flag solo cuenta en la línea de
 // comandos (appendSwitch llega tarde y hasSwitch ya da "wayland"), así que el paquete se relanza con él.
 // En desarrollo lo pasa scripts/dev-electron.mjs. AUTOUML_OZONE elige otra plataforma.
+// Solo en sesiones Wayland (o si se pidió una plataforma): en X11 puro el valor por defecto ya es x11 y el
+// relanzado duplicaría el arranque sin arreglar nada.
+const waylandSession = process.env.XDG_SESSION_TYPE === 'wayland' || Boolean(process.env.WAYLAND_DISPLAY);
 const needsOzoneRelaunch =
-  process.platform === 'linux' && app.isPackaged && !process.argv.some((a) => a.startsWith('--ozone-platform'));
+  process.platform === 'linux'
+  && app.isPackaged
+  && (waylandSession || Boolean(process.env.AUTOUML_OZONE))
+  && !process.argv.some((a) => a.startsWith('--ozone-platform'));
 if (needsOzoneRelaunch) {
   app.relaunch({
     execPath: process.env.APPIMAGE || process.execPath,
@@ -97,9 +103,20 @@ function createWindow(): void {
   win.webContents.on('before-input-event', (event, input) => {
     if (!htmlFullscreen || input.type !== 'keyDown' || input.key !== 'Escape') return;
     event.preventDefault();
-    void win?.webContents.executeJavaScript(
-      "(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))",
-    );
+    // dispatchEvent devuelve false si algún handler hizo preventDefault (el renderer atendió la tecla). Si no
+    // (foco en un campo, diálogo modal, visor desmontado), Esc no puede quedar tragado: se sale de pantalla
+    // completa aquí, o el usuario quedaría atrapado (el botón del header queda fuera del elemento).
+    void win?.webContents
+      .executeJavaScript(
+        "(document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))",
+      )
+      .then((notHandled: unknown) => {
+        if (notHandled === true && htmlFullscreen) {
+          return win?.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()');
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
   });
 
   const devUrl = process.env.VITE_DEV_SERVER_URL;
