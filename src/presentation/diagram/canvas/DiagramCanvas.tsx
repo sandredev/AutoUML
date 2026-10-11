@@ -23,7 +23,8 @@ import { hitTestEdge } from './edgeHit';
 import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './minimap';
 import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
 import { buildIndex, hitTestNode } from './spatial';
-import { pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong } from './keyboardNav';
+import { keysOf } from '../../../application/shortcuts';
+import { hoverAfterKeyNav, pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong } from './keyboardNav';
 import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
 import {
   blendLayouts, canAnimate, changedTypes, EASE_IN_OUT, haloIntensity, layoutsDiffer, lerpView, LAYOUT_MS, REDUCED_LAYOUT_MS, snapshotOf, VIEW_MS,
@@ -1147,6 +1148,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           const rel = edges[edge].rel;
           L.onRelationSelect?.(rel !== undefined ? (L.model.relationships[rel]?.line ?? null) : null);
           if (anchor !== L.selectedId) L.onSelect?.(anchor);
+          setHover(hoverAfterKeyNav(L.hover, anchor));
           return;
         }
         if (rm !== null && flow !== null && rm.edge !== null) {
@@ -1156,6 +1158,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           const st = flow[step];
           if (st.kind === 'node') {
             L.onSelect?.(st.id);
+            setHover(hoverAfterKeyNav(L.hover, st.id));
             focusNodeInView(st.id, true);
           } else {
             const pts = edges[rm.edge].points;
@@ -1174,6 +1177,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           : spatialNext(L.layout.nodes, L.selectedId, action);
         if (next !== null && next !== L.selectedId) {
           L.onSelect?.(next);
+          setHover(hoverAfterKeyNav(L.hover, next));
           focusNodeInView(next, true);
         }
       }
@@ -1418,6 +1422,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
             <dd>{labels.shortcutsFit}</dd>
             <dt><kbd>?</kbd></dt>
             <dd>{labels.shortcutsHelp}</dd>
+            <dt><kbd>{keysOf('fullscreen')}</kbd></dt>
+            <dd>{labels.shortcutsFullscreen}</dd>
+            <dt><kbd>{keysOf('palette')}</kbd></dt>
+            <dd>{labels.shortcutsPalette}</dd>
           </dl>
           <button type="button" className="diagram-route-clear" onClick={() => setHelpOpen(false)}>{labels.shortcutsClose}</button>
         </div>

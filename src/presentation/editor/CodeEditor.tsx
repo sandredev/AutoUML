@@ -25,6 +25,7 @@ import {
 } from 'react';
 import type { ParseIssue } from '../../domain/diagram/model';
 import { useLocalization } from '../localization/LocalizationProvider';
+import { keysOf } from '../../application/shortcuts';
 import { withShortcut } from '../localization/translations';
 import { issuesToDiagnostics } from './diagnostics';
 import { EDITOR_DEFAULT_WIDTH, EDITOR_MAX_WIDTH, EDITOR_MIN_WIDTH } from './editorSize';
@@ -293,7 +294,7 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
           type="button"
           className="code-editor-btn"
           disabled={!dirty}
-          title={withShortcut(t('editor.save'), 'Ctrl+S')}
+          title={withShortcut(t('editor.save'), keysOf('save'))}
           onClick={() => handlers.current.onSave()}
         >
           {t('editor.save')}
@@ -301,8 +302,8 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
         <button
           type="button"
           className="code-editor-btn code-editor-close"
-          title={withShortcut(t('editor.close'), 'Ctrl+E')}
-          aria-label={withShortcut(t('editor.close'), 'Ctrl+E')}
+          title={withShortcut(t('editor.close'), keysOf('toggleEditor'))}
+          aria-label={withShortcut(t('editor.close'), keysOf('toggleEditor'))}
           onClick={onClose}
         >
           ×

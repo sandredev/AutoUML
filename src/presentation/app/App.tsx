@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarFilters, SidecarState, SidecarView, StorageInfo } from '../../application/ports/ipc';
+import { actionOfShortcut, isShortcutEnabled, matchShortcut } from '../../application/shortcuts';
 import type { OpenPumlFile } from '../../application/ports/history';
 import { buildTree, countByCategory } from '../../domain/diagram/classify';
 import { scanIncludes } from '../../application/puml/include';
@@ -148,7 +149,7 @@ export default function App() {
   const dragDepth = useRef(0);
   const tRef = useRef(t);
   const handleRelayoutRef = useRef<() => void>(() => undefined);
-  const handleCopyPngRef = useRef<() => void>(() => undefined);
+  const handleFitRef = useRef<() => void>(() => undefined);
 
   // Confirmación de cierre.
   const [closePromptOpen, setClosePromptOpen] = useState(false);
@@ -184,18 +185,18 @@ export default function App() {
   }, [project, externalName]);
 
   useEffect(() => {
+    // Despacho global de los atajos con Ctrl/Cmd (mapa único en application/shortcuts). El menú nativo solo
+    // los muestra: aquí se ejecutan una vez, con las mismas condiciones que sus opciones de menú.
     const onSettingsShortcut = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === ',') {
-        event.preventDefault();
-        setSettingsOpen(true);
-      }
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'L' || event.key === 'l')) {
-        event.preventDefault();
-        handleRelayoutRef.current();
-      }
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && (event.key === 'C' || event.key === 'c')) {
-        event.preventDefault();
-        void handleCopyPngRef.current();
+      const id = matchShortcut(event);
+      if (id === null || !isShortcutEnabled(id, menuStateRef.current)) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      if (id === 'relayout') handleRelayoutRef.current();
+      else if (id === 'fullscreen') handleFitRef.current();
+      else {
+        const action = actionOfShortcut(id);
+        if (action !== null) actionRef.current(action);
       }
     };
     window.addEventListener('keydown', onSettingsShortcut);
@@ -227,6 +228,8 @@ export default function App() {
     }),
     [project, diagram, sidebarVisible, editorVisible, dirty, locale, themeMode],
   );
+  const menuStateRef = useRef(menuState);
+  menuStateRef.current = menuState;
   useEffect(() => {
     api.updateMenuState(menuState);
   }, [menuState]);
@@ -610,6 +613,7 @@ export default function App() {
     if (area?.requestFullscreen) void area.requestFullscreen().catch(() => canvasRef.current?.fit());
     else canvasRef.current?.fit();
   }, []);
+  handleFitRef.current = handleFit;
   useEffect(() => {
     const onFullscreen = (): void => {
       // Animado: si el cambio de tamaño ya inició el vuelo al mismo encuadre, no lo reinicia (#38).
@@ -682,7 +686,6 @@ export default function App() {
     if (!result.ok) setStatus({ kind: 'error', text: result.error });
     else setStatus({ kind: 'success', text: t('status.pngCopied') });
   }, [t]);
-  handleCopyPngRef.current = handleCopyPng;
 
   // ---------- T7: editor ----------
   const editorVisibleRef = useRef(editorVisible);

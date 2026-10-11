@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type JSX } from 'react';
 import type { MenuAction, MenuCommand, MenuState } from '../../application/ports/ipc';
+import { keysOf } from '../../application/shortcuts';
 import { useLocalization } from '../localization/LocalizationProvider';
 
 interface Props {
@@ -51,17 +52,17 @@ export function AppMenuBar({ state, onAction }: Props): JSX.Element {
     {
       title: t('menu.file'),
       entries: [
-        { kind: 'item', label: t('menu.newProject'), shortcut: 'Ctrl+N', run: action('new-project') },
-        { kind: 'item', label: t('menu.openProject'), shortcut: 'Ctrl+Shift+O', run: action('open-project') },
+        { kind: 'item', label: t('menu.newProject'), shortcut: keysOf('newProject'), run: action('new-project') },
+        { kind: 'item', label: t('menu.openProject'), shortcut: keysOf('openProject'), run: action('open-project') },
         SEPARATOR,
-        { kind: 'item', label: t('menu.loadPuml'), shortcut: 'Ctrl+O', enabled: state.projectOpen, run: action('load-puml') },
-        { kind: 'item', label: t('menu.reload'), shortcut: 'Ctrl+R', enabled: state.hasPuml, run: action('reload-puml') },
-        { kind: 'item', label: t('menu.save'), shortcut: 'Ctrl+S', enabled: state.hasPuml && state.dirty, run: action('save') },
+        { kind: 'item', label: t('menu.loadPuml'), shortcut: keysOf('loadPuml'), enabled: state.projectOpen, run: action('load-puml') },
+        { kind: 'item', label: t('menu.reload'), shortcut: keysOf('reload'), enabled: state.hasPuml, run: action('reload-puml') },
+        { kind: 'item', label: t('menu.save'), shortcut: keysOf('save'), enabled: state.hasPuml && state.dirty, run: action('save') },
         SEPARATOR,
         { kind: 'item', label: t('menu.exportPng'), enabled: state.hasPuml, run: action('export') },
-        { kind: 'item', label: t('menu.exportSvg'), shortcut: 'Ctrl+Shift+E', enabled: state.hasPuml, run: action('export-svg') },
-        { kind: 'item', label: t('menu.exportPdf'), shortcut: 'Ctrl+Shift+P', enabled: state.hasPuml, run: action('export-pdf') },
-        { kind: 'item', label: t('menu.copyPng'), shortcut: 'Ctrl+Shift+C', enabled: state.hasPuml, run: action('copy-png') },
+        { kind: 'item', label: t('menu.exportSvg'), shortcut: keysOf('exportSvg'), enabled: state.hasPuml, run: action('export-svg') },
+        { kind: 'item', label: t('menu.exportPdf'), shortcut: keysOf('exportPdf'), enabled: state.hasPuml, run: action('export-pdf') },
+        { kind: 'item', label: t('menu.copyPng'), shortcut: keysOf('copyPng'), enabled: state.hasPuml, run: action('copy-png') },
         SEPARATOR,
         { kind: 'item', label: t('menu.quit'), run: command('quit') },
       ],
@@ -79,14 +80,14 @@ export function AppMenuBar({ state, onAction }: Props): JSX.Element {
     {
       title: t('menu.view'),
       entries: [
-        { kind: 'item', label: t('menu.zoomIn'), shortcut: 'Ctrl+=', enabled: state.hasPuml, run: action('zoom-in') },
-        { kind: 'item', label: t('menu.zoomOut'), shortcut: 'Ctrl+-', enabled: state.hasPuml, run: action('zoom-out') },
-        { kind: 'item', label: t('menu.fit'), shortcut: 'Ctrl+0', enabled: state.hasPuml, run: action('fit') },
+        { kind: 'item', label: t('menu.zoomIn'), shortcut: keysOf('zoomIn'), enabled: state.hasPuml, run: action('zoom-in') },
+        { kind: 'item', label: t('menu.zoomOut'), shortcut: keysOf('zoomOut'), enabled: state.hasPuml, run: action('zoom-out') },
+        { kind: 'item', label: t('menu.fit'), shortcut: keysOf('fit'), enabled: state.hasPuml, run: action('fit') },
         SEPARATOR,
         {
           kind: 'item',
           label: t('menu.showSidebar'),
-          shortcut: 'Ctrl+B',
+          shortcut: keysOf('toggleSidebar'),
           checked: state.sidebarVisible,
           enabled: anyContent,
           run: action('toggle-sidebar'),
@@ -94,7 +95,7 @@ export function AppMenuBar({ state, onAction }: Props): JSX.Element {
         {
           kind: 'item',
           label: t('menu.showEditor'),
-          shortcut: 'Ctrl+E',
+          shortcut: keysOf('toggleEditor'),
           checked: state.editorVisible,
           enabled: state.hasPuml,
           run: action('toggle-editor'),

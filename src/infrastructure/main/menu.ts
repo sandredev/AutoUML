@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, Menu, type MenuItemConstructorOptions } from 'electron';
 import type { MenuAction, MenuCommand, MenuState } from '../../application/ports/ipc';
+import { acceleratorOf, type ShortcutId } from '../../application/shortcuts';
 import { THEME_MODES, type ThemeMode } from '../../domain/rules/themes';
 import { getCurrentProjectName } from '../storage/projects';
 
@@ -149,6 +150,9 @@ export function runMenuCommand(win: BrowserWindow, command: MenuCommand): void {
   }
 }
 
+/** Atajo solo mostrado: lo despacha el renderer (application/shortcuts), así no se ejecuta dos veces. */
+const shown = (id: ShortcutId) => ({ accelerator: acceleratorOf(id), registerAccelerator: false });
+
 export function buildMenu(win: BrowserWindow, state: MenuState): void {
   currentLocale = state.locale;
   const labels = menuCopy[state.locale];
@@ -164,18 +168,18 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
     {
       label: `&${labels.file}`,
       submenu: [
-        { label: labels.newProject, accelerator: 'CmdOrCtrl+N', click: send('new-project') },
-        { label: labels.openProject, accelerator: 'CmdOrCtrl+Shift+O', click: send('open-project') },
+        { label: labels.newProject, ...shown('newProject'), click: send('new-project') },
+        { label: labels.openProject, ...shown('openProject'), click: send('open-project') },
         { type: 'separator' },
-        { label: labels.loadPuml, accelerator: 'CmdOrCtrl+O', enabled: state.projectOpen, click: send('load-puml') },
-        { label: labels.reload, accelerator: 'CmdOrCtrl+R', enabled: state.hasPuml, click: send('reload-puml') },
-        { label: labels.save, accelerator: 'CmdOrCtrl+S', enabled: state.hasPuml && state.dirty, click: send('save') },
+        { label: labels.loadPuml, ...shown('loadPuml'), enabled: state.projectOpen, click: send('load-puml') },
+        { label: labels.reload, ...shown('reload'), enabled: state.hasPuml, click: send('reload-puml') },
+        { label: labels.save, ...shown('save'), enabled: state.hasPuml && state.dirty, click: send('save') },
         { type: 'separator' },
         // Ctrl+E es del editor de código (T7); exportar PNG queda sin atajo.
         { label: labels.exportPng, enabled: state.hasPuml, click: send('export') },
-        { label: labels.exportSvg, accelerator: 'CmdOrCtrl+Shift+E', enabled: state.hasPuml, click: send('export-svg') },
-        { label: labels.exportPdf, accelerator: 'CmdOrCtrl+Shift+P', enabled: state.hasPuml, click: send('export-pdf') },
-        { label: labels.copyPng, accelerator: 'CmdOrCtrl+Shift+C', enabled: state.hasPuml, click: send('copy-png') },
+        { label: labels.exportSvg, ...shown('exportSvg'), enabled: state.hasPuml, click: send('export-svg') },
+        { label: labels.exportPdf, ...shown('exportPdf'), enabled: state.hasPuml, click: send('export-pdf') },
+        { label: labels.copyPng, ...shown('copyPng'), enabled: state.hasPuml, click: send('copy-png') },
         { type: 'separator' },
         { label: labels.quit, role: 'quit' },
       ],
@@ -193,14 +197,14 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
     {
       label: `&${labels.view}`,
       submenu: [
-        { label: labels.zoomIn, accelerator: 'CmdOrCtrl+=', enabled: state.hasPuml, click: send('zoom-in') },
-        { label: labels.zoomOut, accelerator: 'CmdOrCtrl+-', enabled: state.hasPuml, click: send('zoom-out') },
-        { label: labels.fit, accelerator: 'CmdOrCtrl+0', enabled: state.hasPuml, click: send('fit') },
+        { label: labels.zoomIn, ...shown('zoomIn'), enabled: state.hasPuml, click: send('zoom-in') },
+        { label: labels.zoomOut, ...shown('zoomOut'), enabled: state.hasPuml, click: send('zoom-out') },
+        { label: labels.fit, ...shown('fit'), enabled: state.hasPuml, click: send('fit') },
         { type: 'separator' },
         {
           label: labels.showSidebar,
           type: 'checkbox',
-          accelerator: 'CmdOrCtrl+B',
+          ...shown('toggleSidebar'),
           checked: state.sidebarVisible,
           enabled: state.projectOpen || state.hasPuml,
           click: send('toggle-sidebar'),
@@ -208,7 +212,7 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
         {
           label: labels.showEditor,
           type: 'checkbox',
-          accelerator: 'CmdOrCtrl+E',
+          ...shown('toggleEditor'),
           checked: state.editorVisible,
           enabled: state.hasPuml,
           click: send('toggle-editor'),
@@ -236,7 +240,7 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
           ],
         },
         { type: 'separator' },
-        { label: labels.moreOptions, accelerator: 'CmdOrCtrl+,', click: send('settings-more') },
+        { label: labels.moreOptions, ...shown('settings'), click: send('settings-more') },
       ],
     },
     {

@@ -68,6 +68,8 @@ export interface ViewerLabels {
   shortcutsZoom: string;
   shortcutsFit: string;
   shortcutsHelp: string;
+  shortcutsFullscreen: string;
+  shortcutsPalette: string;
   // Ruta entre clases (T8)
   routeAria: string;
   /** "Ruta {from} → {to}: {n} saltos" */
@@ -277,6 +279,8 @@ export const DEFAULT_LABELS: ViewerLabels = {
   shortcutsZoom: 'Acercar / alejar',
   shortcutsFit: 'Ajustar la vista al diagrama',
   shortcutsHelp: 'Mostrar esta ayuda',
+  shortcutsFullscreen: 'Entrar o salir de pantalla completa',
+  shortcutsPalette: 'Abrir la paleta de comandos (buscar clases, paquetes y acciones)',
   routeAria: 'Ruta entre clases',
   routeInfo: 'Ruta {from} → {to}: {n} saltos',
   routeNone: 'No hay camino de {from} a {to}',

@@ -24,6 +24,14 @@ export function shortcutOf(key: string, mods: { ctrl?: boolean; alt?: boolean; m
   return KEYS[key] ?? null;
 }
 
+/**
+ * Hover que debe quedar tras moverse con teclado a `target`: el puntero no se mueve, así que un hover
+ * sobre otra clase (o relación) se queda pegado; solo se conserva el que ya apunta al destino.
+ */
+export function hoverAfterKeyNav<H extends { kind: string; id?: string } | null>(hover: H, target: string): H | null {
+  return hover !== null && hover.kind === 'node' && hover.id === target ? hover : null;
+}
+
 const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 const AXIS: Readonly<Record<SpatialDir, readonly [number, number]>> = {

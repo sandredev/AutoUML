@@ -497,6 +497,13 @@ export function PumlViewer({
       document.removeEventListener('fullscreenchange', onFullscreen);
     };
   }, [playing, dispatchPlayer, exitPresent]);
+  // Entrar o salir de pantalla completa con teclado (F11) deja el lienzo enfocado "por teclado" y saldría el aro
+  // naranja; con el clic en el botón no. Mismo trato que el reset: sin aro hasta la siguiente tecla o clic.
+  useEffect(() => {
+    const onFullscreen = (): void => rootRef.current?.classList.add('is-reset');
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => document.removeEventListener('fullscreenchange', onFullscreen);
+  }, []);
   // El panel sigue editable durante el recorrido: la lista del recorrido se mantiene al día.
   useEffect(() => {
     setPlayer((p) => (p && p.views !== views ? { ...p, views, index: Math.min(p.index, Math.max(0, views.length - 1)) } : p));

@@ -61,6 +61,8 @@ export function viewerLabels(t: TranslateFn): ViewerLabels {
     shortcutsZoom: t('viewer.shortcuts.zoom'),
     shortcutsFit: t('viewer.shortcuts.fit'),
     shortcutsHelp: t('viewer.shortcuts.help'),
+    shortcutsFullscreen: t('viewer.shortcuts.fullscreen'),
+    shortcutsPalette: t('viewer.shortcuts.palette'),
     routeAria: t('viewer.routeAria'),
     routeInfo: t('viewer.routeInfo'),
     routeNone: t('viewer.routeNone'),

@@ -1,6 +1,6 @@
 // tests/presentation/diagram/canvas/keyboardNav.test.ts — atajos de teclado del canvas (T10.6).
 import { describe, expect, it } from 'vitest';
-import { pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong } from '../../../../src/presentation/diagram/canvas/keyboardNav';
+import { hoverAfterKeyNav, pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong } from '../../../../src/presentation/diagram/canvas/keyboardNav';
 import type { NodeBox } from '../../../../src/presentation/diagram/types';
 import { rel } from '../../../helpers/diagramBuilders';
 
@@ -154,5 +154,24 @@ describe('shortcutOf', () => {
     expect(k('Enter')).toBeNull();
     expect(k('0', { ctrl: true })).toBeNull();
     expect(k('+', { meta: true })).toBeNull();
+  });
+});
+
+describe('hoverAfterKeyNav (#40: el resaltado no se queda en la entidad anterior)', () => {
+  it('suelta el hover de la clase anterior al moverse a otra con flechas', () => {
+    expect(hoverAfterKeyNav({ kind: 'node', id: 'A' }, 'B')).toBeNull();
+  });
+
+  it('suelta el hover de una relación al navegar', () => {
+    expect(hoverAfterKeyNav({ kind: 'edge', index: 2 }, 'B')).toBeNull();
+  });
+
+  it('conserva el hover si ya apunta a la clase destino', () => {
+    const h = { kind: 'node' as const, id: 'B' };
+    expect(hoverAfterKeyNav(h, 'B')).toBe(h);
+  });
+
+  it('sin hover sigue sin hover', () => {
+    expect(hoverAfterKeyNav(null, 'B')).toBeNull();
   });
 });
