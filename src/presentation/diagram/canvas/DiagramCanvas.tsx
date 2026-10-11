@@ -96,6 +96,15 @@ interface Props {
    * (el campo sigue abierto) o null si se aplicó. Sin esta prop el doble clic no renombra.
    */
   onRename?: (id: string, next: string) => string | null;
+  /**
+   * Modo foco (T8): clave del foco aplicado (null = diagrama completo). Al entrar se guarda la vista y se
+   * encuadra el layout enfocado cuando llegue; al salir se recupera la vista guardada. Mientras dura, las
+   * posiciones manuales no se aplican ni se pueden mover tarjetas (son del diagrama completo) y
+   * getSnapshot() devuelve la vista guardada.
+   */
+  focusKey?: string | null;
+  /** Si la cámara vuela al entrar/salir del foco (false cuando lo pide el teclado). */
+  focusAnimate?: boolean;
 }
 
 type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | null;
@@ -103,6 +112,8 @@ type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | nu
 interface RenameDraft { id: string; value: string; error: string | null; x: number; y: number; w: number }
 /** Arista seleccionada; el índice solo vale para el layout en que se eligió. */
 interface EdgeSelection { layout: LayoutResult; index: number }
+/** Vista pendiente hasta que llegue un layout distinto de `from`: encuadrar o ir a `target`. */
+interface PendingView { from: LayoutResult; target?: ViewState; animate?: boolean }
 
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
 const MAX_EXPORT_SIDE = 16384;
@@ -190,6 +201,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
     labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename,
+    focusKey = null, focusAnimate = true,
   },
   ref,
 ) {
@@ -199,8 +211,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const tipRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<ViewState>({ scale: 1, tx: 0, ty: 0 });
   const pendingFocusRef = useRef<string | null>(null);
-  /** Plegado pedido: se encuadra cuando llegue un layout distinto de `from` (o enseguida sin control). */
-  const pendingFitRef = useRef<{ from: LayoutResult } | null>(null);
+  /** Plegado o foco pedido: se encuadra (o se va a `target`) cuando llegue un layout distinto de `from`. */
+  const pendingFitRef = useRef<PendingView | null>(null);
+  /** Layout del último commit: el que se veía al pedir el foco. */
+  const committedLayoutRef = useRef<LayoutResult>(layout);
+  /** Vista al entrar en el modo foco (T8). */
+  const focusViewRef = useRef<{ view: ViewState; autoFit: boolean } | null>(null);
+  const focusKeyRef = useRef<string | null>(null);
   const sizeRef = useRef({ w: 0, h: 0 });
   const themeRef = useRef<Theme | null>(null);
   const rafRef = useRef(0);
@@ -228,6 +245,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [hover, setHover] = useState<Hover>(null);
   const [edgeSel, setEdgeSel] = useState<EdgeSelection | null>(null);
   const [rename, setRename] = useState<RenameDraft | null>(null);
+  const inFocus = focusKey !== null;
 
   const controlled = collapsedProp !== undefined;
   const collapsedPackages = collapsedProp ?? internalCollapsed;
@@ -240,7 +258,22 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const sameDoc = docKey !== undefined && tracked.docKey === docKey;
     setTracked({ modelKey, docKey });
     const ids = layout.nodes.map((n) => n.id);
-    setOverrides((prev) => (sameDoc ? retainOverrides(prev, ids) : EMPTY_OVERRIDES));
+    // En modo foco el layout solo tiene una parte de las tarjetas: no se olvidan las demás.
+    setOverrides((prev) => (sameDoc ? (inFocus ? prev : retainOverrides(prev, ids)) : EMPTY_OVERRIDES));
+  }
+
+  // Entrar/salir del modo foco o cambiar su objetivo (T8). Se deriva en el render: el layout nuevo puede
+  // llegar en este mismo render (caché) y el efecto que encuadra tiene que encontrar ya la petición.
+  if (focusKey !== focusKeyRef.current) {
+    const entering = focusKeyRef.current === null;
+    focusKeyRef.current = focusKey;
+    if (focusKey !== null && entering) focusViewRef.current = { view: { ...viewRef.current }, autoFit: autoFitRef.current };
+    const saved = focusKey === null ? focusViewRef.current : null;
+    if (focusKey === null) focusViewRef.current = null;
+    pendingFitRef.current = saved
+      ? { from: committedLayoutRef.current, target: saved.view, animate: focusAnimate }
+      : { from: committedLayoutRef.current, animate: focusAnimate };
+    if (saved) autoFitRef.current = saved.autoFit;
   }
 
   // Iniciales del sidecar: se aplican una vez por documento (aunque lleguen tarde por la
@@ -260,7 +293,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     }
   }
 
-  const movedLayout = useMemo(() => applyOverrides(layout, overrides), [layout, overrides]);
+  const movedLayout = useMemo(() => (inFocus ? layout : applyOverrides(layout, overrides)), [inFocus, layout, overrides]);
   const visibleLayout = useMemo(
     () => (controlled ? movedLayout : collapsePackages(model, movedLayout, collapsedPackages, labels.collapsedSubtitle)),
     [controlled, model, movedLayout, collapsedPackages, labels.collapsedSubtitle],
@@ -295,6 +328,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const snapshot = {
     model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, onSelect, onViewChange,
     collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename,
+    inFocus,
   };
   const latest = useRef(snapshot);
   latest.current = snapshot;
@@ -526,7 +560,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         if (b.w <= 0 || b.h <= 0) return null;
         return diagramToSvg(L.layout, { cards: svgCardsOf(L.model) });
       },
-      getSnapshot: () => ({ view: { ...viewRef.current }, overrides: overridesToRecord(latest.current.overrides) }),
+      // En modo foco se persiste la vista del diagrama completo, no la del foco.
+      getSnapshot: () => ({ view: { ...(focusViewRef.current?.view ?? viewRef.current) }, overrides: overridesToRecord(latest.current.overrides) }),
       resetPositions: () => setOverrides(EMPTY_OVERRIDES),
       hasManualPositions: () => hasOverrides(latest.current.overrides),
     }),
@@ -605,13 +640,16 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // y después centrar la clase pendiente de focusNode si ya está visible.
   useEffect(() => {
     const pending = pendingFitRef.current;
+    committedLayoutRef.current = layout;
     if (pending && !(controlled && pending.from === layout)) {
       pendingFitRef.current = null;
-      fit(true); // la cámara se asienta a la vez que la transición del layout
+      // La cámara se asienta a la vez que la transición del layout (sin vuelo si lo pidió el teclado).
+      if (pending.target) flyTo(pending.target, pending.animate ?? true);
+      else fit(pending.animate ?? true);
     }
     const id = pendingFocusRef.current;
     if (id && focusNodeInView(id)) pendingFocusRef.current = null;
-  }, [layout, collapsedPackages, controlled, fit, focusNodeInView]);
+  }, [layout, collapsedPackages, controlled, fit, flyTo, focusNodeInView]);
 
   // Transición de layout (T6): cuando lo que se muestra cambia de geometría dentro del MISMO documento
   // (recarga, plegar/desplegar, Restablecer, refinado dagre→ELK) las tarjetas se desplazan, entran y salen
@@ -758,7 +796,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const p = screenToWorld(viewRef.current, e.clientX - rect.left, e.clientY - rect.top);
     const L = latest.current;
     const hit = hitTestNode(L.index, L.layout, p.x, p.y);
-    const nodeId = hit !== null && !isPackageNode(hit) ? hit : null;
+    // En modo foco no se mueven tarjetas: las posiciones manuales son del diagrama completo.
+    const nodeId = hit !== null && !isPackageNode(hit) && !L.inFocus ? hit : null;
     dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, nodeId };
   };
 

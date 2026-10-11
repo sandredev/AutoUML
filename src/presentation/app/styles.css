@@ -125,6 +125,11 @@ p { margin: 0 0 8px; }
 .puml-viewer-bar-info { flex: 1; min-width: 0; font-size: 12px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .puml-viewer-reset { padding: 2px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); font-size: 12px; }
 .puml-viewer-reset:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.puml-viewer-reset:focus-visible, .puml-viewer-focus select:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
+.puml-viewer-focus { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.puml-viewer-focus-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-weight: 600; }
+.puml-viewer-focus label { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-muted); }
+.puml-viewer-focus select { padding: 1px 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); font-size: 12px; }
 .puml-viewer.has-canvas { align-items: stretch; justify-content: stretch; overflow: hidden; text-align: left; }
 .diagram-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .diagram-canvas canvas { display: block; cursor: grab; touch-action: none; }

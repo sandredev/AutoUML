@@ -3,7 +3,10 @@ import type { JSX, RefObject } from 'react';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { SidecarState } from '../../application/ports/ipc';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
+import { focusTargetOf, viewerShortcut } from './focusMode';
+import { focusKey, type FocusDirection, type FocusSpec } from './graph/neighborhood';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from './labels';
+import { isPackageNode, packageNodeName } from './layout/aggregate';
 import { useDiagramLayout } from './layout/useDiagramLayout';
 import type { LayoutOptions, ViewState } from './types';
 import { initialViewOptions, resetViewOptions, type ViewOptionsState } from './viewOptions';
@@ -41,6 +44,8 @@ export interface PumlViewerProps {
 }
 
 const NO_COLLAPSED: ReadonlySet<string> = new Set();
+const FOCUS_DEPTHS = [1, 2, 3] as const;
+const FOCUS_DIRECTIONS: FocusDirection[] = ['both', 'out', 'in'];
 
 export function PumlViewer({
   model,
@@ -60,6 +65,10 @@ export function PumlViewer({
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(NO_COLLAPSED);
+  // Modo foco (T8): clase (o paquete plegado) y sus vecinos a N saltos. focusAnimate: la cámara vuela al
+  // entrar/salir salvo si lo pidió el teclado.
+  const [focus, setFocus] = useState<FocusSpec | null>(null);
+  const [focusAnimate, setFocusAnimate] = useState(false);
 
   // Al cambiar de documento se parte de cero; al llegar el sidecar se aplican sus
   // colapsados (filtrados a los existentes). Se deriva durante el render.
@@ -70,6 +79,7 @@ export function PumlViewer({
     lastKeyFor.current = sidecarKey;
     lastAppliedSidecar.current = undefined;
     setCollapsed(NO_COLLAPSED);
+    setFocus(null);
   }
   if (sidecarKey !== null && initialSidecar !== undefined && lastAppliedSidecar.current !== initialSidecar) {
     lastAppliedSidecar.current = initialSidecar;
@@ -87,8 +97,35 @@ export function PumlViewer({
 
   const moreTemplate = labels.moreMembers;
   const options = useMemo<LayoutOptions>(() => ({ ...view.options, moreTemplate }), [view.options, moreTemplate]);
-  const { layout, layoutModel, viewModel, packageCounts, display, loading, refining, error, engine, fallback, ms } =
-    useDiagramLayout(model, liveCollapsed, options, view.layoutVersion);
+  const {
+    layout, layoutModel, viewModel, packageCounts, display, loading, refining, error, engine, fallback, ms, focusableModel, focusApplied,
+  } = useDiagramLayout(model, liveCollapsed, options, view.layoutVersion, focus);
+
+  // El objetivo del foco desapareció (recarga, plegado de su paquete…): se vuelve al diagrama completo.
+  if (focus !== null && focusableModel !== null && !focusApplied) setFocus(null);
+  const activeFocus = focus !== null && focusApplied ? focus : null;
+  const focusTarget = model && focusableModel ? focusTargetOf(selectedId, focusableModel, model, liveCollapsed) : null;
+
+  // Últimos valores para el atajo de teclado (el listener se registra una vez).
+  const keyState = useRef({ focusTarget, activeFocus });
+  keyState.current = { focusTarget, activeFocus };
+
+  /** Enfoca la selección (o la vuelve a enfocar si ya hay foco), conservando saltos y dirección. */
+  const enterFocus = useCallback((animate: boolean): boolean => {
+    const id = keyState.current.focusTarget;
+    if (id === null) return false;
+    setFocusAnimate(animate);
+    setFocus((prev) => ({ id, depth: prev?.depth ?? 1, direction: prev?.direction ?? 'both' }));
+    return true;
+  }, []);
+  const exitFocus = useCallback((animate: boolean) => {
+    setFocusAnimate(animate);
+    setFocus(null);
+  }, []);
+  const changeFocus = useCallback((patch: Partial<FocusSpec>) => {
+    setFocusAnimate(true);
+    setFocus((prev) => (prev ? { ...prev, ...patch } : prev));
+  }, []);
 
   // Documento de cada modelo recibido: un layout del modelo anterior sigue valiendo si es el mismo documento.
   const docOf = useRef(new WeakMap<DiagramModel, string>());
@@ -103,6 +140,25 @@ export function PumlViewer({
   // Si el host no pasa un ref, se usa uno propio para poder restablecer.
   const ownRef = useRef<DiagramCanvasHandle | null>(null);
   const handleRef = canvasRef ?? ownRef;
+
+  // F enfoca la selección; Esc sale del foco. Atajos de alta frecuencia: la
+  // cámara no vuela (la transición del layout sí). No actúan escribiendo ni con un diálogo modal abierto.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const shortcut = viewerShortcut(e);
+      if (shortcut === null || document.querySelector('[aria-modal="true"]')) return;
+      if (shortcut === 'focus') {
+        if (enterFocus(false)) e.preventDefault();
+        return;
+      }
+      if (keyState.current.activeFocus !== null) {
+        e.preventDefault();
+        exitFocus(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enterFocus, exitFocus, handleRef]);
 
   /**
    * Restablecer: las tarjetas movidas vuelven a su posición, las opciones de vista a sus valores por defecto
@@ -165,6 +221,10 @@ export function PumlViewer({
     );
   }
 
+  const directionLabel: Record<FocusDirection, string> = { both: labels.focusDirBoth, out: labels.focusDirOut, in: labels.focusDirIn };
+  const focusName = (id: string): string =>
+    isPackageNode(id) ? packageNodeName(id) : (model.types.find((t) => t.id === id)?.name ?? id);
+
   const engineInfo = engine
     ? `${engine.toUpperCase()} · ${ms ?? 0} ms${refining ? ' · ' + labels.refining : ''}`
     : '';
@@ -177,6 +237,37 @@ export function PumlViewer({
           {engineInfo ? <span className="puml-viewer-bar-engine"> · {engineInfo}</span> : null}
           {fallback ? <span className="puml-viewer-bar-warn" title={fallback}> {labels.fallbackBadge}</span> : null}
         </span>
+        {activeFocus !== null ? (
+          <div className="puml-viewer-focus" role="group" aria-label={labels.focusGroupAria}>
+            <span className="puml-viewer-focus-name">{fill(labels.focusOn, { name: focusName(activeFocus.id) })}</span>
+            <label>
+              {labels.focusDepth}
+              <select value={activeFocus.depth} onChange={(e) => changeFocus({ depth: Number(e.target.value) })}>
+                {FOCUS_DEPTHS.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </label>
+            <label>
+              {labels.focusDirection}
+              <select value={activeFocus.direction} onChange={(e) => changeFocus({ direction: e.target.value as FocusDirection })}>
+                {FOCUS_DIRECTIONS.map((d) => <option key={d} value={d}>{directionLabel[d]}</option>)}
+              </select>
+            </label>
+            <button type="button" className="puml-viewer-reset" onClick={() => exitFocus(true)} title={labels.focusExitTitle}>
+              {labels.focusExit}
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="puml-viewer-reset"
+            onClick={() => enterFocus(true)}
+            disabled={focusTarget === null}
+            title={labels.focusTitle}
+            aria-keyshortcuts="F"
+          >
+            {labels.focus}
+          </button>
+        )}
         <button
           type="button"
           className="puml-viewer-reset"
@@ -208,6 +299,8 @@ export function PumlViewer({
         highlightLine={highlightLine}
         {...(onRelationSelect ? { onRelationSelect } : {})}
         {...(onRename ? { onRename } : {})}
+        focusKey={activeFocus !== null ? focusKey(activeFocus) : null}
+        focusAnimate={focusAnimate}
       />
     </section>
   );
