@@ -63,3 +63,39 @@ describe('round-trip en disco', () => {
     expect(readSidecarFile(wrong)).toEqual({ state: null, corrupt: true });
   });
 });
+
+describe('filtros por documento (T8, opcionales y sin subir version)', () => {
+  const filters = {
+    hiddenRelTypes: ['DEPENDENCY'],
+    minVisibility: '#',
+    hideAccessors: true,
+    hideConstructors: false,
+    hideExternal: true,
+    hideUndeclared: false,
+    hiddenPackages: ['app.ui'],
+    hiddenTypes: ['Logger'],
+  };
+
+  it('un sidecar antiguo sin filters sigue cargando y no inventa el campo', () => {
+    const state = validateSidecar(validState());
+    expect(state).toEqual(validState());
+    expect(state && 'filters' in state).toBe(false);
+  });
+
+  it('acepta filters válidos y hace round-trip en disco', () => {
+    const withFilters = { ...validState(), filters } as SidecarState;
+    expect(validateSidecar(withFilters)).toEqual(withFilters);
+    const file = path.join(tmpRoot, 'con-filtros.json');
+    writeSidecarFile(file, withFilters);
+    expect(readSidecarFile(file)).toEqual({ state: withFilters, corrupt: false });
+  });
+
+  it('un campo de filters inválido se descarta sin dar el sidecar por corrupto', () => {
+    const raw = {
+      ...validState(),
+      filters: { hiddenRelTypes: ['DEPENDENCY', 'NO_EXISTE', 3], minVisibility: '!', hideAccessors: 'si', hiddenPackages: 'app', futuro: 1 },
+    };
+    expect(validateSidecar(raw)).toEqual({ ...validState(), filters: { hiddenRelTypes: ['DEPENDENCY'] } });
+    expect(validateSidecar({ ...validState(), filters: 'roto' })).toEqual(validState());
+  });
+});

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarState, StorageInfo } from '../../application/ports/ipc';
+import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarFilters, SidecarState, StorageInfo } from '../../application/ports/ipc';
 import type { OpenPumlFile } from '../../application/ports/history';
 import { buildTree, countByCategory } from '../../domain/diagram/classify';
 import { scanIncludes } from '../../application/puml/include';
@@ -19,6 +19,7 @@ import { Sidebar } from '../components/Sidebar';
 import { StartModal } from '../components/StartModal';
 import { StatusBar, type Status } from '../components/StatusBar';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
+import { hasActiveFilters } from '../diagram/graph/filters';
 import { SettingsDialog } from '../components/SettingsDialog';
 import { CloseConfirmModal } from '../components/CloseConfirmModal';
 import { createOpenGuard, type OpenChoice } from './openGuard';
@@ -85,6 +86,7 @@ export default function App() {
   const scopeRef = useRef<PumlScope | null>(null);
   const saveTimer = useRef<number | undefined>(undefined);
   const pendingCollapsed = useRef<ReadonlySet<string> | null>(null);
+  const pendingFilters = useRef<SidecarFilters>({});
   // T5: texto combinado (con !include expandidos, lo que se parsea y muestra IssuesPanel),
   // archivos vigilados, ruta externa y sidecar.
   const [combined, setCombined] = useState<string | null>(null);
@@ -532,8 +534,9 @@ export default function App() {
     };
   }, [docKey, projectName, externalPath]);
 
-  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>) => {
+  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>, filters: SidecarFilters) => {
     pendingCollapsed.current = _collapsed;
+    pendingFilters.current = filters;
     if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = undefined;
@@ -541,11 +544,14 @@ export default function App() {
       const scope = scopeRef.current;
       if (!handle || !scope) return;
       const snap = handle.getSnapshot();
+      const filters = pendingFilters.current;
       void api.saveSidecar(scope, {
         version: 1,
         collapsed: [...(pendingCollapsed.current ?? [])],
         overrides: snap.overrides,
         view: snap.view,
+        // Sin filtros activos no se escribe el campo: el sidecar queda igual que antes de T8.
+        ...(hasActiveFilters(filters) ? { filters } : {}),
       });
     }, 800);
   }, []);

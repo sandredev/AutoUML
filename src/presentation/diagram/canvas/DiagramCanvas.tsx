@@ -4,6 +4,7 @@ import type { JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouse
 import type { Category, DiagramModel, TypeNode } from '../../../domain/diagram/model';
 import type { Skinparams } from '../../../domain/diagram/skinparam';
 import { adjacencyOf } from '../graph/adjacency';
+import { filterLayout, type DrawHidden } from '../graph/filters';
 import { focusOf } from '../graph/focus';
 import { pathFocus, shortestPath } from '../graph/shortestPath';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
@@ -109,13 +110,18 @@ interface Props {
   focusKey?: string | null;
   /** Si la cámara vuela al entrar/salir del foco (false cuando lo pide el teclado). */
   focusAnimate?: boolean;
+  /**
+   * Filtros de dibujo (T8): nodos y tipos de relación que no se dibujan. No recalculan el layout: se quitan
+   * del layout ya calculado (tampoco se pueden señalar ni seleccionar).
+   */
+  hidden?: DrawHidden | null;
 }
 
 type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | null;
 /** Renombrado en curso: tarjeta, texto escrito, error de validación y posición en pantalla al abrirlo. */
 interface RenameDraft { id: string; value: string; error: string | null; x: number; y: number; w: number }
-/** Arista seleccionada; el índice solo vale para el layout en que se eligió. */
-interface EdgeSelection { layout: LayoutResult; index: number }
+/** Arista seleccionada; el índice solo vale para el layout y los filtros con que se eligió. */
+interface EdgeSelection { layout: LayoutResult; hidden: DrawHidden | null; index: number }
 /** Ruta entre dos clases (T8); vale para el modelo en que se pidió. */
 interface RouteRequest { model: DiagramModel; from: string; to: string; directed: boolean }
 /** Vista pendiente hasta que llegue un layout distinto de `from`: encuadrar o ir a `target`. */
@@ -207,7 +213,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
     labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename,
-    focusKey = null, focusAnimate = true,
+    focusKey = null, focusAnimate = true, hidden = null,
   },
   ref,
 ) {
@@ -303,11 +309,15 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   const movedLayout = useMemo(() => (inFocus ? layout : applyOverrides(layout, overrides)), [inFocus, layout, overrides]);
   const visibleLayout = useMemo(
-    () => (controlled ? movedLayout : collapsePackages(model, movedLayout, collapsedPackages, labels.collapsedSubtitle)),
-    [controlled, model, movedLayout, collapsedPackages, labels.collapsedSubtitle],
+    () => filterLayout(
+      controlled ? movedLayout : collapsePackages(model, movedLayout, collapsedPackages, labels.collapsedSubtitle),
+      model,
+      hidden,
+    ),
+    [controlled, model, movedLayout, collapsedPackages, labels.collapsedSubtitle, hidden],
   );
   const index = useMemo(() => buildIndex(visibleLayout), [visibleLayout]);
-  const clickedEdge = edgeSel !== null && edgeSel.layout === layout ? edgeSel.index : null;
+  const clickedEdge = edgeSel !== null && edgeSel.layout === layout && edgeSel.hidden === hidden ? edgeSel.index : null;
   // Arista de la relación en la que está el cursor del editor (T7); el clic del ratón manda.
   const lineEdge = useMemo(() => {
     if (highlightLine === null) return null;
@@ -345,7 +355,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const snapshot = {
     model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, onSelect, onViewChange,
     collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename,
-    inFocus, route,
+    inFocus, route, hidden,
   };
   const latest = useRef(snapshot);
   latest.current = snapshot;
@@ -890,7 +900,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     }
     if (hit?.kind === 'edge') {
       // Arista: se resalta con sus dos clases; la selección de clase del host se limpia.
-      setEdgeSel({ layout: L.sourceLayout, index: hit.index });
+      setEdgeSel({ layout: L.sourceLayout, hidden: L.hidden, index: hit.index });
       L.onSelect?.(null);
       const rel = L.layout.edges[hit.index]?.rel;
       L.onRelationSelect?.(rel !== undefined ? (L.model.relationships[rel]?.line ?? null) : null);

@@ -3,6 +3,7 @@
 // (T8: salir del modo foco recupera el layout completo sin recalcular).
 import { useEffect, useMemo, useRef } from 'react';
 import type { DiagramModel } from '../../../domain/diagram/model';
+import { applyMemberFilters, memberFiltersKey, type DiagramFilters } from '../graph/filters';
 import { applyHide, parseHide } from '../graph/hide';
 import { applyFocus, focusKey, type FocusSpec } from '../graph/neighborhood';
 import { linetypeOf, visibilityIconsOf } from '../style/skin';
@@ -35,6 +36,7 @@ interface Derived {
 }
 
 const EMPTY_COUNTS: ReadonlyMap<string, number> = new Map();
+const NO_FILTERS: DiagramFilters = {};
 
 export function useDiagramLayout(
   model: DiagramModel | null,
@@ -42,17 +44,24 @@ export function useDiagramLayout(
   opts?: LayoutOptions,
   layoutVersion = 0,
   focus: FocusSpec | null = null,
+  filters: DiagramFilters = NO_FILTERS,
 ): DiagramLayoutState {
   const hidden = useMemo(
     () => (model ? applyHide(model, parseHide(model.hide ?? []), visibilityIconsOf(model.skinparams)) : null),
     [model],
   );
+  // Filtros de tamaño (T8): quitan miembros, así que van antes del layout. Solo cuentan los que cambian la
+  // medida: los de dibujo los aplica el lienzo sin recalcular. Se depende de su clave (primitiva).
+  const mKey = memberFiltersKey(filters);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const sizeFilters = useMemo(() => filters, [mKey]);
+  const filtered = useMemo(() => (hidden ? applyMemberFilters(hidden.model, sizeFilters) : null), [hidden, sizeFilters]);
   const cKey = collapsedKey(collapsed);
   // `collapsed` puede ser un Set nuevo con el mismo contenido: se depende de su clave (primitiva).
   const stableCollapsed = useMemo<ReadonlySet<string>>(() => new Set(cKey ? cKey.split('\n') : []), [cKey]);
   const agg = useMemo(
-    () => (hidden ? aggregateCollapsed(hidden.model, stableCollapsed) : null),
-    [hidden, stableCollapsed],
+    () => (filtered ? aggregateCollapsed(filtered, stableCollapsed) : null),
+    [filtered, stableCollapsed],
   );
 
   // Foco (T8) sobre el modelo agregado: un paquete plegado es un nodo más. Se depende de su clave (primitiva).
@@ -76,10 +85,11 @@ export function useDiagramLayout(
     return o;
   }, [opts, linetype, display]);
 
-  // Caché por conjunto plegado + foco; se vacía si cambian el modelo, las opciones o se fuerza el recálculo.
+  // Caché por conjunto plegado + foco; se vacía si cambian el modelo, los filtros de tamaño, las opciones o se
+  // fuerza el recálculo.
   const cache = useRef(new Map<string, LayoutState>());
   const cacheDeps = useRef<unknown[]>([]);
-  const deps = [model, opts?.summary, opts?.rankSep, opts?.nodeSep, opts?.moreTemplate, layoutVersion];
+  const deps = [model, mKey, opts?.summary, opts?.rankSep, opts?.nodeSep, opts?.moreTemplate, layoutVersion];
   if (deps.length !== cacheDeps.current.length || deps.some((d, i) => d !== cacheDeps.current[i])) {
     cache.current.clear();
     cacheDeps.current = deps;

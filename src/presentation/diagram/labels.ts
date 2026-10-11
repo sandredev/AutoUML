@@ -63,6 +63,33 @@ export interface ViewerLabels {
   routeNone: string;
   routeDirected: string;
   routeClear: string;
+  // Filtros (T8)
+  filters: string;
+  /** "Filtros ({n})": n filtros activos. */
+  filtersActive: string;
+  filtersTitle: string;
+  filtersPanelAria: string;
+  filtersRelations: string;
+  filtersMembers: string;
+  filtersMinVisibility: string;
+  filtersVisAll: string;
+  filtersVisPackage: string;
+  filtersVisProtected: string;
+  filtersVisPublic: string;
+  filtersAccessors: string;
+  filtersConstructors: string;
+  filtersRelayoutHint: string;
+  filtersClasses: string;
+  filtersExternal: string;
+  filtersUndeclared: string;
+  /** "{n} clases ocultadas a mano" */
+  filtersHiddenTypes: string;
+  filtersShowTypes: string;
+  filtersPackages: string;
+  filtersAllPackages: string;
+  filtersNoPackages: string;
+  filtersClear: string;
+  filtersClose: string;
 }
 
 export const DEFAULT_LABELS: ViewerLabels = {
@@ -128,6 +155,30 @@ export const DEFAULT_LABELS: ViewerLabels = {
   routeNone: 'No hay camino de {from} a {to}',
   routeDirected: 'Seguir el sentido de las relaciones',
   routeClear: 'Quitar ruta',
+  filters: 'Filtros',
+  filtersActive: 'Filtros ({n})',
+  filtersTitle: 'Filtrar relaciones, miembros, clases y paquetes de este documento',
+  filtersPanelAria: 'Filtros del diagrama',
+  filtersRelations: 'Relaciones',
+  filtersMembers: 'Miembros',
+  filtersMinVisibility: 'Visibilidad mínima',
+  filtersVisAll: 'Todos',
+  filtersVisPackage: 'Paquete o más',
+  filtersVisProtected: 'Protegidos o más',
+  filtersVisPublic: 'Solo públicos',
+  filtersAccessors: 'Ocultar getters y setters',
+  filtersConstructors: 'Ocultar constructores',
+  filtersRelayoutHint: 'Los filtros de miembros cambian el tamaño de las tarjetas y reorganizan el diagrama.',
+  filtersClasses: 'Clases',
+  filtersExternal: 'Ocultar externos',
+  filtersUndeclared: 'Ocultar sin declarar',
+  filtersHiddenTypes: '{n} clases ocultadas a mano',
+  filtersShowTypes: 'Mostrarlas',
+  filtersPackages: 'Paquetes',
+  filtersAllPackages: 'Todos',
+  filtersNoPackages: 'Ninguno',
+  filtersClear: 'Quitar filtros',
+  filtersClose: 'Cerrar',
 };
 
 /** Sustituye los marcadores {clave} de una etiqueta. */

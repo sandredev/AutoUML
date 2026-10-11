@@ -3,7 +3,9 @@ import type { JSX, RefObject } from 'react';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { SidecarState } from '../../application/ports/ipc';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
+import { FiltersPanel } from './FiltersPanel';
 import { focusTargetOf, viewerShortcut } from './focusMode';
+import { drawHiddenOf, type DiagramFilters } from './graph/filters';
 import { focusKey, type FocusDirection, type FocusSpec } from './graph/neighborhood';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from './labels';
 import { isPackageNode, packageNodeName } from './layout/aggregate';
@@ -33,8 +35,8 @@ export interface PumlViewerProps {
   labels?: ViewerLabels;
   /** Estado persistido del sidecar (colapsados, overrides, vista). */
   initialSidecar?: SidecarState | null;
-  /** Avisa cuando cambian colapsados, posiciones manuales o vista (para persistir). */
-  onViewStateChange?: (collapsed: ReadonlySet<string>) => void;
+  /** Avisa cuando cambian colapsados, filtros (T8), posiciones manuales o vista (para persistir). */
+  onViewStateChange?: (collapsed: ReadonlySet<string>, filters: DiagramFilters) => void;
   /** Línea de una relación cuya arista se resalta (T7: cursor del editor). */
   highlightLine?: number | null;
   /** Clic en una arista: línea de su relación (T7). */
@@ -44,6 +46,7 @@ export interface PumlViewerProps {
 }
 
 const NO_COLLAPSED: ReadonlySet<string> = new Set();
+const NO_FILTERS: DiagramFilters = {};
 const FOCUS_DEPTHS = [1, 2, 3] as const;
 const FOCUS_DIRECTIONS: FocusDirection[] = ['both', 'out', 'in'];
 
@@ -69,6 +72,8 @@ export function PumlViewer({
   // entrar/salir salvo si lo pidió el teclado.
   const [focus, setFocus] = useState<FocusSpec | null>(null);
   const [focusAnimate, setFocusAnimate] = useState(false);
+  // Filtros semánticos (T8), por documento: llegan con el sidecar y se persisten con él.
+  const [filters, setFilters] = useState<DiagramFilters>(NO_FILTERS);
 
   // Al cambiar de documento se parte de cero; al llegar el sidecar se aplican sus
   // colapsados (filtrados a los existentes). Se deriva durante el render.
@@ -80,11 +85,13 @@ export function PumlViewer({
     lastAppliedSidecar.current = undefined;
     setCollapsed(NO_COLLAPSED);
     setFocus(null);
+    setFilters(NO_FILTERS);
   }
   if (sidecarKey !== null && initialSidecar !== undefined && lastAppliedSidecar.current !== initialSidecar) {
     lastAppliedSidecar.current = initialSidecar;
     const known = model ? new Set(model.packages.map((p) => p.name)) : null;
     setCollapsed(new Set((initialSidecar?.collapsed ?? []).filter((name) => !known || known.has(name))));
+    setFilters(initialSidecar?.filters ?? NO_FILTERS);
   }
 
   // Paquetes plegados que siguen existiendo en el modelo (derivado: sin efecto ni render extra).
@@ -99,7 +106,14 @@ export function PumlViewer({
   const options = useMemo<LayoutOptions>(() => ({ ...view.options, moreTemplate }), [view.options, moreTemplate]);
   const {
     layout, layoutModel, viewModel, packageCounts, display, loading, refining, error, engine, fallback, ms, focusableModel, focusApplied,
-  } = useDiagramLayout(model, liveCollapsed, options, view.layoutVersion, focus);
+  } = useDiagramLayout(model, liveCollapsed, options, view.layoutVersion, focus, filters);
+  // Filtros de dibujo sobre el modelo que se dibuja (no recalculan el layout).
+  const drawHidden = useMemo(() => (viewModel ? drawHiddenOf(viewModel, filters) : null), [viewModel, filters]);
+  // Paquetes del documento para las casillas del panel.
+  const packageNames = useMemo(
+    () => (model ? [...new Set(model.packages.map((p) => p.name))].sort((a, b) => a.localeCompare(b)) : []),
+    [model],
+  );
 
   // El objetivo del foco desapareció (recarga, plegado de su paquete…): se vuelve al diagrama completo.
   if (focus !== null && focusableModel !== null && !focusApplied) setFocus(null);
@@ -182,18 +196,21 @@ export function PumlViewer({
   // El host lee el snapshot del canvas al guardar; aquí solo se le despierta (él hace debounce).
   const notifyRef = useRef(onViewStateChange);
   notifyRef.current = onViewStateChange;
-  const liveCollapsedRef = useRef(liveCollapsed);
-  liveCollapsedRef.current = liveCollapsed;
+  const persistRef = useRef({ collapsed: liveCollapsed, filters });
+  persistRef.current = { collapsed: liveCollapsed, filters };
+  const notify = useCallback(() => {
+    notifyRef.current?.(persistRef.current.collapsed, persistRef.current.filters);
+  }, []);
   useEffect(() => {
-    notifyRef.current?.(liveCollapsed);
-  }, [liveCollapsed]);
+    notify();
+  }, [liveCollapsed, filters, notify]);
   const handleManualPositions = useCallback((has: boolean) => {
     setManual(has);
-    notifyRef.current?.(liveCollapsedRef.current);
-  }, []);
+    notify();
+  }, [notify]);
   const handleViewChange = useCallback((_v: ViewState) => {
-    notifyRef.current?.(liveCollapsedRef.current);
-  }, []);
+    notify();
+  }, [notify]);
 
   if (error) {
     return (
@@ -241,6 +258,7 @@ export function PumlViewer({
           {engineInfo ? <span className="puml-viewer-bar-engine"> · {engineInfo}</span> : null}
           {fallback ? <span className="puml-viewer-bar-warn" title={fallback}> {labels.fallbackBadge}</span> : null}
         </span>
+        <FiltersPanel filters={filters} packages={packageNames} labels={labels} onChange={setFilters} />
         {activeFocus !== null ? (
           <div className="puml-viewer-focus" role="group" aria-label={labels.focusGroupAria}>
             <span className="puml-viewer-focus-name">{fill(labels.focusOn, { name: focusName(activeFocus.id) })}</span>
@@ -305,6 +323,7 @@ export function PumlViewer({
         {...(onRename ? { onRename } : {})}
         focusKey={activeFocus !== null ? focusKey(activeFocus) : null}
         focusAnimate={focusAnimate}
+        hidden={drawHidden}
       />
     </section>
   );

@@ -1,6 +1,7 @@
 // Tipos compartidos entre main, preload y renderer.
 import type { HistoryApi, OpenPumlFile } from './history';
 import type { ThemeMode } from '../../domain/rules/themes';
+import type { RelType, Visibility } from '../../domain/diagram/model';
 // El preload solo importa TIPOS de aquí, porque en modo sandbox no puede cargar otros módulos.
 
 export interface ProjectMeta {
@@ -47,6 +48,32 @@ export interface SidecarState {
   collapsed: string[];
   overrides: Record<string, { dx: number; dy: number }>;
   view: { scale: number; tx: number; ty: number } | null;
+  /** Filtros semánticos del visor (T8). Opcional: un sidecar antiguo no lo tiene y sigue siendo v1. */
+  filters?: SidecarFilters;
+}
+
+/**
+ * Filtros del visor por documento (T8). Todo opcional: lo ausente es "sin filtrar", así que un campo
+ * nuevo (T11: vistas guardadas…) no rompe sidecars anteriores. Se guarda lo OCULTO, no lo visible: un
+ * tipo o paquete que aparezca después se ve por defecto.
+ */
+export interface SidecarFilters {
+  /** Tipos de relación que no se dibujan. */
+  hiddenRelTypes?: RelType[];
+  /** Visibilidad mínima de los miembros que se muestran ('+' solo públicos … '-' todos). Cambia el tamaño. */
+  minVisibility?: Visibility;
+  /** Oculta getters/setters (get/set/is + mayúscula). Cambia el tamaño. */
+  hideAccessors?: boolean;
+  /** Oculta los constructores. Cambia el tamaño. */
+  hideConstructors?: boolean;
+  /** No dibuja los tipos externos. */
+  hideExternal?: boolean;
+  /** No dibuja los tipos sin declarar. */
+  hideUndeclared?: boolean;
+  /** Paquetes desmarcados: sus tipos no se dibujan. */
+  hiddenPackages?: string[];
+  /** Tipos ocultados uno a uno (menú contextual "Ocultar esta clase"). */
+  hiddenTypes?: string[];
 }
 
 export interface SidecarLoadResult {
