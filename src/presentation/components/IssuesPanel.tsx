@@ -7,6 +7,8 @@ interface Props {
   source: string | null;
   open: boolean;
   onToggle: () => void;
+  /** Clic en un issue (T7: el editor salta a su línea). Sin él la lista no es interactiva. */
+  onSelect?: (issue: ParseIssue) => void;
 }
 
 /** Texto de la línea indicada (1-based), o cadena vacía si no existe. */
@@ -16,7 +18,7 @@ function lineAt(source: string | null, line: number): string {
   return lines[line - 1] ?? '';
 }
 
-export function IssuesPanel({ issues, source, open, onToggle }: Props): JSX.Element | null {
+export function IssuesPanel({ issues, source, open, onToggle, onSelect }: Props): JSX.Element | null {
   const { t } = useLocalization();
   if (issues.length === 0) return null;
 
@@ -38,8 +40,8 @@ export function IssuesPanel({ issues, source, open, onToggle }: Props): JSX.Elem
             // L{line} + archivo son el origen real (tras !include).
             const text = lineAt(source, issue.combinedLine ?? issue.line);
             const base = issue.file?.split(/[/\\]/).pop();
-            return (
-              <li key={`${issue.line}-${idx}`} className={`issue ${issue.severity}`}>
+            const content = (
+              <>
                 <span className="issue-line">L{issue.line}</span>
                 {base && <span className="issue-file">{base}</span>}
                 <span className={`issue-sev ${issue.severity}`}>{issue.severity === 'error' ? t('issues.error') : t('issues.warning')}</span>
@@ -48,6 +50,17 @@ export function IssuesPanel({ issues, source, open, onToggle }: Props): JSX.Elem
                   <code className="issue-src" title={text}>
                     {text.trim()}
                   </code>
+                )}
+              </>
+            );
+            return (
+              <li key={`${issue.line}-${idx}`} className={`issue ${issue.severity}`}>
+                {onSelect ? (
+                  <button type="button" className="issue-btn" title={t('issues.goTo', { line: issue.line })} onClick={() => onSelect(issue)}>
+                    {content}
+                  </button>
+                ) : (
+                  content
                 )}
               </li>
             );

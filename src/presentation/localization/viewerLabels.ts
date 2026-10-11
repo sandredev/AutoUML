@@ -15,6 +15,7 @@ export function viewerLabels(t: TranslateFn): ViewerLabels {
     canvasAria: t('viewer.canvasAria'),
     minimapAria: t('viewer.minimapAria'),
     paintError: t('viewer.paintError'),
+    renameAria: t('rename.aria'),
     contextUnavailable: t('viewer.contextUnavailable'),
     collapsedSubtitle: t('viewer.collapsedSubtitle'),
     moreMembers: t('viewer.moreMembers'),

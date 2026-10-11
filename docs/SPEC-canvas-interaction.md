@@ -88,3 +88,38 @@ Vitest: cada comando (hacer/deshacer/rehacer), serialización con overlay, confl
 - Con `prefers-reduced-motion`: sin desplazamiento, escala ni vuelo de cámara; se conservan los fundidos (160 ms) y el halo.
 - Halo de 2 s sobre las tarjetas nuevas o con contenido modificado al recargar el mismo documento (`changedTypes`, que ignora la
   línea del `.puml`).
+
+## Editor en vivo (T7)
+
+### Panel
+- CodeMirror 6 (`@codemirror/*`, `@lezer/highlight`) en `presentation/editor/`, cargado en un chunk aparte (`React.lazy`): el
+  bundle principal no crece (~390 kB; el editor son ~340 kB que solo se piden con un documento abierto).
+- Resaltado con un `StreamLanguage` propio (`pumlLanguage.ts`) que reutiliza las regex del parser (`PUML_SYNTAX`). Números de
+  línea, los `ParseIssue` como diagnósticos (subrayado + tooltip) y colores por variables CSS del tema.
+- Ver → Editor de código / Ctrl+E (Exportar PNG queda sin atajo). Ancho ajustable arrastrando el borde; doble clic lo restablece.
+  Oculto sigue montado: conserva texto, cursor e historial de deshacer.
+- Conserva el fin de línea del archivo (CRLF o LF) aunque se pegue texto con el otro.
+
+### Código → diagrama
+- Debounce de 250 ms; con `!include` main combina el texto del editor con los incluidos del disco (`puml:combine-source`).
+- Con errores graves (`severity: 'error'`) se mantiene el último diagrama válido (`nextLiveState`) y el panel de issues muestra
+  los errores nuevos. El diagrama se actualiza con el layout estable y la animación de T6; el halo ignora `line`/`endLine`.
+
+### Diagrama → código
+- `TypeNode.endLine`: rango `[line, endLine]` de cada tipo (`}` de cierre, o la propia línea).
+- `createSourceIndex` (línea → tipo/relación y tipo → rango) y `lineMapping` (líneas del archivo ↔ texto combinado).
+- Clic en una tarjeta (o en la sidebar) → el editor salta a la declaración y la resalta 1,6 s. Clic en una arista → su línea.
+- Cursor del editor en un tipo → se selecciona la tarjeta; en una relación → se resalta su arista (`highlightLine`).
+- Clic en un issue → abre el editor en su línea (los de un archivo incluido no saltan).
+
+### Guardar y cierre
+- Ctrl+S (menú Archivo → Guardar o el botón del panel) escribe el `.puml` abierto sin diálogos (`puml:save-source`: proyecto →
+  `diagram.puml`; archivo externo → escritura atómica). Exige `@startuml`/`@enduml`.
+- "Sin guardar" en el panel y en el modal de cierre: Guardar escribe el `.puml` y cierra; si falla, la app sigue abierta.
+- Si el archivo cambia en disco con cambios sin guardar, no se pisan (aviso); sin cambios, el editor toma el texto del disco.
+
+### Renombrar desde el lienzo
+- Doble clic en una tarjeta → campo en línea. Reescribe el identificador y sus referencias (relaciones, tipos de miembros, notas,
+  `hide`, `A::campo`, `paquete.A`) usando el tokenizador; no toca comentarios, notas, etiquetas, nombres de campo ni `OrderItem`.
+  Es una sola transacción del editor: Ctrl+Z la deshace.
+- No se ofrece con alias/genéricos (`name !== id`) ni si el documento usa `!include`.

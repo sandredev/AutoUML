@@ -56,7 +56,9 @@ export function AppMenuBar({ state, onAction }: Props): JSX.Element {
         SEPARATOR,
         { kind: 'item', label: t('menu.loadPuml'), shortcut: 'Ctrl+O', enabled: state.projectOpen, run: action('load-puml') },
         { kind: 'item', label: t('menu.reload'), shortcut: 'Ctrl+R', enabled: state.hasPuml, run: action('reload-puml') },
-        { kind: 'item', label: t('menu.exportPng'), shortcut: 'Ctrl+E', enabled: state.hasPuml, run: action('export') },
+        { kind: 'item', label: t('menu.save'), shortcut: 'Ctrl+S', enabled: state.hasPuml && state.dirty, run: action('save') },
+        SEPARATOR,
+        { kind: 'item', label: t('menu.exportPng'), enabled: state.hasPuml, run: action('export') },
         { kind: 'item', label: t('menu.exportSvg'), shortcut: 'Ctrl+Shift+E', enabled: state.hasPuml, run: action('export-svg') },
         { kind: 'item', label: t('menu.exportPdf'), shortcut: 'Ctrl+Shift+P', enabled: state.hasPuml, run: action('export-pdf') },
         { kind: 'item', label: t('menu.copyPng'), shortcut: 'Ctrl+Shift+C', enabled: state.hasPuml, run: action('copy-png') },
@@ -88,6 +90,14 @@ export function AppMenuBar({ state, onAction }: Props): JSX.Element {
           checked: state.sidebarVisible,
           enabled: anyContent,
           run: action('toggle-sidebar'),
+        },
+        {
+          kind: 'item',
+          label: t('menu.showEditor'),
+          shortcut: 'Ctrl+E',
+          checked: state.editorVisible,
+          enabled: state.hasPuml,
+          run: action('toggle-editor'),
         },
         ...(import.meta.env.DEV
           ? [SEPARATOR, { kind: 'item', label: t('menu.devTools'), run: command('dev-tools') } satisfies Entry]

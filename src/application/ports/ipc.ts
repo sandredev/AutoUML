@@ -98,6 +98,11 @@ export type SavePumlOutcome =
   | { status: 'saved'; project: ProjectInfo }
   | { status: 'cancelled' };
 
+/** Guardado del editor (T7): con proyecto devuelve su info al día (pumlLoadedAt cambia); con archivo externo, null. */
+export interface SaveSourceOutcome {
+  project: ProjectInfo | null;
+}
+
 export type MenuAction =
   | 'new-project'
   | 'open-project'
@@ -112,7 +117,9 @@ export type MenuAction =
   | 'export-svg'
   | 'export-pdf'
   | 'copy-png'
+  | 'save'
   | 'toggle-sidebar'
+  | 'toggle-editor'
   | `theme-${ThemeMode}`
   | 'locale-es'
   | 'locale-en'
@@ -126,6 +133,10 @@ export interface MenuState {
   projectOpen: boolean;
   hasPuml: boolean;
   sidebarVisible: boolean;
+  /** Panel del editor de código visible (T7). */
+  editorVisible: boolean;
+  /** Hay cambios del editor sin guardar (T7). */
+  dirty: boolean;
   locale: 'es' | 'en';
   themeMode: ThemeMode;
 }
@@ -155,6 +166,8 @@ export type IpcChannel =
   | 'puml:save-to-project'
   | 'puml:reload'
   | 'puml:load-source'
+  | 'puml:combine-source'
+  | 'puml:save-source'
   | 'puml:watch'
   | 'puml:unwatch'
   | 'puml:files-changed'
@@ -193,6 +206,10 @@ export interface AutoUmlApi {
   savePng(fileName: string, bytes: Uint8Array): Promise<Result<string | null>>;
   // Lee el .puml con sus !include ya resueltos (proyecto o archivo externo). (T5)
   loadSource(scope: PumlScope): Promise<Result<PumlSourceResult>>;
+  // Como loadSource, pero con el texto del editor como entrada (sin guardar): parseo en vivo con !include. (T7)
+  combineSource(scope: PumlScope, entryText: string): Promise<Result<PumlSourceResult>>;
+  // Guarda el texto del editor en el .puml de entrada (proyecto o archivo externo), sin diálogos. (T7)
+  saveSource(scope: PumlScope, text: string): Promise<Result<SaveSourceOutcome>>;
   // Vigila los archivos del documento; avisa con onPumlFilesChanged. (T5)
   watchPumlFiles(files: string[]): Promise<Result<{ watched: string[] }>>;
   unwatchPumlFiles(): void;

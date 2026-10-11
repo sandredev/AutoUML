@@ -5,12 +5,14 @@ import './closeConfirmModal.css';
 interface CloseConfirmModalProps {
   saving: boolean;
   error: string | null;
+  /** Hay cambios del editor sin guardar (T7): Guardar los escribe en el .puml abierto. */
+  dirty?: boolean;
   onSave: () => void;
   onDiscard: () => void;
   onCancel: () => void;
 }
 
-export function CloseConfirmModal({ saving, error, onSave, onDiscard, onCancel }: CloseConfirmModalProps): JSX.Element {
+export function CloseConfirmModal({ saving, error, dirty = false, onSave, onDiscard, onCancel }: CloseConfirmModalProps): JSX.Element {
   const { t } = useLocalization();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
@@ -67,7 +69,7 @@ export function CloseConfirmModal({ saving, error, onSave, onDiscard, onCancel }
         onKeyDown={handleKeyDown}
       >
         <h2 id="close-confirm-title" className="close-confirm__title">{t('close.title')}</h2>
-        <p id="close-confirm-message" className="close-confirm__message">{t('close.message')}</p>
+        <p id="close-confirm-message" className="close-confirm__message">{dirty ? t('close.messageDirty') : t('close.message')}</p>
         {error && (
           <p className="close-confirm__error" role="alert">{error}</p>
         )}

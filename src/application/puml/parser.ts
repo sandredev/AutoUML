@@ -69,6 +69,21 @@ const RE_NOTE_POS =
   /^note\s+(left|right|top|bottom|over)\b(?:\s+of)?\s*([^:#]*?)\s*(?:#\S+\s*)?(?::\s*(.*\S))?\s*$/iu;
 const RE_PKG_ALIAS = /^(?:pkg|layer)_/u;
 
+/**
+ * Regex del parser que reutiliza el resaltado del editor (T7): la sintaxis se reconoce en un solo sitio.
+ * Todas sin flag g (no guardan estado entre llamadas).
+ */
+export const PUML_SYNTAX = {
+  /** Palabra clave de declaración de tipo al principio de la línea. */
+  typeStart: RE_TYPE_START,
+  /** Directivas (skinparam, hide, title, left to right…), preprocesador y @startuml/@enduml. */
+  directive: RE_DIRECTIVE,
+  /** Una flecha completa ("-->", "<|..", "-[#red]up->"…). */
+  arrow: RE_ARROW,
+  noteStart: RE_NOTE_START,
+  noteEnd: RE_NOTE_END,
+} as const;
+
 // ---------- Estructuras internas ----------
 interface PkgAcc {
   name: string;
@@ -402,6 +417,7 @@ function newNode(
     constructors: [],
     enumConstants: [],
     line,
+    endLine: line,
   };
 }
 
@@ -464,6 +480,7 @@ export function parsePuml(source: string): DiagramModel {
     // --- Dentro de un tipo ---
     if (top && top.kind === 'type') {
       if (line === '}') {
+        top.node.endLine = lineNo;
         stack.pop();
         continue;
       }
@@ -476,7 +493,10 @@ export function parsePuml(source: string): DiagramModel {
       if (content && !parseMember(content, top.node)) {
         warn(lineNo, `Miembro no reconocido en "${top.node.name}": ${line}`);
       }
-      if (closes) stack.pop();
+      if (closes) {
+        top.node.endLine = lineNo;
+        stack.pop();
+      }
       continue;
     }
 
@@ -645,6 +665,8 @@ export function parsePuml(source: string): DiagramModel {
   for (const w of skin.warnings) warn(w.line, w.message);
   for (const f of stack) {
     warn(f.line, `Llave sin cerrar (abierta en la línea ${f.line})`, 'error');
+    // Sin "}" el cuerpo llega hasta el final del texto.
+    if (f.kind === 'type') f.node.endLine = lines.length;
   }
 
   // --- Resolución de extremos (crea nodos implícitos) ---

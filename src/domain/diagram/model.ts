@@ -103,6 +103,12 @@ export interface TypeNode {
   enumConstants: string[];
   /** Línea (1-based) de la declaración en el .puml. */
   line: number;
+  /**
+   * Última línea (1-based) del tipo: la de su "}" de cierre, o `line` si no tiene cuerpo (T7).
+   * Junto con `line` da el rango [line, endLine] que el editor usa para saber en qué tipo está el cursor.
+   * Opcional para los modelos armados a mano; parsePuml siempre la rellena.
+   */
+  endLine?: number;
 }
 
 export interface RelationshipModel {

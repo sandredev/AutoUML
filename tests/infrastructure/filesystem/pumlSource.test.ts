@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { loadSourceWithIncludes } from '../../../src/infrastructure/filesystem/pumlSource';
+import { loadSourceWithIncludes, saveEntryText } from '../../../src/infrastructure/filesystem/pumlSource';
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'autouml-pumlsource-'));
 
@@ -68,5 +68,43 @@ describe('loadSourceWithIncludes', () => {
     } else {
       expect(r.entryPath).toBe(upper);
     }
+  });
+});
+
+describe('loadSourceWithIncludes con el texto del editor (T7)', () => {
+  it('usa el texto en memoria para la entrada y lee los incluidos del disco', () => {
+    const dir = writeTree({
+      'main.puml': '@startuml\nclass Viejo\n@enduml',
+      'inc.iuml': 'class Incluido',
+    });
+    const live = '@startuml\n!include inc.iuml\nclass Nuevo\n@enduml';
+    const r = loadSourceWithIncludes(path.join(dir, 'main.puml'), live);
+    expect(r.entryText).toBe(live);
+    expect(r.text).toContain('class Nuevo');
+    expect(r.text).toContain('class Incluido');
+    expect(r.text).not.toContain('class Viejo');
+    expect(r.files).toHaveLength(2);
+  });
+
+  it('el disco no cambia: es solo para parsear', () => {
+    const dir = writeTree({ 'main.puml': '@startuml\nclass A\n@enduml' });
+    loadSourceWithIncludes(path.join(dir, 'main.puml'), '@startuml\nclass B\n@enduml');
+    expect(fs.readFileSync(path.join(dir, 'main.puml'), 'utf8')).toBe('@startuml\nclass A\n@enduml');
+  });
+});
+
+describe('saveEntryText (T7: Ctrl+S de un archivo externo)', () => {
+  it('escribe el texto tal cual, sin BOM y sin dejar el temporal', () => {
+    const dir = writeTree({ 'main.puml': '@startuml\nclass A\n@enduml' });
+    const file = path.join(dir, 'main.puml');
+    saveEntryText(file, '﻿@startuml\r\nclass B\r\n@enduml');
+    expect(fs.readFileSync(file, 'utf8')).toBe('@startuml\r\nclass B\r\n@enduml');
+    expect(fs.readdirSync(dir)).toEqual(['main.puml']);
+  });
+
+  it('no crea archivos nuevos: la entrada debe existir', () => {
+    const dir = writeTree({});
+    expect(() => saveEntryText(path.join(dir, 'nuevo.puml'), '@startuml\n@enduml')).toThrow();
+    expect(fs.existsSync(path.join(dir, 'nuevo.puml'))).toBe(false);
   });
 });
