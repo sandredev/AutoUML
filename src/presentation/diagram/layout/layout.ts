@@ -6,6 +6,7 @@ import type { EdgePath, LayoutOptions, LayoutResult, NodeBox, PackageBox } from 
 import { collapsedNodeSize, isPackageNode } from './aggregate';
 import { cardContentOf, makeMeasurer, measureCardBox } from './cardModel';
 import { selfLoopPoints } from './selfLoop';
+import { anchorToHints, hintsUsable } from './stability';
 
 // Interop CJS/ESM: en Node el namespace puede traer solo `default`.
 const dagre = (dagreNs as unknown as { default?: typeof dagreNs }).default ?? dagreNs;
@@ -180,5 +181,7 @@ export function computeLayout(model: DiagramModel, opts?: LayoutOptions): Layout
   for (const b of packages) add(b.x, b.y, b.w, b.h);
   for (const e of edges) for (let i = 0; i + 1 < e.points.length; i += 2) add(e.points[i] ?? 0, e.points[i + 1] ?? 0);
 
-  return { nodes, edges, packages, bounds: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+  const result: LayoutResult = { nodes, edges, packages, bounds: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+  // dagre no respeta posiciones previas, pero al menos no se mueve el conjunto (T6).
+  return hintsUsable([...sizes.keys()], opts?.hints) ? anchorToHints(result, opts?.hints, model.direction === 'LR' ? 'LR' : 'TB') : result;
 }

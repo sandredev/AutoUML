@@ -8,7 +8,7 @@ import type { CardDisplay } from '../style/contract';
 import type { LayoutOptions, LayoutResult } from '../types';
 import { aggregateCollapsed, collapsedKey } from './aggregate';
 import { placeNotes } from './notes';
-import { useLayout, type LayoutState } from './useLayout';
+import { useLayout, type LayoutState, type ShownLayout } from './useLayout';
 
 export interface DiagramLayoutState extends Omit<LayoutState, 'layoutModel'> {
   /**
@@ -71,7 +71,10 @@ export function useDiagramLayout(
   }
   const cached = cache.current.get(key);
 
-  const st = useLayout(cached ? null : (agg?.model ?? null), lopts, layoutVersion);
+  // Layout que se está mostrando (T6): su posición es la pista del siguiente cálculo. Se actualiza en un
+  // efecto, DESPUÉS de que useLayout pida el layout nuevo, así que al pedirlo aún guarda el anterior.
+  const shown = useRef<ShownLayout | null>(null);
+  const st = useLayout(cached ? null : (agg?.model ?? null), lopts, layoutVersion, shown);
 
   // Guarda en caché el layout final (ELK o respaldo) del conjunto plegado actual.
   useEffect(() => {
@@ -87,6 +90,10 @@ export function useDiagramLayout(
   else base = lastShown.current && model ? { ...lastShown.current, loading: st.loading, error: st.error } : st;
   if (base.layout) lastShown.current = base;
   if (!model) lastShown.current = null;
+
+  useEffect(() => {
+    shown.current = base.layout && base.reqKey !== undefined ? { layout: base.layout, reqKey: base.reqKey } : null;
+  }, [base.layout, base.reqKey]);
 
   const shownModel = base.layoutModel;
   const layout = useMemo<LayoutResult | null>(
