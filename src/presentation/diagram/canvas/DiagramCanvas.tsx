@@ -3,7 +3,9 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import type { JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import type { Category, DiagramModel, TypeNode } from '../../../domain/diagram/model';
 import type { Skinparams } from '../../../domain/diagram/skinparam';
+import { adjacencyOf } from '../graph/adjacency';
 import { focusOf } from '../graph/focus';
+import { pathFocus, shortestPath } from '../graph/shortestPath';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
 import { collapsedOwner, isPackageNode, packageNodeName } from '../layout/aggregate';
 import { applySkin, skinKey } from '../style/skin';
@@ -41,6 +43,8 @@ export interface DiagramCanvasHandle {
   getSnapshot(): { view: ViewState; overrides: Record<string, { dx: number; dy: number }> };
   /** Devuelve las tarjetas movidas a mano a la posición que calculó el layout. */
   resetPositions(): void;
+  /** Quita la ruta resaltada (T8). true si había una (Esc la quita antes de salir del modo foco). */
+  clearRoute(): boolean;
   /** true si hay alguna tarjeta movida a mano. */
   hasManualPositions(): boolean;
 }
@@ -112,6 +116,8 @@ type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | nu
 interface RenameDraft { id: string; value: string; error: string | null; x: number; y: number; w: number }
 /** Arista seleccionada; el índice solo vale para el layout en que se eligió. */
 interface EdgeSelection { layout: LayoutResult; index: number }
+/** Ruta entre dos clases (T8); vale para el modelo en que se pidió. */
+interface RouteRequest { model: DiagramModel; from: string; to: string; directed: boolean }
 /** Vista pendiente hasta que llegue un layout distinto de `from`: encuadrar o ir a `target`. */
 interface PendingView { from: LayoutResult; target?: ViewState; animate?: boolean }
 
@@ -245,6 +251,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [hover, setHover] = useState<Hover>(null);
   const [edgeSel, setEdgeSel] = useState<EdgeSelection | null>(null);
   const [rename, setRename] = useState<RenameDraft | null>(null);
+  const [routeReq, setRouteReq] = useState<RouteRequest | null>(null);
   const inFocus = focusKey !== null;
 
   const controlled = collapsedProp !== undefined;
@@ -267,6 +274,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   if (focusKey !== focusKeyRef.current) {
     const entering = focusKeyRef.current === null;
     focusKeyRef.current = focusKey;
+    setRouteReq(null); // la ruta era del modelo anterior: al volver de la caché reaparecería
     if (focusKey !== null && entering) focusViewRef.current = { view: { ...viewRef.current }, autoFit: autoFitRef.current };
     const saved = focusKey === null ? focusViewRef.current : null;
     if (focusKey === null) focusViewRef.current = null;
@@ -307,9 +315,18 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     return i >= 0 ? i : null;
   }, [visibleLayout, model, highlightLine]);
   const selectedEdge = clickedEdge ?? lineEdge;
+  // Ruta (T8): BFS sobre la adyacencia memoizada del modelo dibujado; manda sobre el foco de selección.
+  const route = routeReq !== null && routeReq.model === model ? routeReq : null;
+  const routePath = useMemo(
+    () => (route ? shortestPath(adjacencyOf(route.model), route.from, route.to, route.directed) : null),
+    [route],
+  );
+  const routeDirected = route?.directed ?? false;
   const focus = useMemo(
-    () => focusOf(visibleLayout, selectedEdge === null ? selectedId : null, selectedEdge),
-    [visibleLayout, selectedId, selectedEdge],
+    () => (routePath
+      ? pathFocus(visibleLayout, routePath, routeDirected)
+      : focusOf(visibleLayout, selectedEdge === null ? selectedId : null, selectedEdge)),
+    [visibleLayout, selectedId, selectedEdge, routePath, routeDirected],
   );
   // Un hover de arista de otro layout ya no apunta a la misma arista.
   const liveHover: Hover = hover?.kind === 'edge' && !visibleLayout.edges[hover.index] ? null : hover;
@@ -328,7 +345,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const snapshot = {
     model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, onSelect, onViewChange,
     collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename,
-    inFocus,
+    inFocus, route,
   };
   const latest = useRef(snapshot);
   latest.current = snapshot;
@@ -563,6 +580,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       // En modo foco se persiste la vista del diagrama completo, no la del foco.
       getSnapshot: () => ({ view: { ...(focusViewRef.current?.view ?? viewRef.current) }, overrides: overridesToRecord(latest.current.overrides) }),
       resetPositions: () => setOverrides(EMPTY_OVERRIDES),
+      clearRoute: () => {
+        if (latest.current.route === null) return false;
+        setRouteReq(null);
+        return true;
+      },
       hasManualPositions: () => hasOverrides(latest.current.overrides),
     }),
     [zoomBy, fit, focusNodeInView, updateCollapsed, themeOf],
@@ -845,6 +867,17 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const sy = e.clientY - rect.top;
     const p = screenToWorld(viewRef.current, sx, sy);
     const L = latest.current;
+    // Mayús+clic en otra clase con una seleccionada: ruta más corta (T8). Un Mayús+clic que arrastra no llega aquí.
+    if (e.shiftKey && L.selectedId !== null) {
+      const target = pick(sx, sy);
+      const from = L.selectedId;
+      if (target?.kind === 'node' && target.id !== from && L.model.types.some((t) => t.id === from)) {
+        setRouteReq((prev) => ({ model: L.model, from, to: target.id, directed: prev?.directed ?? false }));
+        return;
+      }
+    }
+    // Cualquier otro clic (fondo, tarjeta, arista, paquete) quita la ruta.
+    if (L.route !== null) setRouteReq(null);
     const packageName = hitTestPackageHeader(L.layout, p.x, p.y);
     if (packageName) {
       togglePackage(packageName);
@@ -953,6 +986,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   // ---------- Tooltip ----------
   const typeById = useMemo(() => new Map(model.types.map((t) => [t.id, t] as const)), [model]);
+  const nameOf = (id: string): string => typeById.get(id)?.name ?? (isPackageNode(id) ? packageNodeName(id) : id);
   let tip: JSX.Element | null = null;
   if (liveHover?.kind === 'node') {
     const id = liveHover.id;
@@ -983,7 +1017,6 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const e = visibleLayout.edges[liveHover.index];
     const r = e?.rel !== undefined ? model.relationships[e.rel] : undefined;
     if (e) {
-      const nameOf = (id: string): string => typeById.get(id)?.name ?? (isPackageNode(id) ? packageNodeName(id) : id);
       const mult = r?.sourceLabel || r?.targetLabel ? `${r.sourceLabel ?? '—'} → ${r.targetLabel ?? '—'}` : null;
       const label = r?.label ?? e.label;
       tip = (
@@ -1049,6 +1082,24 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
             onBlur={() => setRename(null)}
           />
           {rename.error !== null ? <p role="alert">{rename.error}</p> : null}
+        </div>
+      ) : null}
+      {route !== null ? (
+        <div className="diagram-route" role="group" aria-label={labels.routeAria}>
+          <span role="status" className={routePath ? 'diagram-route-info' : 'diagram-route-info is-empty'}>
+            {fill(routePath ? labels.routeInfo : labels.routeNone, {
+              from: nameOf(route.from),
+              to: nameOf(route.to),
+              n: (routePath?.length ?? 1) - 1,
+            })}
+          </span>
+          <label className="diagram-route-directed">
+            <input type="checkbox" checked={route.directed} onChange={(e) => setRouteReq({ ...route, directed: e.target.checked })} />
+            {labels.routeDirected}
+          </label>
+          <button type="button" className="diagram-route-clear" onClick={() => setRouteReq(null)}>
+            {labels.routeClear}
+          </button>
         </div>
       ) : null}
       {paintError !== null ? (

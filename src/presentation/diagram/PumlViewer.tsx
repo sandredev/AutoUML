@@ -141,7 +141,7 @@ export function PumlViewer({
   const ownRef = useRef<DiagramCanvasHandle | null>(null);
   const handleRef = canvasRef ?? ownRef;
 
-  // F enfoca la selección; Esc sale del foco. Atajos de alta frecuencia: la
+  // F enfoca la selección; Esc quita la ruta y, si no hay, sale del foco. Atajos de alta frecuencia: la
   // cámara no vuela (la transición del layout sí). No actúan escribiendo ni con un diálogo modal abierto.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -149,6 +149,10 @@ export function PumlViewer({
       if (shortcut === null || document.querySelector('[aria-modal="true"]')) return;
       if (shortcut === 'focus') {
         if (enterFocus(false)) e.preventDefault();
+        return;
+      }
+      if (handleRef.current?.clearRoute()) {
+        e.preventDefault();
         return;
       }
       if (keyState.current.activeFocus !== null) {

@@ -130,6 +130,13 @@ p { margin: 0 0 8px; }
 .puml-viewer-focus-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-weight: 600; }
 .puml-viewer-focus label { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-muted); }
 .puml-viewer-focus select { padding: 1px 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); font-size: 12px; }
+.diagram-canvas .diagram-route { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev); box-shadow: 0 2px 12px #0002; font-size: 12px; }
+.diagram-route-info { color: var(--accent); font-weight: 600; }
+.diagram-route-info.is-empty { color: var(--fg-muted); font-weight: 400; }
+.diagram-route-directed { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-muted); }
+.diagram-route-clear { padding: 1px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); font-size: 12px; }
+.diagram-route-clear:hover { border-color: var(--accent); color: var(--accent); }
+.diagram-route-clear:focus-visible, .diagram-route-directed input:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
 .puml-viewer.has-canvas { align-items: stretch; justify-content: stretch; overflow: hidden; text-align: left; }
 .diagram-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .diagram-canvas canvas { display: block; cursor: grab; touch-action: none; }
