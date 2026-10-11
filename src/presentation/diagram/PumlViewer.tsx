@@ -32,6 +32,12 @@ export interface PumlViewerProps {
   initialSidecar?: SidecarState | null;
   /** Avisa cuando cambian colapsados, posiciones manuales o vista (para persistir). */
   onViewStateChange?: (collapsed: ReadonlySet<string>) => void;
+  /** Línea de una relación cuya arista se resalta (T7: cursor del editor). */
+  highlightLine?: number | null;
+  /** Clic en una arista: línea de su relación (T7). */
+  onRelationSelect?: (line: number | null) => void;
+  /** Renombrado en línea con doble clic (T7): mensaje de error o null si se aplicó. */
+  onRename?: (id: string, next: string) => string | null;
 }
 
 const NO_COLLAPSED: ReadonlySet<string> = new Set();
@@ -47,6 +53,9 @@ export function PumlViewer({
   labels = DEFAULT_LABELS,
   initialSidecar,
   onViewStateChange,
+  highlightLine = null,
+  onRelationSelect,
+  onRename,
 }: PumlViewerProps): JSX.Element {
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
@@ -196,6 +205,9 @@ export function PumlViewer({
         skin={model.skinparams}
         display={display}
         labels={labels}
+        highlightLine={highlightLine}
+        {...(onRelationSelect ? { onRelationSelect } : {})}
+        {...(onRename ? { onRename } : {})}
       />
     </section>
   );

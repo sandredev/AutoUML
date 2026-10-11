@@ -2,7 +2,7 @@
 import type { JSX, ReactNode } from 'react';
 import type { MenuAction, MenuState } from '../../application/ports/ipc';
 import { AppMenuBar } from './AppMenuBar';
-import { ExportIcon, FitIcon, LoadIcon, RelayoutIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
+import { CodeIcon, ExportIcon, FitIcon, LoadIcon, RelayoutIcon, ReloadIcon, SidebarIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { withShortcut } from '../localization/translations';
 import './settings.css';
@@ -12,6 +12,10 @@ interface Props {
   canLoad: boolean;
   canReload: boolean;
   sidebarVisible: boolean;
+  /** Panel del editor de código (T7). */
+  editorVisible: boolean;
+  canEdit: boolean;
+  onToggleEditor: () => void;
   onLoad: () => void;
   onReload: () => void;
   canView: boolean;
@@ -27,14 +31,14 @@ interface Props {
 
 interface ToolProps {
   label: string;
-  shortcut: string;
+  shortcut?: string;
   icon: ReactNode;
   disabled: boolean;
   onClick?: () => void;
 }
 
 function ToolButton({ label, shortcut, icon, disabled, onClick }: ToolProps): JSX.Element {
-  const text = withShortcut(label, shortcut);
+  const text = shortcut ? withShortcut(label, shortcut) : label;
   return (
     <button type="button" className="tool-btn" title={text} aria-label={text} disabled={disabled} onClick={onClick}>
       {icon}
@@ -47,6 +51,9 @@ export function Header({
   canLoad,
   canReload,
   sidebarVisible,
+  editorVisible,
+  canEdit,
+  onToggleEditor,
   onLoad,
   onReload,
   canView,
@@ -76,6 +83,17 @@ export function Header({
       >
         <SidebarIcon />
       </button>
+      <button
+        type="button"
+        className={editorVisible ? 'tool-btn active' : 'tool-btn'}
+        title={withShortcut(editorVisible ? t('header.editorHide') : t('header.editorShow'), 'Ctrl+E')}
+        aria-label={withShortcut(t('header.editorToggle'), 'Ctrl+E')}
+        aria-pressed={editorVisible}
+        disabled={!canEdit}
+        onClick={onToggleEditor}
+      >
+        <CodeIcon />
+      </button>
 
       <div className="header-title" title={projectName ?? undefined}>
         <img className="app-logo" src="./favicon.png" alt="" aria-hidden="true" />
@@ -92,7 +110,7 @@ export function Header({
         <ToolButton label={t('header.zoomOut')} shortcut="Ctrl+-" icon={<ZoomOutIcon />} disabled={!canView} onClick={onZoomOut} />
         <ToolButton label={t('header.fit')} shortcut="Ctrl+0" icon={<FitIcon />} disabled={!canView} onClick={onFit} />
         <ToolButton label={t('header.relayout')} shortcut="Ctrl+Shift+L" icon={<RelayoutIcon />} disabled={!canView} onClick={onRelayout} />
-        <ToolButton label={t('header.export')} shortcut="Ctrl+E" icon={<ExportIcon />} disabled={!canView} onClick={onExport} />
+        <ToolButton label={t('header.export')} icon={<ExportIcon />} disabled={!canView} onClick={onExport} />
       </div>
     </header>
     </>

@@ -2,11 +2,11 @@
 import { BrowserWindow, clipboard, dialog, ipcMain, nativeImage, type IpcMainInvokeEvent, type MessageBoxOptions } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import { MENU_COMMANDS, type LoadOutcome, type MenuCommand, type MenuState, type ProjectInfo, type PumlScope, type PumlSourceResult, type Result, type SavePumlOutcome, type SidecarState } from '../../application/ports/ipc';
+import { MENU_COMMANDS, type LoadOutcome, type MenuCommand, type MenuState, type ProjectInfo, type PumlScope, type PumlSourceResult, type Result, type SavePumlOutcome, type SaveSourceOutcome, type SidecarState } from '../../application/ports/ipc';
 import { runMenuCommand } from './menu';
 import { isThemeMode } from '../../domain/rules/themes';
 import { hasPumlExtension, PUML_EXTENSIONS, validatePumlMarkers } from '../../domain/rules/validation';
-import { loadSourceWithIncludes } from '../filesystem/pumlSource';
+import { loadSourceWithIncludes, saveEntryText } from '../filesystem/pumlSource';
 import { WatchManager } from '../filesystem/watch';
 import { readSidecarFile, sidecarPathForFile, sidecarPathForProject, validateSidecar, writeSidecarFile } from '../storage/sidecar';
 import {
@@ -73,6 +73,14 @@ function entryOfScope(scope: PumlScope): string {
   return abs;
 }
 
+/** Texto .puml recibido del renderer: string sin BOM y dentro del límite. */
+function asPumlText(value: unknown): string {
+  if (typeof value !== 'string') throw new Error('El contenido PUML es inválido.');
+  const text = value.replace(/^﻿/, '');
+  if (Buffer.byteLength(text, 'utf8') > MAX_PUML_BYTES) throw new Error('El archivo supera el límite de 50 MB.');
+  return text;
+}
+
 /** Vigilancia única del documento abierto: un watch nuevo reemplaza al anterior. */
 const watchManager = new WatchManager();
 function stopWatching(): void {
@@ -85,6 +93,8 @@ function isMenuState(v: unknown): v is MenuState {
   return typeof s.projectOpen === 'boolean'
     && typeof s.hasPuml === 'boolean'
     && typeof s.sidebarVisible === 'boolean'
+    && typeof s.editorVisible === 'boolean'
+    && typeof s.dirty === 'boolean'
     && (s.locale === 'es' || s.locale === 'en')
     && isThemeMode(s.themeMode);
 }
@@ -255,6 +265,43 @@ export function registerIpc(onMenuState: (state: MenuState) => void): void {
         lineMap: loaded.lineMap,
         loadIssues: loaded.issues,
       });
+    } catch (e) {
+      return fail(e);
+    }
+  });
+
+  // T7: lo mismo que load-source pero con el texto del editor como entrada (sin tocar el disco).
+  ipcMain.handle('puml:combine-source', (_e, rawScope: unknown, rawText: unknown): Result<PumlSourceResult> => {
+    try {
+      const text = asPumlText(rawText);
+      const loaded = loadSourceWithIncludes(entryOfScope(asScope(rawScope)), text);
+      return ok({
+        entryPath: loaded.entryPath,
+        entryText: loaded.entryText,
+        combined: loaded.text,
+        files: loaded.files,
+        lineMap: loaded.lineMap,
+        loadIssues: loaded.issues,
+      });
+    } catch (e) {
+      return fail(e);
+    }
+  });
+
+  // T7: Ctrl+S del editor. Sobrescribe la entrada del documento abierto sin diálogos (es el mismo archivo).
+  ipcMain.handle('puml:save-source', (_e, rawScope: unknown, rawText: unknown): Result<SaveSourceOutcome> => {
+    try {
+      const scope = asScope(rawScope);
+      const text = asPumlText(rawText);
+      const errors = validatePumlMarkers(text);
+      if (errors.length > 0) throw new Error(`No se guardó: el .puml no es válido. ${errors.join(' ')}`);
+      if ('project' in scope) {
+        // entryOfScope valida que el proyecto ya tenga .puml (el editor nunca crea uno nuevo).
+        entryOfScope(scope);
+        return ok({ project: savePumlText(scope.project, text) });
+      }
+      saveEntryText(entryOfScope(scope), text);
+      return ok({ project: null });
     } catch (e) {
       return fail(e);
     }

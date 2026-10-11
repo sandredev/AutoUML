@@ -23,6 +23,10 @@ interface Props {
   initialSidecar?: SidecarState | null;
   /** Avisa cuando cambian colapsados, posiciones manuales o vista (para persistir). */
   onViewStateChange?: (collapsed: ReadonlySet<string>) => void;
+  /** Sincronización con el editor (T7). */
+  highlightLine?: number | null;
+  onRelationSelect?: (line: number | null) => void;
+  onRename?: (id: string, next: string) => string | null;
 }
 
 export function RenderArea({
@@ -38,6 +42,9 @@ export function RenderArea({
   docKey,
   initialSidecar,
   onViewStateChange,
+  highlightLine = null,
+  onRelationSelect,
+  onRename,
 }: Props): JSX.Element {
   const { t } = useLocalization();
   const labels = useMemo(() => viewerLabels(t), [t]);
@@ -84,6 +91,9 @@ export function RenderArea({
         {...(docKey !== undefined ? { docKey } : {})}
         {...(initialSidecar !== undefined ? { initialSidecar } : {})}
         {...(onViewStateChange ? { onViewStateChange } : {})}
+        highlightLine={highlightLine}
+        {...(onRelationSelect ? { onRelationSelect } : {})}
+        {...(onRename ? { onRename } : {})}
       />
       {children}
     </main>

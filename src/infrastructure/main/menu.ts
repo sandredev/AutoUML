@@ -19,6 +19,7 @@ interface MenuCopy {
   exportSvg: string;
   exportPdf: string;
   copyPng: string;
+  save: string;
   quit: string;
   replacePuml: string;
   copyProjectName: string;
@@ -28,6 +29,7 @@ interface MenuCopy {
   zoomOut: string;
   fit: string;
   showSidebar: string;
+  showEditor: string;
   devTools: string;
   theme: string;
   themes: Record<ThemeMode, string>;
@@ -54,6 +56,7 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     exportSvg: 'Exportar SVG…',
     exportPdf: 'Exportar PDF…',
     copyPng: 'Copiar PNG',
+    save: 'Guardar',
     quit: 'Salir',
     replacePuml: 'Reemplazar PUML…',
     copyProjectName: 'Copiar nombre del proyecto',
@@ -63,6 +66,7 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     zoomOut: 'Alejar',
     fit: 'Ajustar a pantalla',
     showSidebar: 'Mostrar panel lateral',
+    showEditor: 'Editor de código',
     devTools: 'Herramientas de desarrollo',
     theme: 'Tema',
     themes: { system: 'Sistema', light: 'Claro', dark: 'Oscuro', midnight: 'Medianoche', ember: 'Brasa', sunrise: 'Amanecer', contrast: 'Alto contraste' },
@@ -87,6 +91,7 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     exportSvg: 'Export SVG…',
     exportPdf: 'Export PDF…',
     copyPng: 'Copy PNG',
+    save: 'Save',
     quit: 'Quit',
     replacePuml: 'Replace PUML…',
     copyProjectName: 'Copy project name',
@@ -96,6 +101,7 @@ const menuCopy: Record<MenuState['locale'], MenuCopy> = {
     zoomOut: 'Zoom out',
     fit: 'Fit to screen',
     showSidebar: 'Show side panel',
+    showEditor: 'Code editor',
     devTools: 'Developer tools',
     theme: 'Theme',
     themes: { system: 'System', light: 'Light', dark: 'Dark', midnight: 'Midnight', ember: 'Ember', sunrise: 'Sunrise', contrast: 'High contrast' },
@@ -163,7 +169,10 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
         { type: 'separator' },
         { label: labels.loadPuml, accelerator: 'CmdOrCtrl+O', enabled: state.projectOpen, click: send('load-puml') },
         { label: labels.reload, accelerator: 'CmdOrCtrl+R', enabled: state.hasPuml, click: send('reload-puml') },
-        { label: labels.exportPng, accelerator: 'CmdOrCtrl+E', enabled: state.hasPuml, click: send('export') },
+        { label: labels.save, accelerator: 'CmdOrCtrl+S', enabled: state.hasPuml && state.dirty, click: send('save') },
+        { type: 'separator' },
+        // Ctrl+E es del editor de código (T7); exportar PNG queda sin atajo.
+        { label: labels.exportPng, enabled: state.hasPuml, click: send('export') },
         { label: labels.exportSvg, accelerator: 'CmdOrCtrl+Shift+E', enabled: state.hasPuml, click: send('export-svg') },
         { label: labels.exportPdf, accelerator: 'CmdOrCtrl+Shift+P', enabled: state.hasPuml, click: send('export-pdf') },
         { label: labels.copyPng, accelerator: 'CmdOrCtrl+Shift+C', enabled: state.hasPuml, click: send('copy-png') },
@@ -195,6 +204,14 @@ export function buildMenu(win: BrowserWindow, state: MenuState): void {
           checked: state.sidebarVisible,
           enabled: state.projectOpen || state.hasPuml,
           click: send('toggle-sidebar'),
+        },
+        {
+          label: labels.showEditor,
+          type: 'checkbox',
+          accelerator: 'CmdOrCtrl+E',
+          checked: state.editorVisible,
+          enabled: state.hasPuml,
+          click: send('toggle-editor'),
         },
         ...viewDev,
       ],

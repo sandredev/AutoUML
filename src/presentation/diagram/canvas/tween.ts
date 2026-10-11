@@ -290,7 +290,8 @@ export function canAnimate(a: LayoutResult, b: LayoutResult): boolean {
 // ---------- resaltado de cambios al recargar ----------
 /** Contenido de una tarjeta sin su línea en el .puml (insertar una clase arriba desplaza todas las demás). */
 function contentSignature(t: unknown): string {
-  return JSON.stringify(t, (k, v: unknown) => (k === 'line' ? undefined : v));
+  // La posición en el texto no es contenido: insertar líneas encima (T7: escribir en el editor) no es un cambio.
+  return JSON.stringify(t, (k, v: unknown) => (k === 'line' || k === 'endLine' ? undefined : v));
 }
 
 export interface ChangedTypes { added: ReadonlySet<string>; modified: ReadonlySet<string> }

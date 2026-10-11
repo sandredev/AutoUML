@@ -84,9 +84,23 @@ interface Props {
   initialOverrides?: Record<string, { dx: number; dy: number }>;
   /** Vista inicial del sidecar (si hay, no se encuadra al abrir). */
   initialView?: ViewState | null;
+  /**
+   * Línea (numeración del modelo) de una relación que se resalta como si se hubiera seleccionado su arista
+   * (T7: el cursor del editor está en esa relación). Una arista elegida con el ratón tiene prioridad.
+   */
+  highlightLine?: number | null;
+  /** Clic en una arista: línea de su relación (T7: el editor salta a ella). null al deseleccionar. */
+  onRelationSelect?: (line: number | null) => void;
+  /**
+   * Doble clic en una tarjeta abre un campo para renombrarla (T7). Devuelve un mensaje de error
+   * (el campo sigue abierto) o null si se aplicó. Sin esta prop el doble clic no renombra.
+   */
+  onRename?: (id: string, next: string) => string | null;
 }
 
 type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | null;
+/** Renombrado en curso: tarjeta, texto escrito, error de validación y posición en pantalla al abrirlo. */
+interface RenameDraft { id: string; value: string; error: string | null; x: number; y: number; w: number }
 /** Arista seleccionada; el índice solo vale para el layout en que se eligió. */
 interface EdgeSelection { layout: LayoutResult; index: number }
 
@@ -175,7 +189,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   {
     model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
-    labels = DEFAULT_LABELS, initialOverrides, initialView,
+    labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename,
   },
   ref,
 ) {
@@ -213,6 +227,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [draggingNode, setDraggingNode] = useState(false);
   const [hover, setHover] = useState<Hover>(null);
   const [edgeSel, setEdgeSel] = useState<EdgeSelection | null>(null);
+  const [rename, setRename] = useState<RenameDraft | null>(null);
 
   const controlled = collapsedProp !== undefined;
   const collapsedPackages = collapsedProp ?? internalCollapsed;
@@ -251,7 +266,14 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     [controlled, model, movedLayout, collapsedPackages, labels.collapsedSubtitle],
   );
   const index = useMemo(() => buildIndex(visibleLayout), [visibleLayout]);
-  const selectedEdge = edgeSel !== null && edgeSel.layout === layout ? edgeSel.index : null;
+  const clickedEdge = edgeSel !== null && edgeSel.layout === layout ? edgeSel.index : null;
+  // Arista de la relación en la que está el cursor del editor (T7); el clic del ratón manda.
+  const lineEdge = useMemo(() => {
+    if (highlightLine === null) return null;
+    const i = visibleLayout.edges.findIndex((e) => e.rel !== undefined && model.relationships[e.rel]?.line === highlightLine);
+    return i >= 0 ? i : null;
+  }, [visibleLayout, model, highlightLine]);
+  const selectedEdge = clickedEdge ?? lineEdge;
   const focus = useMemo(
     () => focusOf(visibleLayout, selectedEdge === null ? selectedId : null, selectedEdge),
     [visibleLayout, selectedId, selectedEdge],
@@ -272,7 +294,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // Siempre las últimas props para los callbacks estables.
   const snapshot = {
     model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, onSelect, onViewChange,
-    collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts,
+    collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename,
   };
   const latest = useRef(snapshot);
   latest.current = snapshot;
@@ -798,8 +820,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       // Arista: se resalta con sus dos clases; la selección de clase del host se limpia.
       setEdgeSel({ layout: L.sourceLayout, index: hit.index });
       L.onSelect?.(null);
+      const rel = L.layout.edges[hit.index]?.rel;
+      L.onRelationSelect?.(rel !== undefined ? (L.model.relationships[rel]?.line ?? null) : null);
       return;
     }
+    if (edgeSel !== null) L.onRelationSelect?.(null);
     setEdgeSel(null);
     L.onSelect?.(hit?.kind === 'node' ? hit.id : null);
   };
@@ -812,7 +837,27 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const rect = e.currentTarget.getBoundingClientRect();
     const p = screenToWorld(viewRef.current, e.clientX - rect.left, e.clientY - rect.top);
     const L = latest.current;
-    if (hitTestNode(L.index, L.layout, p.x, p.y) === null && !hitTestPackageHeader(L.layout, p.x, p.y)) fit(true);
+    const nodeId = hitTestNode(L.index, L.layout, p.x, p.y);
+    if (nodeId === null && !hitTestPackageHeader(L.layout, p.x, p.y)) {
+      fit(true);
+      return;
+    }
+    // Doble clic en una tarjeta (no en un paquete plegado): renombrar en línea, encima de su cabecera.
+    const box = nodeId !== null && !isPackageNode(nodeId) ? L.layout.nodes.find((n) => n.id === nodeId) : undefined;
+    if (!box || !L.onRename) return;
+    const v = viewRef.current;
+    const name = L.model.types.find((t) => t.id === box.id)?.name ?? box.id;
+    setHover(null);
+    setRename({ id: box.id, value: name, error: null, x: box.x * v.scale + v.tx, y: box.y * v.scale + v.ty, w: box.w * v.scale });
+  };
+
+  const commitRename = (): void => {
+    const r = rename;
+    const apply = latest.current.onRename;
+    if (!r || !apply) return;
+    const error = apply(r.id, r.value.trim());
+    if (error === null) setRename(null);
+    else setRename({ ...r, error });
   };
 
   // ---------- Minimapa: clic para centrar, arrastrar el recuadro para desplazar ----------
@@ -937,9 +982,36 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onPointerUp={onMiniUp}
         onPointerCancel={onMiniUp}
       />
-      <div ref={tipRef} className="diagram-tooltip" role="tooltip" hidden={tip === null}>
+      <div ref={tipRef} className="diagram-tooltip" role="tooltip" hidden={tip === null || rename !== null}>
         {tip}
       </div>
+      {rename !== null ? (
+        <div
+          className="diagram-rename"
+          style={{ transform: `translate(${Math.round(rename.x)}px, ${Math.round(rename.y)}px)`, width: Math.max(160, Math.round(rename.w)) }}
+        >
+          <input
+            autoFocus
+            spellCheck={false}
+            aria-label={labels.renameAria}
+            aria-invalid={rename.error !== null}
+            value={rename.value}
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) => setRename({ ...rename, value: e.target.value, error: null })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitRename();
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setRename(null);
+              }
+            }}
+            onBlur={() => setRename(null)}
+          />
+          {rename.error !== null ? <p role="alert">{rename.error}</p> : null}
+        </div>
+      ) : null}
       {paintError !== null ? (
         <p
           className="render-meta diagram-paint-error"

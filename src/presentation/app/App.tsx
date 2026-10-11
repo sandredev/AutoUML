@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MenuAction, MenuState, ProjectInfo, PumlScope, SidecarState, StorageInfo } from '../../application/ports/ipc';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarState, StorageInfo } from '../../application/ports/ipc';
 import type { OpenPumlFile } from '../../application/ports/history';
 import { buildTree, countByCategory } from '../../domain/diagram/classify';
+import { scanIncludes } from '../../application/puml/include';
+import { nextLiveState, parseDocument, reconcileDiskText, type LiveState } from '../../application/puml/liveDocument';
 import { parsePuml } from '../../application/puml/parser';
-import type { DiagramModel } from '../../domain/diagram/model';
+import { validateRename } from '../../application/puml/rename';
+import { createSourceIndex, lineMapping, type LineMapping, type SourceIndex } from '../../application/puml/sourceSync';
+import type { DiagramModel, ParseIssue } from '../../domain/diagram/model';
+import type { CodeEditorHandle } from '../editor/CodeEditor';
+import { createDebouncer, LIVE_PARSE_DELAY_MS } from '../editor/debounce';
+import { EDITOR_DEFAULT_WIDTH } from '../editor/editorSize';
 import { Header } from '../components/Header';
 import { HistoryPanel, openDroppedFiles } from '../components/HistoryPanel';
 import { IssuesPanel } from '../components/IssuesPanel';
@@ -23,9 +30,22 @@ import { useLocalization } from '../localization/LocalizationProvider';
 
 const api = window.autouml;
 
+// CodeMirror pesa ~350 kB: el editor va en su propio chunk y solo se carga cuando hay un documento abierto.
+const CodeEditor = lazy(() => import('../editor/CodeEditor').then((m) => ({ default: m.CodeEditor })));
+
 interface ModalState {
   open: boolean;
   dismissable: boolean;
+}
+
+/** Cómo se llega a cargar el documento desde disco (T7: decide qué pasa con el texto del editor). */
+type LoadMode = 'open' | 'reload' | 'watch';
+
+/** Sincronía editor ↔ diagrama del último texto parseado (T7). */
+interface SyncInfo {
+  index: SourceIndex;
+  mapping: LineMapping;
+  hasIncludes: boolean;
 }
 
 function hasFiles(event: DragEvent): boolean {
@@ -70,6 +90,31 @@ export default function App() {
   const [sourceFiles, setSourceFiles] = useState<string[]>([]);
   const [externalPath, setExternalPath] = useState<string | null>(null);
   const [initialSidecar, setInitialSidecar] = useState<SidecarState | null | undefined>(undefined);
+
+  // T7: editor en vivo. El texto vive en CodeMirror; aquí solo refs (cada tecla no re-renderiza la app).
+  const editorRef = useRef<CodeEditorHandle | null>(null);
+  const [editorVisible, setEditorVisible] = useState(false);
+  const [editorWidth, setEditorWidth] = useState(EDITOR_DEFAULT_WIDTH);
+  // Cambia al abrir otro documento: el editor se monta de nuevo (texto e historial limpios).
+  const [docGen, setDocGen] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const [stale, setStale] = useState(false);
+  const [hasIncludes, setHasIncludes] = useState(false);
+  /** Issues del último texto parseado (con errores graves no son los del diagrama mostrado). */
+  const [issues, setIssues] = useState<ParseIssue[]>([]);
+  const [entryPath, setEntryPath] = useState<string | null>(null);
+  /** Línea (numeración del modelo) de la relación en la que está el cursor del editor. */
+  const [highlightLine, setHighlightLine] = useState<number | null>(null);
+  const editorTextRef = useRef('');
+  const savedTextRef = useRef('');
+  const liveRef = useRef<LiveState | null>(null);
+  const syncRef = useRef<SyncInfo | null>(null);
+  const parseSeq = useRef(0);
+  const savingRef = useRef(false);
+  // Parseo en vivo con debounce; la función real (runLiveParse) se asigna más abajo.
+  const runLiveParseRef = useRef<(text: string) => Promise<void>>(async () => undefined);
+  const [liveParse] = useState(() => createDebouncer<string>((text) => void runLiveParseRef.current(text), LIVE_PARSE_DELAY_MS));
+  useEffect(() => () => liveParse.cancel(), [liveParse]);
 
   // Feedback visual de drag and drop.
   const [dropPhase, setDropPhase] = useState<DropPhase>('idle');
@@ -144,8 +189,16 @@ export default function App() {
   // Sincroniza qué opciones del menú nativo están habilitadas.
   // hasPuml también cuenta el diagrama externo soltado (sin proyecto) para zoom/fit/export/sidebar.
   const menuState = useMemo<MenuState>(
-    () => ({ projectOpen: project !== null, hasPuml: project?.puml != null || diagram !== null, sidebarVisible, locale, themeMode }),
-    [project, diagram, sidebarVisible, locale, themeMode],
+    () => ({
+      projectOpen: project !== null,
+      hasPuml: project?.puml != null || diagram !== null,
+      sidebarVisible,
+      editorVisible,
+      dirty,
+      locale,
+      themeMode,
+    }),
+    [project, diagram, sidebarVisible, editorVisible, dirty, locale, themeMode],
   );
   useEffect(() => {
     api.updateMenuState(menuState);
@@ -158,52 +211,103 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [status]);
 
+  /** Texto ya parseado: diagrama (o el último válido si hay errores graves), issues y sincronía. (T7) */
+  const applyParsed = useCallback(
+    (parsed: DiagramModel, text: string, map: readonly PumlLineRef[] | null, entry: string | null) => {
+      const next = nextLiveState(liveRef.current, parsed);
+      liveRef.current = next;
+      syncRef.current = { index: createSourceIndex(parsed), mapping: lineMapping(map, entry), hasIncludes: map !== null };
+      setDiagram(next.shown);
+      setIssues(next.issues);
+      setStale(next.stale);
+      setCombined(text);
+      setHasIncludes(map !== null);
+    },
+    [],
+  );
+
   // Carga el documento con sus !include resueltos (proyecto o externo) y lo parsea.
-  // source sigue siendo el texto crudo de entrada (los guardados quedan intactos);
-  // combined es lo parseado (IssuesPanel lo usa para el snippet). No tumba la app si falla.
-  const loadDocument = useCallback(async (scope: PumlScope, opts?: { silent?: boolean }): Promise<boolean> => {
-    const silent = opts?.silent ?? false;
+  // source es el texto de entrada (lo que se guarda); combined es lo parseado (IssuesPanel lo usa
+  // para el snippet). No tumba la app si falla. Con el editor (T7), un cambio en disco no pisa
+  // ediciones sin guardar ('watch' → conflicto) y abrir otro documento monta un editor nuevo.
+  const loadDocument = useCallback(async (scope: PumlScope, mode: LoadMode = 'open'): Promise<boolean> => {
+    const silent = mode === 'watch';
     if (!silent) setSourceLoading(true);
     try {
       const r = await api.loadSource(scope);
       if (!r.ok) {
         if (!silent) {
+          liveRef.current = null;
+          syncRef.current = null;
           setSource(null);
           setCombined(null);
           setSourceFiles([]);
           setDiagram(null);
+          setIssues([]);
           setStatus({ kind: 'error', text: r.error });
         }
         return false;
       }
-      const { entryText, combined: text, files, lineMap, loadIssues } = r.value;
-      const model = parsePuml(text);
-      // Los issues del parser van en líneas del combinado: se remapean al origen
-      // (line+file) y guardan la línea combinada para el snippet.
-      const remapped = model.issues.map((issue) => {
-        const ref = lineMap[issue.line - 1];
-        if (!ref) return issue;
-        return { ...issue, file: ref.file, line: ref.line, combinedLine: issue.line };
-      });
-      // Los del loader ya traen file+line de origen (sin línea combinada).
-      const loaderIssues = loadIssues.map((i) => ({ line: i.line, severity: i.severity, message: i.message, file: i.file }));
+      const { entryPath: entry, entryText, combined: text, files, lineMap, loadIssues } = r.value;
+      if (mode === 'watch') {
+        const decision = reconcileDiskText({ editorText: editorTextRef.current, savedText: savedTextRef.current, diskText: entryText });
+        if (decision === 'conflict') {
+          setStatus({ kind: 'info', text: tRef.current('status.diskConflict') });
+          return false;
+        }
+        if (decision === 'replace') editorRef.current?.reset(entryText);
+      } else {
+        // Lo que estuviera pendiente de parsear era del texto anterior.
+        liveParse.cancel();
+        if (mode === 'open') {
+          liveRef.current = null;
+          setDocGen((g) => g + 1);
+        } else editorRef.current?.reset(entryText);
+      }
+      // Un parseo en vivo que siga en curso ya no corresponde a este texto.
+      parseSeq.current++;
+      editorTextRef.current = entryText;
+      savedTextRef.current = entryText;
+      setDirty(false);
+      // Sin !include el texto combinado es la entrada tal cual: no hace falta traducir líneas.
+      const map = scanIncludes(entryText).length > 0 ? lineMap : null;
+      const parsed = map ? parseDocument(text, { lineMap, loadIssues }) : parseDocument(text);
       setSource(entryText);
-      setCombined(text);
+      setEntryPath(entry);
       setSourceFiles(files);
-      setDiagram({ ...model, issues: [...loaderIssues, ...remapped] });
+      applyParsed(parsed, text, map, entry);
       setSourceTick((t) => t + 1);
       return true;
     } finally {
       if (!silent) setSourceLoading(false);
     }
-  }, []);
+  }, [applyParsed, liveParse]);
+
+  // T7: parseo en vivo con debounce. Con !include, main combina el texto del editor con los incluidos.
+  const runLiveParse = useCallback(async (text: string) => {
+    const seq = ++parseSeq.current;
+    if (scanIncludes(text).length === 0) {
+      applyParsed(parseDocument(text), text, null, null);
+      setSource(text);
+      return;
+    }
+    const scope = scopeRef.current;
+    if (!scope) return;
+    const r = await api.combineSource(scope, text);
+    if (seq !== parseSeq.current || !r.ok) return;
+    const v = r.value;
+    applyParsed(parseDocument(v.combined, { lineMap: v.lineMap, loadIssues: v.loadIssues }), v.combined, v.lineMap, v.entryPath);
+    setSource(text);
+    setSourceFiles(v.files);
+  }, [applyParsed]);
+  runLiveParseRef.current = runLiveParse;
 
   const handlePumlOpened = useCallback((file: OpenPumlFile) => {
     setSelectedId(null);
     setExternalName(file.entry.name);
     setExternalPath(file.entry.path);
     setModal((current) => current.open ? { open: false, dismissable: true } : current);
-    void loadDocument({ file: file.entry.path });
+    void loadDocument({ file: file.entry.path }, 'open');
   }, [loadDocument]);
 
   // Ruta global única de drop. El overlay solo refleja la fase; nunca recibe eventos.
@@ -293,6 +397,12 @@ export default function App() {
     if (!project?.puml) {
       loadedFor.current = null;
       if (externalName) return;
+      // Sin documento no hay editor: se olvida lo pendiente y el "sin guardar".
+      liveParse.cancel();
+      liveRef.current = null;
+      syncRef.current = null;
+      setDirty(false);
+      setIssues([]);
       setSource(null);
       setCombined(null);
       setSourceFiles([]);
@@ -305,8 +415,8 @@ export default function App() {
     loadedFor.current = key;
     setExternalName(null);
     setExternalPath(null);
-    void loadDocument({ project: project.meta.name });
-  }, [project, externalName, loadDocument]);
+    void loadDocument({ project: project.meta.name }, 'open');
+  }, [project, externalName, loadDocument, liveParse]);
 
   const handleLoad = useCallback(async () => {
     if (!project || busy) return;
@@ -329,7 +439,7 @@ export default function App() {
     try {
       // El contenido manda (con !include resueltos); los metadatos se refrescan después
       // sin disparar la carga inicial (loadedFor ya queda al día).
-      const ok = await loadDocument({ project: project.meta.name });
+      const ok = await loadDocument({ project: project.meta.name }, 'reload');
       const meta = await api.reloadPuml(project.meta.name);
       if (meta.ok) {
         setProject(meta.value);
@@ -370,17 +480,18 @@ export default function App() {
     }
     const scope = scopeRef.current;
     if (!scope) return;
-    void loadDocument(scope, { silent: true }).then((ok) => {
+    void loadDocument(scope, 'watch').then((ok) => {
       if (ok) setStatus({ kind: 'success', text: tRef.current('status.externalChanged') });
     });
   }), [loadDocument]);
 
   // T5.3: el sidecar se carga por documento; lo que cambie (colapsados, posiciones,
   // vista) se guarda con debounce de ~800 ms.
+  const projectName = project?.meta.name ?? null;
   useEffect(() => {
     setInitialSidecar(undefined);
     if (docKey === undefined) return;
-    const scope: PumlScope | null = project ? { project: project.meta.name } : externalPath ? { file: externalPath } : null;
+    const scope: PumlScope | null = projectName !== null ? { project: projectName } : externalPath ? { file: externalPath } : null;
     if (scope === null) return;
     let cancelled = false;
     void api.loadSidecar(scope).then((r) => {
@@ -395,7 +506,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [docKey, project, externalPath]);
+  }, [docKey, projectName, externalPath]);
 
   const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>) => {
     pendingCollapsed.current = _collapsed;
@@ -499,6 +610,125 @@ export default function App() {
   }, [t]);
   handleCopyPngRef.current = handleCopyPng;
 
+  // ---------- T7: editor ----------
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const editorVisibleRef = useRef(editorVisible);
+  editorVisibleRef.current = editorVisible;
+  const entryPathRef = useRef(entryPath);
+  entryPathRef.current = entryPath;
+  const sourceFilesRef = useRef(sourceFiles);
+  sourceFilesRef.current = sourceFiles;
+  const editorFileName = externalName ?? project?.puml?.originalFileName ?? 'diagram.puml';
+  const editorFileNameRef = useRef(editorFileName);
+  editorFileNameRef.current = editorFileName;
+
+  const handleEditorChange = useCallback((text: string) => {
+    editorTextRef.current = text;
+    setDirty(text !== savedTextRef.current);
+    liveParse.schedule(text);
+  }, [liveParse]);
+
+  /** Ctrl+S: escribe el texto del editor en el .puml abierto (proyecto o archivo externo). */
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    const scope = scopeRef.current;
+    if (!scope || savingRef.current) return false;
+    liveParse.flush();
+    const text = editorTextRef.current;
+    if (text === savedTextRef.current) return true;
+    savingRef.current = true;
+    try {
+      const r = await api.saveSource(scope, text);
+      if (!r.ok) {
+        setStatus({ kind: 'error', text: tRef.current('status.saveFailed', { error: r.error }) });
+        return false;
+      }
+      savedTextRef.current = text;
+      setDirty(editorTextRef.current !== text);
+      const saved = r.value.project;
+      if (saved) {
+        // Guardar cambia pumlLoadedAt: se marca como cargado para que no se vuelva a leer del disco.
+        loadedFor.current = saved.meta.name + ':' + (saved.meta.pumlLoadedAt ?? '');
+        setProject(saved);
+      }
+      // El guardado es atómico (temporal + rename): se vuelve a vigilar por si el watcher seguía el archivo viejo.
+      if (sourceFilesRef.current.length > 0) void api.watchPumlFiles(sourceFilesRef.current);
+      setStatus({ kind: 'success', text: tRef.current('status.saved', { name: editorFileNameRef.current }) });
+      return true;
+    } catch (error: unknown) {
+      setStatus({ kind: 'error', text: tRef.current('status.saveFailed', { error: error instanceof Error ? error.message : String(error) }) });
+      return false;
+    } finally {
+      savingRef.current = false;
+    }
+  }, [liveParse]);
+
+  /** Salta en el editor a líneas del modelo (si vienen de un !include no están en el editor). */
+  const revealInEditor = useCallback((line: number, endLine = line) => {
+    const sync = syncRef.current;
+    const editor = editorRef.current;
+    if (!sync || !editor || !editorVisibleRef.current) return;
+    const from = sync.mapping.toEntry(line);
+    if (from === null) return;
+    editor.revealLines(from, sync.mapping.toEntry(endLine) ?? from);
+  }, []);
+
+  const revealType = useCallback((id: string) => {
+    const range = syncRef.current?.index.rangeOf(id);
+    if (range) revealInEditor(range.line, range.endLine);
+  }, [revealInEditor]);
+
+  /** El cursor del editor entró en otra línea: se resalta su tipo o su relación en el diagrama. */
+  const handleCursorLine = useCallback((line: number) => {
+    const sync = syncRef.current;
+    if (!sync) return;
+    const at = sync.mapping.toCombined(line);
+    const element = at === null ? null : sync.index.elementAt(at);
+    setSelectedId(element?.kind === 'type' ? element.id : null);
+    setHighlightLine(element?.kind === 'relation' ? element.line : null);
+  }, []);
+
+  const handleCanvasSelect = useCallback((id: string | null) => {
+    setSelectedId(id);
+    setHighlightLine(null);
+    if (id !== null) revealType(id);
+  }, [revealType]);
+
+  const handleRelationSelect = useCallback((line: number | null) => {
+    setHighlightLine(line);
+    if (line !== null) revealInEditor(line);
+  }, [revealInEditor]);
+
+  const handleIssueSelect = useCallback((issue: ParseIssue) => {
+    // Los de un archivo incluido no están en el editor.
+    if (issue.file !== undefined && issue.file !== entryPathRef.current) return;
+    setEditorVisible(true);
+    // Si el panel estaba oculto, CodeMirror mide al mostrarse: el salto va en el siguiente fotograma.
+    requestAnimationFrame(() => {
+      editorRef.current?.revealLines(issue.line);
+      editorRef.current?.focus();
+    });
+  }, []);
+
+  /** Doble clic en una tarjeta: reescribe el identificador y sus referencias en el editor (Ctrl+Z deshace). */
+  const handleRename = useCallback((id: string, next: string): string | null => {
+    const model = liveRef.current?.shown;
+    if (!model || !editorRef.current) return null;
+    if (syncRef.current?.hasIncludes) return tRef.current('rename.includes');
+    const problem = validateRename(model, id, next);
+    if (problem === 'unchanged') return null;
+    if (problem !== null) return tRef.current(`rename.${problem}`, { name: next });
+    editorRef.current.renameType(id, next);
+    setSelectedId(next);
+    setStatus({ kind: 'info', text: tRef.current('status.renamed', { from: id, to: next }) });
+    return null;
+  }, []);
+
+  const toggleEditor = useCallback(() => setEditorVisible((v) => !v), []);
+  useEffect(() => {
+    if (editorVisible) editorRef.current?.focus();
+  }, [editorVisible]);
+
   const saveCloseSourceToProject = useCallback(async (target: ProjectInfo, text: string) => {
     const keepDisplayedDiagram = () => {
       setProject(target);
@@ -543,6 +773,20 @@ export default function App() {
   // primero permite elegir uno existente o crear uno nuevo.
   const handleCloseSave = useCallback(() => {
     if (closeSaving) return;
+    if (dirtyRef.current && scopeRef.current) {
+      setCloseSaving(true);
+      setCloseError(null);
+      void handleSave().then((ok) => {
+        setCloseSaving(false);
+        if (!ok) {
+          setCloseError(t('close.saveFailed'));
+          return;
+        }
+        setClosePromptOpen(false);
+        api.confirmClose('close');
+      });
+      return;
+    }
     if (source === null) {
       setCloseError(t('history.noCurrentPuml'));
       return;
@@ -555,7 +799,7 @@ export default function App() {
       return;
     }
     void saveCloseSourceToProject(project, source);
-  }, [closeSaving, source, project, saveCloseSourceToProject, t]);
+  }, [closeSaving, source, project, saveCloseSourceToProject, handleSave, t]);
 
   const handleStartModalOpened = useCallback((opened: ProjectInfo) => {
     if (!closeSaveProjectPending) {
@@ -597,8 +841,10 @@ export default function App() {
 
   const handleSidebarSelect = useCallback((id: string) => {
     setSelectedId(id);
+    setHighlightLine(null);
     canvasRef.current?.focusNode(id);
-  }, []);
+    revealType(id);
+  }, [revealType]);
 
   // Derivados del modelo.
   const groups = useMemo(() => (diagram ? buildTree(diagram) : []), [diagram]);
@@ -614,9 +860,9 @@ export default function App() {
     if (!diagram) return null;
     // Internos + externos + sin declarar.
     const totalTypes = diagram.types.length;
-    const warnings = diagram.issues.filter((i) => i.severity === 'warning').length;
+    const warnings = issues.filter((i) => i.severity === 'warning').length;
     return t('status.summary', { types: totalTypes, relationships: diagram.relationships.length, warnings });
-  }, [diagram, t]);
+  }, [diagram, issues, t]);
 
   // Despachador de las acciones del menú nativo (los atajos llegan por aquí).
   // toggle-sidebar y acciones de vista también funcionan con un .puml externo sin proyecto.
@@ -681,9 +927,15 @@ export default function App() {
         case 'copy-png':
           void handleCopyPng();
           break;
+        case 'save':
+          void handleSave();
+          break;
+        case 'toggle-editor':
+          if (source !== null) toggleEditor();
+          break;
       }
     };
-  }, [project, diagram, modal.open, closePromptOpen, handleLoad, handleReload, toggleSidebar, handleZoomIn, handleZoomOut, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
+  }, [project, diagram, source, modal.open, closePromptOpen, handleLoad, handleReload, handleSave, toggleSidebar, toggleEditor, handleZoomIn, handleZoomOut, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 
@@ -697,6 +949,9 @@ export default function App() {
         canLoad={project !== null && !busy}
         canReload={project?.puml != null && !busy}
         sidebarVisible={sidebarVisible}
+        editorVisible={editorVisible}
+        canEdit={source !== null}
+        onToggleEditor={toggleEditor}
         onLoad={() => void handleLoad()}
         onReload={() => void handleReload()}
         canView={diagram !== null && diagram.types.length > 0}
@@ -722,11 +977,36 @@ export default function App() {
             onSelect={handleSidebarSelect}
           />
         )}
+        {source !== null && (project || diagram) && (
+          <Suspense fallback={null}>
+          <CodeEditor
+            key={docGen}
+            ref={editorRef}
+            hidden={!editorVisible}
+            initialText={source}
+            issues={issues}
+            entryFile={entryPath}
+            fileName={editorFileName}
+            width={editorWidth}
+            onResize={setEditorWidth}
+            dirty={dirty}
+            stale={stale}
+            hasIncludes={hasIncludes}
+            onChange={handleEditorChange}
+            onCursorLine={handleCursorLine}
+            onSave={() => void handleSave()}
+            onClose={() => setEditorVisible(false)}
+          />
+          </Suspense>
+        )}
         <RenderArea
           project={project}
           model={diagram}
           selectedId={selectedId}
-          onSelect={setSelectedId}
+          onSelect={handleCanvasSelect}
+          highlightLine={highlightLine}
+          onRelationSelect={handleRelationSelect}
+          onRename={handleRename}
           canvasRef={canvasRef}
           onLayoutLoadingChange={setLayoutLoading}
           onNewProject={handleNewProject}
@@ -750,10 +1030,11 @@ export default function App() {
         <DropOverlay phase={dropPhase} />
       </div>
       <IssuesPanel
-        issues={diagram?.issues ?? []}
+        issues={diagram ? issues : []}
         source={combined}
         open={issuesOpen}
         onToggle={() => setIssuesOpen((v) => !v)}
+        onSelect={handleIssueSelect}
       />
       <StatusBar status={status} storage={storage} summary={summary} onDismiss={() => setStatus(null)} />
       {modal.open && (
@@ -768,6 +1049,7 @@ export default function App() {
         <CloseConfirmModal
           saving={closeSaving}
           error={closeError}
+          dirty={dirty}
           onSave={() => void handleCloseSave()}
           onDiscard={handleCloseDiscard}
           onCancel={handleCloseCancel}

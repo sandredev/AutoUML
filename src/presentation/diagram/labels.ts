@@ -9,6 +9,8 @@ export interface ViewerLabels {
   minimapAria: string;
   /** Prefijo del error de dibujo; el detalle va detrás. */
   paintError: string;
+  /** Campo de renombrado en línea de una tarjeta (T7). */
+  renameAria: string;
   contextUnavailable: string;
   /** "{n} entidades · clic para expandir" */
   collapsedSubtitle: string;
@@ -47,6 +49,7 @@ export const DEFAULT_LABELS: ViewerLabels = {
     'Diagrama de clases. Arrastra una tarjeta para moverla o el fondo para mover la vista. Haz clic en el encabezado de un paquete para contraerlo y en su tarjeta para expandirlo.',
   minimapAria: 'Minimapa del diagrama. Haz clic para centrar la vista, arrastra el recuadro o usa las flechas para desplazarla.',
   paintError: 'No se pudo dibujar el diagrama: ',
+  renameAria: 'Nuevo nombre del tipo',
   contextUnavailable: 'no se pudo obtener el contexto 2D del lienzo.',
   collapsedSubtitle: '{n} entidades · clic para expandir',
   moreMembers: '… +{n} más',

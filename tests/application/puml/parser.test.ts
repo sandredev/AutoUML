@@ -278,3 +278,47 @@ describe('parsePuml — tipos de flecha', () => {
     });
   }
 });
+
+describe('parsePuml — rango de líneas de los tipos (T7)', () => {
+  const SRC = [
+    '@startuml', //                    1
+    'package app {', //                2
+    '  class Order {', //              3
+    '    - id: long', //               4
+    '    + total(): double', //        5
+    '  }', //                          6
+    '  interface Repo', //             7
+    '  enum Status {', //              8
+    '    OPEN', //                     9
+    '    CLOSED }', //                10
+    '}', //                           11
+    'class Customer {}', //           12
+    'Customer --> Order', //          13
+    'Order ..> Ghost', //             14
+    '@enduml', //                     15
+  ].join('\n');
+  const m = parsePuml(SRC);
+  const byId = (id: string) => m.types.find((t) => t.id === id);
+
+  it('un tipo con cuerpo abarca hasta su llave de cierre', () => {
+    expect(byId('Order')).toMatchObject({ line: 3, endLine: 6 });
+  });
+
+  it('un tipo de una línea empieza y acaba en la misma', () => {
+    expect(byId('Repo')).toMatchObject({ line: 7, endLine: 7 });
+    expect(byId('Customer')).toMatchObject({ line: 12, endLine: 12 });
+  });
+
+  it('el cierre en la línea de un miembro también cuenta', () => {
+    expect(byId('Status')).toMatchObject({ line: 8, endLine: 10 });
+  });
+
+  it('un tipo implícito ocupa la línea de la relación que lo creó', () => {
+    expect(byId('Ghost')).toMatchObject({ line: 14, endLine: 14, implicit: true });
+  });
+
+  it('un tipo sin cerrar llega hasta el final del texto', () => {
+    const open = parsePuml('@startuml\nclass A {\n  x: int\n@enduml');
+    expect(open.types[0]).toMatchObject({ line: 2, endLine: 4 });
+  });
+});

@@ -147,3 +147,11 @@ export const InfoIcon = () => (
     <path d="M12 16v-4M12 8h.01" />
   </Svg>
 );
+
+export const CodeIcon = () => (
+  <Svg>
+    <path d="m8 7-5 5 5 5" />
+    <path d="m16 7 5 5-5 5" />
+    <path d="m13.5 4-3 16" />
+  </Svg>
+);

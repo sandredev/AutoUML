@@ -44,6 +44,8 @@ const api: AutoUmlApi = {
   savePumlToProject: (name, source) => invoke('puml:save-to-project', name, source),
   reloadPuml: (name) => invoke('puml:reload', name),
   loadSource: (scope: PumlScope) => invoke('puml:load-source', scope),
+  combineSource: (scope: PumlScope, entryText: string) => invoke('puml:combine-source', scope, entryText),
+  saveSource: (scope: PumlScope, text: string) => invoke('puml:save-source', scope, text),
   watchPumlFiles: (files: string[]) => invoke('puml:watch', files),
   unwatchPumlFiles: () => {
     ipcRenderer.send('puml:unwatch' as IpcChannel);

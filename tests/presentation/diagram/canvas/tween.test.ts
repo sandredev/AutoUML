@@ -238,6 +238,13 @@ describe('changedTypes', () => {
     expect(added.size + modified.size).toBe(0);
   });
 
+  it('tampoco cuenta que se desplace el final del tipo (endLine, T7: escribir en el editor)', () => {
+    const before = diagram([typeNode('A', { line: 3, endLine: 6 }), typeNode('B', { line: 9, endLine: 9 })]);
+    const after = diagram([typeNode('A', { line: 4, endLine: 7 }), typeNode('B', { line: 10, endLine: 10 })]);
+    const { added, modified } = changedTypes(before, after);
+    expect(added.size + modified.size).toBe(0);
+  });
+
   it('un miembro nuevo en una clase sí cuenta', () => {
     const member = { name: 'x', type: 'int', visibility: '+' as const, isStatic: false };
     const before = diagram([typeNode('A')]);

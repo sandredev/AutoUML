@@ -41,10 +41,13 @@ function readIncluded(absPath: string): string | undefined {
   }
 }
 
-/** Lee la entrada (límite 50 MB) y la combina con sus incluidos. */
-export function loadSourceWithIncludes(absEntry: string): LoadedSource {
+/**
+ * Lee la entrada (límite 50 MB) y la combina con sus incluidos.
+ * Con `entryOverride` la entrada es ese texto (el del editor sin guardar, T7); los incluidos se leen del disco.
+ */
+export function loadSourceWithIncludes(absEntry: string, entryOverride?: string): LoadedSource {
   const entryPath = norm(absEntry);
-  const entryText = fs.readFileSync(entryPath, 'utf8');
+  const entryText = entryOverride ?? fs.readFileSync(entryPath, 'utf8');
   if (Buffer.byteLength(entryText, 'utf8') > MAX_ENTRY_BYTES) {
     throw new Error('El archivo supera el límite de 50 MB.');
   }
@@ -54,4 +57,23 @@ export function loadSourceWithIncludes(absEntry: string): LoadedSource {
     (abs) => (norm(abs) === entryPath ? entryText : readIncluded(abs)),
   );
   return { ...combined, entryPath, entryText };
+}
+
+/**
+ * Guarda el texto del editor en el archivo de entrada (T7). Solo sobrescribe: la entrada debe existir.
+ * Escritura atómica (temporal + rename) para no dejar el .puml a medias si algo falla.
+ */
+export function saveEntryText(absEntry: string, text: string): void {
+  const entryPath = path.normalize(absEntry);
+  if (!fs.statSync(entryPath).isFile()) throw new Error('La ruta no es un archivo.');
+  const data = text.replace(/^﻿/u, '');
+  if (Buffer.byteLength(data, 'utf8') > MAX_ENTRY_BYTES) throw new Error('El archivo supera el límite de 50 MB.');
+  const tmp = `${entryPath}.autouml-tmp`;
+  fs.writeFileSync(tmp, data, 'utf8');
+  try {
+    fs.renameSync(tmp, entryPath);
+  } catch (e) {
+    fs.rmSync(tmp, { force: true });
+    throw e;
+  }
 }
