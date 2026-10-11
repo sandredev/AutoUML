@@ -43,7 +43,8 @@ interface KeyLike {
 
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
-function isEditable(target: unknown): boolean {
+/** ¿El destino de la tecla es un campo de texto, desplegable o editor? Ahí las teclas son suyas. */
+export function isEditable(target: unknown): boolean {
   if (typeof target !== 'object' || target === null) return false;
   const el = target as { tagName?: unknown; isContentEditable?: unknown };
   return el.isContentEditable === true || (typeof el.tagName === 'string' && EDITABLE_TAGS.has(el.tagName));

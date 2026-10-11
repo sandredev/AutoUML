@@ -10,13 +10,13 @@ import { buildOverlay, type HeatMetric } from './analysis/overlay';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
 import type { MenuAction, MenuSubject } from './contextMenu';
 import { FiltersPanel, withListItem } from './FiltersPanel';
-import { focusTargetOf, focusToggle, viewerShortcut } from './focusMode';
+import { focusTargetOf, focusToggle, isEditable, viewerShortcut } from './focusMode';
 import { drawHiddenOf, hasActiveFilters, memberFiltersKey, type DiagramFilters } from './graph/filters';
 import { focusKey, type FocusDirection, type FocusSpec } from './graph/neighborhood';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from './labels';
 import { collapsedOwner, isPackageNode, PACKAGE_NODE_PREFIX, packageNodeName } from './layout/aggregate';
 import { buildPaletteActions, type AppAction } from './palette/actions';
-import { presentationReducer, startPresentation, transitionPlan, type PlayerEvent } from './presentation/player';
+import { animatesTransition, clampIndex, presentationReducer, startPresentation, type PlayerEvent } from './presentation/player';
 import { addView, moveView, removeView, renameView, type DeckView } from './presentation/views';
 import { ViewsPanel, type SaveViewOptions } from './ViewsPanel';
 import { useDiagramLayout } from './layout/useDiagramLayout';
@@ -218,8 +218,9 @@ export function PumlViewer({
   const handleRef = canvasRef ?? ownRef;
 
   // F entra en el foco de la selección; ya en foco, cambia a la nueva selección o, si es la misma, sale.
-  // Esc / Retroceso deshacen por capas: quita la ruta, luego sale del foco y, sin nada más, restablece la disposición
-  // (tarjetas movidas a mano a su sitio). La ayuda y el modo relaciones los cierra antes el lienzo.
+  // Esc / Retroceso deshacen por capas: quita la ruta, luego sale del foco y, sin nada más, Retroceso quita la
+  // selección y encuadra (Esc sale de pantalla completa). Las tarjetas movidas a mano no se tocan aquí: se
+  // devuelven con Ctrl+Shift+L. La ayuda y el modo relaciones los cierra antes el lienzo.
   // Atajos de alta frecuencia: la cámara no vuela (la transición del layout sí). No actúan escribiendo ni
   // con un diálogo modal abierto.
   useEffect(() => {
@@ -397,7 +398,8 @@ export function PumlViewer({
       .filter((a) => a.enabled)
       .map((a): PaletteItem => ({ id: a.id, label: a.label, kind: 'action', ...(a.detail ? { detail: a.detail } : {}), run: a.run }));
   }, [model, packageNames, selectedId, labels, hostApp, liveCollapsed, filtersActive, onGoToCode, activeFocus, handleRef]);
-  const allPaletteItems = useMemo(() => [...paletteItems, ...actionItems], [paletteItems, actionItems]);
+  // Acciones primero: con la consulta vacía la lista se corta y, al final, nadie las descubriría.
+  const allPaletteItems = useMemo(() => [...actionItems, ...paletteItems], [paletteItems, actionItems]);
   const pickPaletteItem = useCallback((item: PaletteItem) => {
     closePalette();
     if (item.kind === 'action') {
@@ -436,13 +438,18 @@ export function PumlViewer({
     const collapsedChanges = nextCollapsed !== null
       && (nextCollapsed.size !== liveCollapsed.size || [...nextCollapsed].some((n) => !liveCollapsed.has(n)));
     const filtersChange = v.filters !== undefined && memberFiltersKey(v.filters) !== memberFiltersKey(filters);
-    const focusChanges = v.focusKey !== undefined && v.focusKey !== activeFocus?.id;
+    // Una clase que ya no existe no se enfoca: el foco no cambiaría y la cámara quedaría esperando un layout.
+    const focusKnown = v.focusKey !== undefined && (!model || model.types.some((t) => t.id === v.focusKey));
+    const focusChanges = focusKnown && v.focusKey !== activeFocus?.id;
+    // Una vista sin foco se guardó sobre el diagrama completo: con un foco activo, su cámara caería en el subgrafo.
+    const leavesFocus = v.focusKey === undefined && activeFocus !== null;
     // Si el layout va a cambiar, la cámara espera al layout nuevo; si el foco cambia, el foco reencuadra.
-    handleRef.current?.goToView(v.view, { animate, afterLayout: collapsedChanges || filtersChange || focusChanges });
+    handleRef.current?.goToView(v.view, { animate, afterLayout: collapsedChanges || filtersChange || focusChanges || leavesFocus });
     if (nextCollapsed !== null && collapsedChanges) setCollapsed(nextCollapsed);
     if (v.filters !== undefined) setFilters(v.filters);
-    if (v.focusKey !== undefined && focusChanges) focusOn(v.focusKey, true);
-  }, [views, model, liveCollapsed, filters, activeFocus, handleRef, focusOn]);
+    if (leavesFocus) exitFocus(animate);
+    else if (v.focusKey !== undefined && focusChanges) focusOn(v.focusKey, true);
+  }, [views, model, liveCollapsed, filters, activeFocus, handleRef, focusOn, exitFocus]);
 
   // Recorrido de presentación (T10.4): pantalla completa del visor y ←/→ entre vistas. El estado vive en
   // `player`; aplicar la vista y la pantalla completa son efectos de aquí.
@@ -454,7 +461,7 @@ export function PumlViewer({
   }, []);
   const present = useCallback(() => {
     if (views.length === 0) return;
-    setPlayer(startPresentation(views));
+    setPlayer(startPresentation(views.length));
     void rootRef.current?.requestFullscreen?.().catch(() => undefined);
   }, [views]);
   const exitPresent = useCallback(() => {
@@ -472,15 +479,17 @@ export function PumlViewer({
     const first = appliedIndex.current === null;
     appliedIndex.current = player.index;
     const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    applyView(player.index, !first && transitionPlan(reduced).animate);
+    applyView(player.index, !first && animatesTransition(reduced));
   }, [playing, player, applyView]);
   useEffect(() => {
     if (!playing) return;
     const onKey = (e: KeyboardEvent): void => {
+      // Escribiendo (renombrar una vista, paleta de comandos): las teclas son del campo, no del recorrido.
+      if (isEditable(e.target)) return;
       if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
         e.preventDefault();
         e.stopPropagation();
-        dispatchPlayer({ type: e.key === 'ArrowRight' ? 'next' : 'prev' });
+        dispatchPlayer({ type: e.key === 'ArrowRight' ? 'next' : 'prev', count: viewsRef.current.length });
       } else if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -505,8 +514,10 @@ export function PumlViewer({
     return () => document.removeEventListener('fullscreenchange', onFullscreen);
   }, []);
   // El panel sigue editable durante el recorrido: la lista del recorrido se mantiene al día.
+  const viewsRef = useRef(views);
+  viewsRef.current = views;
   useEffect(() => {
-    setPlayer((p) => (p && p.views !== views ? { ...p, views, index: Math.min(p.index, Math.max(0, views.length - 1)) } : p));
+    setPlayer((p) => (p && p.index !== clampIndex(p.index, views.length) ? { ...p, index: clampIndex(p.index, views.length) } : p));
   }, [views]);
   // Si se borran las vistas desde el panel con el recorrido activo, se sale.
   if (playing && views.length === 0) setPlayer(null);
