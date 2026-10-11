@@ -1,6 +1,7 @@
 // src/presentation/diagram/labels.ts — textos visibles del visor. src/render no depende del renderer: el host
 // (RenderArea) los traduce con el módulo de localización y los pasa por props. Sin labels se usa el español por defecto.
 // Son cadenas planas con marcadores {n}/{name}… para poder enviarlas al Worker si hace falta.
+import type { ReportLabels } from '../../domain/analysis/report';
 import type { Category, RelType } from '../../domain/diagram/model';
 
 export interface ViewerLabels {
@@ -109,7 +110,43 @@ export interface ViewerLabels {
   menuClearFilters: string;
   /** "Ruta desde {from}: haz clic en la clase de destino" */
   routePick: string;
+  /** Diagnóstico de arquitectura (T9). */
+  analysis: AnalysisLabels;
 }
+
+/** Textos del diagnóstico de arquitectura (T9): los del informe Markdown más los del panel. */
+export interface AnalysisLabels extends ReportLabels {
+  toggle: string;
+  toggleTitle: string;
+  panelAria: string;
+  heatmap: string;
+  heatNone: string;
+  heatFanIn: string;
+  heatFanOut: string;
+  heatInstability: string;
+  /** "{metric}: de {min} (claro) a {max} (oscuro)" */
+  legendRange: string;
+  legendCycle: string;
+  legendViolation: string;
+  includeExternal: string;
+  exportReport: string;
+  exportTitle: string;
+  close: string;
+  /** "Ir a {name}" */
+  goTo: string;
+}
+
+const DEFAULT_CATEGORIES: Record<Category, string> = {
+  sealed: 'Clase sellada',
+  abstract: 'Clase abstracta',
+  interface: 'Interfaz',
+  enum: 'Enumeración',
+  record: 'Registro',
+  annotation: 'Anotación',
+  class: 'Clase',
+  external: 'Externo',
+  undeclared: 'Sin declarar',
+};
 
 export const DEFAULT_LABELS: ViewerLabels = {
   canvasAria:
@@ -127,17 +164,7 @@ export const DEFAULT_LABELS: ViewerLabels = {
   tipLabel: 'Etiqueta',
   tipEntities: '{n} entidades',
   noPackage: '(sin paquete)',
-  categories: {
-    sealed: 'Clase sellada',
-    abstract: 'Clase abstracta',
-    interface: 'Interfaz',
-    enum: 'Enumeración',
-    record: 'Registro',
-    annotation: 'Anotación',
-    class: 'Clase',
-    external: 'Externo',
-    undeclared: 'Sin declarar',
-  },
+  categories: DEFAULT_CATEGORIES,
   relTypes: {
     EXTENDS: 'Herencia',
     IMPLEMENTS: 'Implementación',
@@ -213,6 +240,62 @@ export const DEFAULT_LABELS: ViewerLabels = {
   menuExitFocus: 'Salir del foco',
   menuClearFilters: 'Quitar filtros',
   routePick: 'Ruta desde {from}: haz clic en la clase de destino',
+  analysis: {
+    title: '{title}: diagnóstico de arquitectura',
+    summary: '{types} tipos analizados · {deps} dependencias.',
+    excluded: 'No incluye tipos externos ni sin declarar.',
+    cycles: 'Ciclos entre clases ({n})',
+    packageCycles: 'Ciclos entre paquetes ({n})',
+    selfLoops: 'Autorreferencias ({n})',
+    cycleMembers: '{n} clases: {names}',
+    none: 'Ninguno.',
+    violations: 'Violaciones de capas ({n})',
+    layersOrder: 'Capas de arriba abajo ({source}): {layers}.',
+    layersFromConfig: 'layers.json',
+    layersFromModel: 'paquetes del diagrama',
+    layersNone: 'El diagrama no define capas: anida paquetes dentro de un paquete-capa o añade un layers.json junto al .puml.',
+    layersRule: 'Una capa superior puede depender de una inferior; depender de una capa superior es una violación.',
+    colSource: 'Origen',
+    colTarget: 'Destino',
+    colLayer: 'Capa',
+    metrics: 'Métricas',
+    byCategory: 'Tipos por categoría',
+    colCategory: 'Categoría',
+    colTypes: 'Tipos',
+    inheritance: 'Herencia',
+    inheritanceDepth: 'Profundidad máxima: {n}',
+    topCoupled: 'Clases más acopladas',
+    colClass: 'Clase',
+    colCa: 'Ca (entrantes)',
+    colCe: 'Ce (salientes)',
+    colCaShort: 'Ca',
+    colCeShort: 'Ce',
+    colI: 'I',
+    colA: 'A',
+    colD: 'D',
+    packages: 'Paquetes',
+    colPackage: 'Paquete',
+    colAbstract: 'Abstractos',
+    legend: 'Ca: acoplamiento aferente (cuántas clases dependen de esta). Ce: eferente (de cuántas depende). I = Ce / (Ca + Ce). A = tipos abstractos / tipos. D = |A + I − 1|.',
+    toggle: 'Análisis',
+    toggleTitle: 'Mostrar ciclos, violaciones de capas, mapa de calor y métricas',
+    panelAria: 'Diagnóstico de arquitectura',
+    heatmap: 'Mapa de calor',
+    heatNone: 'Sin colorear',
+    heatFanIn: 'Fan-in (Ca)',
+    heatFanOut: 'Fan-out (Ce)',
+    heatInstability: 'Inestabilidad (I)',
+    legendRange: '{metric}: de {min} (claro) a {max} (oscuro)',
+    legendCycle: 'Ciclo (trazo doble)',
+    legendViolation: 'Hacia capa superior (raya y punto)',
+    includeExternal: 'Incluir externos y sin declarar',
+    exportReport: 'Exportar informe…',
+    exportTitle: 'Guardar este diagnóstico como Markdown',
+    close: 'Cerrar',
+    goTo: 'Ir a {name}',
+    noPackage: '(sin paquete)',
+    categories: DEFAULT_CATEGORIES,
+  },
 };
 
 /** Sustituye los marcadores {clave} de una etiqueta. */
