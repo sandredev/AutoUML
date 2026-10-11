@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { JSX, RefObject } from 'react';
+import { analyzeDiagram } from '../../domain/analysis/analyze';
+import { analysisReport } from '../../domain/analysis/report';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { SidecarState } from '../../application/ports/ipc';
+import { AnalysisPanel } from './AnalysisPanel';
+import { buildOverlay, type HeatMetric } from './analysis/overlay';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
 import type { MenuAction, MenuSubject } from './contextMenu';
 import { FiltersPanel, withListItem } from './FiltersPanel';
@@ -48,6 +52,12 @@ export interface PumlViewerProps {
   onGoToCode?: (target: CodeTarget) => void;
   /** Menú contextual "Copiar nombre" (T8). */
   onCopyText?: (text: string) => void;
+  /** Orden de capas de layers.json (T9); sin él, el de los paquetes del modelo. */
+  analysisLayers?: readonly string[] | null;
+  /** Título del informe de arquitectura (nombre del documento) (T9). */
+  reportTitle?: string;
+  /** Guarda el informe Markdown (T9). Sin él, el botón de exportar sale deshabilitado. */
+  onExportReport?: (markdown: string) => void;
 }
 
 export type CodeTarget = { kind: 'type'; id: string } | { kind: 'relation'; line: number };
@@ -73,6 +83,9 @@ export function PumlViewer({
   onRename,
   onGoToCode,
   onCopyText,
+  analysisLayers = null,
+  reportTitle = '',
+  onExportReport,
 }: PumlViewerProps): JSX.Element {
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
@@ -83,6 +96,11 @@ export function PumlViewer({
   const [focusAnimate, setFocusAnimate] = useState(false);
   // Filtros semánticos (T8), por documento: llegan con el sidecar y se persisten con él.
   const [filters, setFilters] = useState<DiagramFilters>(NO_FILTERS);
+  // Diagnóstico de arquitectura (T9): capa opcional de SOLO dibujo. Se calcula sobre el documento entero
+  // (no sobre lo filtrado o enfocado) y no entra en useDiagramLayout: activarla no recalcula posiciones.
+  const [analysisOn, setAnalysisOn] = useState(false);
+  const [heatMetric, setHeatMetric] = useState<HeatMetric>('none');
+  const [includeExternal, setIncludeExternal] = useState(false);
 
   // Al cambiar de documento se parte de cero; al llegar el sidecar se aplican sus
   // colapsados (filtrados a los existentes). Se deriva durante el render.
@@ -123,6 +141,12 @@ export function PumlViewer({
     () => (model ? [...new Set(model.packages.map((p) => p.name))].sort((a, b) => a.localeCompare(b)) : []),
     [model],
   );
+
+  const analysis = useMemo(
+    () => (analysisOn && model ? analyzeDiagram(model, { includeExternal, layers: analysisLayers }) : null),
+    [analysisOn, model, includeExternal, analysisLayers],
+  );
+  const overlay = useMemo(() => (analysis ? buildOverlay(analysis, heatMetric) : null), [analysis, heatMetric]);
 
   // El objetivo del foco desapareció (recarga, plegado de su paquete…): se vuelve al diagrama completo.
   if (focus !== null && focusableModel !== null && !focusApplied) setFocus(null);
@@ -239,6 +263,20 @@ export function PumlViewer({
     }
   }, [focusOn, exitFocus]);
   const filtersActive = hasActiveFilters(filters);
+  const analysisPanelId = useId();
+
+  // Panel de análisis: llevar la cámara a una clase (vuela con ratón; salta con teclado) y seleccionarla.
+  const selectRef = useRef(onSelect);
+  selectRef.current = onSelect;
+  const goToClass = useCallback((id: string, animate: boolean) => {
+    handleRef.current?.focusNode(id, { animate });
+    selectRef.current?.(id);
+  }, [handleRef]);
+  const closeAnalysis = useCallback(() => setAnalysisOn(false), []);
+  const exportReport = useMemo(() => {
+    if (!onExportReport || !model || !analysis) return undefined;
+    return () => onExportReport(analysisReport(model, analysis, labels.analysis, reportTitle, { includeExternal }));
+  }, [onExportReport, model, analysis, labels.analysis, reportTitle, includeExternal]);
   const canGoToCode = onGoToCode !== undefined;
   const menuContext = useMemo(() => ({ canGoToCode, hasFilters: filtersActive }), [canGoToCode, filtersActive]);
 
@@ -309,6 +347,16 @@ export function PumlViewer({
           {fallback ? <span className="puml-viewer-bar-warn" title={fallback}> {labels.fallbackBadge}</span> : null}
         </span>
         <FiltersPanel filters={filters} packages={packageNames} labels={labels} onChange={setFilters} />
+        <button
+          type="button"
+          className={analysisOn ? 'puml-viewer-reset is-active' : 'puml-viewer-reset'}
+          aria-pressed={analysisOn}
+          aria-controls={analysisOn ? analysisPanelId : undefined}
+          title={labels.analysis.toggleTitle}
+          onClick={() => setAnalysisOn((v) => !v)}
+        >
+          {labels.analysis.toggle}
+        </button>
         {activeFocus !== null ? (
           <div className="puml-viewer-focus" role="group" aria-label={labels.focusGroupAria}>
             <span className="puml-viewer-focus-name">{fill(labels.focusOn, { name: focusName(activeFocus.id) })}</span>
@@ -350,6 +398,7 @@ export function PumlViewer({
           {labels.reset}
         </button>
       </div>
+      <div className="puml-viewer-body">
       <DiagramCanvas
         ref={handleRef}
         model={viewModel}
@@ -376,7 +425,25 @@ export function PumlViewer({
         hidden={drawHidden}
         menuContext={menuContext}
         onMenuAction={handleMenuAction}
+        analysis={overlay}
       />
+      {analysis && overlay ? (
+        <AnalysisPanel
+          id={analysisPanelId}
+          model={model}
+          analysis={analysis}
+          overlay={overlay}
+          labels={labels}
+          metric={heatMetric}
+          includeExternal={includeExternal}
+          onMetricChange={setHeatMetric}
+          onIncludeExternalChange={setIncludeExternal}
+          onGoTo={goToClass}
+          onClose={closeAnalysis}
+          onExport={exportReport}
+        />
+      ) : null}
+      </div>
     </section>
   );
 }

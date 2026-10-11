@@ -9,6 +9,7 @@ import { hasPumlExtension, PUML_EXTENSIONS, validatePumlMarkers } from '../../do
 import { loadSourceWithIncludes, saveEntryText } from '../filesystem/pumlSource';
 import { WatchManager } from '../filesystem/watch';
 import { readSidecarFile, sidecarPathForFile, sidecarPathForProject, validateSidecar, writeSidecarFile } from '../storage/sidecar';
+import { layersPathForFile, layersPathForProject, readLayersFile } from '../storage/layersConfig';
 import {
   createProject,
   getCurrentProject,
@@ -25,6 +26,7 @@ import { registerHistoryIpc } from '../storage/history';
 const MAX_PUML_BYTES = 50 * 1024 * 1024;
 const MAX_PNG_BYTES = 100 * 1024 * 1024;
 const MAX_SVG_BYTES = 20 * 1024 * 1024;
+const MAX_MARKDOWN_BYTES = 5 * 1024 * 1024;
 const MAX_PDF_SIDE_PX = 20000;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -364,6 +366,42 @@ export function registerIpc(onMenuState: (state: MenuState) => void): void {
       if (validateSidecar(rawState) === null) throw new Error('El estado de vista es inválido.');
       writeSidecarFile(file, rawState as SidecarState);
       return ok(undefined);
+    } catch (e) {
+      return fail(e);
+    }
+  });
+
+  // T9: orden de capas del diagnóstico (solo lectura; ausente = sin capas configuradas).
+  ipcMain.handle('layers:load', (_e, rawScope: unknown): Result<{ layers: string[] | null; corrupt: boolean }> => {
+    try {
+      const scope = asScope(rawScope);
+      const file = 'project' in scope
+        ? layersPathForProject(readProject(scope.project).dir)
+        : layersPathForFile(path.normalize(scope.file));
+      return ok(readLayersFile(file));
+    } catch (e) {
+      return fail(e);
+    }
+  });
+
+  // T9: informe de arquitectura en Markdown (misma plantilla de validación+diálogo+write que el SVG).
+  ipcMain.handle('export:save-markdown', async (event, fileName: unknown, rawText: unknown): Promise<Result<string | null>> => {
+    try {
+      if (typeof fileName !== 'string' || fileName.trim() === '') throw new Error('Nombre de archivo inválido.');
+      if (typeof rawText !== 'string' || rawText.length === 0 || Buffer.byteLength(rawText, 'utf8') > MAX_MARKDOWN_BYTES) {
+        throw new Error('El informe está vacío o supera el límite de 5 MB.');
+      }
+      const safeName = `${path.basename(fileName, path.extname(fileName))}.md`;
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const options: Electron.SaveDialogOptions = {
+        title: 'Exportar informe de arquitectura',
+        defaultPath: safeName,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      };
+      const picked = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options);
+      if (picked.canceled || !picked.filePath) return ok(null);
+      await fs.promises.writeFile(picked.filePath, rawText, 'utf8');
+      return ok(picked.filePath);
     } catch (e) {
       return fail(e);
     }

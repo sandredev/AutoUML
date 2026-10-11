@@ -7,12 +7,19 @@ import { THEME_IDS } from '../../../src/domain/rules/themes';
 
 const css = readFileSync(resolve(__dirname, '../../../src/presentation/app/theme.css'), 'utf8');
 
-/** Tokens `--x: #hex` del bloque `:root[data-theme="<id>"] { … }`. */
+/**
+ * Tokens `--x: #hex` que aplican al tema `<id>`: se funden, en orden, todos los bloques cuyo selector nombra
+ * `[data-theme="<id>"]` (el del tema y los grupos semánticos claros/oscuros).
+ */
 function themeTokens(id: string): Map<string, string> {
-  const block = new RegExp(`:root\\[data-theme="${id}"\\]\\s*\\{([^}]*)\\}`).exec(css);
-  if (!block) throw new Error(`tema sin bloque: ${id}`);
   const tokens = new Map<string, string>();
-  for (const m of block[1].matchAll(/--([\w-]+):\s*(#[0-9a-fA-F]{6})\b/g)) tokens.set(m[1], m[2]);
+  let found = false;
+  for (const block of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (!block[1].includes(`[data-theme="${id}"]`)) continue;
+    found = true;
+    for (const m of block[2].matchAll(/--([\w-]+):\s*(#[0-9a-fA-F]{6})\b/g)) tokens.set(m[1], m[2]);
+  }
+  if (!found) throw new Error(`tema sin bloque: ${id}`);
   return tokens;
 }
 
@@ -62,4 +69,34 @@ describe('contraste del menú contextual y del panel de filtros', () => {
       expect(contrast(a as string, b as string)).toBeGreaterThanOrEqual(4.5);
     },
   );
+});
+
+// Capa de análisis (T9): las marcas de aristas son líneas (no texto): ≥ 3:1 sobre el lienzo (--bg-elev).
+// En el mapa de calor el texto de la tarjeta se elige negro o blanco (el de más contraste): ≥ 4.5:1.
+describe('contraste de la capa de análisis (T9)', () => {
+  const best = (bg: string): number => Math.max(contrast(bg, '#000000'), contrast(bg, '#ffffff'));
+
+  it.each(THEME_IDS.flatMap((id) => (['mark-cycle', 'mark-violation'] as const).map((k) => [id, k] as const)))(
+    '%s: --%s sobre --bg-elev ≥ 3',
+    (id, k) => {
+      const t = themeTokens(id);
+      expect(contrast(t.get(k) as string, t.get('bg-elev') as string)).toBeGreaterThanOrEqual(3);
+    },
+  );
+
+  it.each([...THEME_IDS])('%s: 5 pasos de calor, texto legible en cada uno', (id) => {
+    const t = themeTokens(id);
+    for (let i = 1; i <= 5; i++) {
+      const c = t.get(`heat-${i}`);
+      expect(c, `--heat-${i}`).toBeDefined();
+      expect(best(c as string)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it.each([...THEME_IDS])('%s: la rampa es secuencial (contraste con el lienzo creciente)', (id) => {
+    const t = themeTokens(id);
+    const bg = t.get('bg-elev') as string;
+    const steps = [1, 2, 3, 4, 5].map((i) => contrast(t.get(`heat-${i}`) as string, bg));
+    for (let i = 1; i < steps.length; i++) expect(steps[i]).toBeGreaterThan(steps[i - 1] as number);
+  });
 });

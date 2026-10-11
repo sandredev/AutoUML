@@ -30,6 +30,10 @@ interface Props {
   /** Menú contextual (T8): ir al código y copiar nombre. */
   onGoToCode?: (target: CodeTarget) => void;
   onCopyText?: (text: string) => void;
+  /** Diagnóstico de arquitectura (T9): capas de layers.json, título y exportación del informe. */
+  analysisLayers?: readonly string[] | null;
+  reportTitle?: string;
+  onExportReport?: (markdown: string) => void;
 }
 
 export function RenderArea({
@@ -50,6 +54,9 @@ export function RenderArea({
   onRename,
   onGoToCode,
   onCopyText,
+  analysisLayers = null,
+  reportTitle,
+  onExportReport,
 }: Props): JSX.Element {
   const { t } = useLocalization();
   const labels = useMemo(() => viewerLabels(t), [t]);
@@ -101,6 +108,9 @@ export function RenderArea({
         {...(onRename ? { onRename } : {})}
         {...(onGoToCode ? { onGoToCode } : {})}
         {...(onCopyText ? { onCopyText } : {})}
+        analysisLayers={analysisLayers}
+        {...(reportTitle !== undefined ? { reportTitle } : {})}
+        {...(onExportReport ? { onExportReport } : {})}
       />
       {children}
     </main>

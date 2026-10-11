@@ -92,6 +92,12 @@
   --warning-bg: #fff3bf; --warning-fg: #5c3b00;
   --cat-sealed: #7c4bd6; --cat-abstract: #b07d00; --cat-interface: #0b62c9; --cat-enum: #1a7f37;
   --cat-record: #0e8a8a; --cat-annotation: #c04e00; --cat-class: #5b6272; --cat-external: #8f6400; --cat-undeclared: #c62a37;
+
+  /* Capa de análisis (T9). Marcas de aristas: ciclo (rojo de estado "crítico") y dependencia hacia una capa
+     superior (violeta, lejos del acento naranja de la selección); además del color llevan trazo propio.
+     Calor: rampa secuencial azul de un solo tono; en claro va de claro (poco) a oscuro (mucho). */
+  --mark-cycle: #d03b3b; --mark-violation: #6250d6;
+  --heat-1: #cde2fb; --heat-2: #86b6ef; --heat-3: #3987e5; --heat-4: #1c5cab; --heat-5: #0d366b;
 }
 
 /* ---------- Semánticos: oscuros ---------- */
@@ -100,4 +106,8 @@
   --warning-bg: #3d3300; --warning-fg: #ffd866;
   --cat-sealed: #b794f6; --cat-abstract: #e8bb4a; --cat-interface: #6cb0ff; --cat-enum: #4cc26a;
   --cat-record: #3fcfc3; --cat-annotation: #ff9a52; --cat-class: #98a0b5; --cat-external: #d9a52b; --cat-undeclared: #ff6b66;
+
+  /* Capa de análisis (T9): misma rampa, invertida para el lienzo oscuro (poco = se funde con el fondo). */
+  --mark-cycle: #e66767; --mark-violation: #9085e9;
+  --heat-1: #0d366b; --heat-2: #1c5cab; --heat-3: #3987e5; --heat-4: #86b6ef; --heat-5: #cde2fb;
 }

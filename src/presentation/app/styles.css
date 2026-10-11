@@ -155,6 +155,40 @@ p { margin: 0 0 8px; }
 .filters-panel-pkg { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filters-panel-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .filters-panel input:focus-visible, .filters-panel select:focus-visible, .filters-panel button:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
+/* Diagnóstico de arquitectura (T9): columna lateral junto al lienzo (no tapa el minimapa). */
+.puml-viewer-body { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.analysis-panel { display: flex; flex-direction: column; gap: 10px; flex: 0 0 auto; width: min(320px, 40%); min-width: 220px; overflow: auto; overscroll-behavior: contain; padding: 10px 12px; border-left: 1px solid var(--border); background: var(--bg-elev); color: var(--fg); font-size: 12px; text-align: left; }
+.analysis-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.analysis-head h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.analysis-summary, .analysis-note, .analysis-empty { margin: 0; color: var(--fg-muted); }
+.analysis-controls { display: flex; flex-direction: column; gap: 6px; }
+.analysis-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.analysis-field select { padding: 1px 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); color: var(--fg); font-size: 12px; }
+.analysis-check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.analysis-legend { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.analysis-legend-ramp { display: flex; flex: 1; gap: 2px; }
+.analysis-legend-step { flex: 1; height: 10px; border-radius: 2px; }
+.analysis-legend-value { color: var(--fg-muted); }
+.analysis-marks { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0; list-style: none; color: var(--fg-muted); }
+.analysis-marks li { display: inline-flex; align-items: center; gap: 6px; }
+.analysis-section { border-top: 1px solid var(--border); padding-top: 6px; }
+.analysis-section summary { font-weight: 600; cursor: pointer; padding: 2px 0; }
+.analysis-section h3 { margin: 8px 0 4px; font-size: 12px; font-weight: 600; }
+.analysis-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0; padding: 0; list-style: none; }
+.analysis-list li { min-width: 0; overflow-wrap: anywhere; }
+.analysis-more { color: var(--fg-muted); }
+.analysis-link { padding: 1px 0; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 2px; overflow-wrap: anywhere; }
+.analysis-link:hover { text-decoration-thickness: 2px; }
+.analysis-dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 0; }
+.analysis-dl div { display: contents; }
+.analysis-dl dt { color: var(--fg-muted); }
+.analysis-dl dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.analysis-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.analysis-table th, .analysis-table td { padding: 2px 4px; border-bottom: 1px solid var(--border); text-align: right; }
+.analysis-table th:first-child { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font-weight: 400; }
+.analysis-table thead th { color: var(--fg-muted); font-weight: 600; }
+.analysis-actions { display: flex; justify-content: flex-end; }
+.analysis-panel select:focus-visible, .analysis-panel button:focus-visible, .analysis-panel input:focus-visible, .analysis-section summary:focus-visible { outline: 2px solid var(--focus-ring, var(--accent)); outline-offset: 1px; }
 .diagram-canvas .diagram-route { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elev); box-shadow: 0 2px 12px #0002; font-size: 12px; }
 .diagram-route-info { min-width: 0; overflow-wrap: anywhere; color: var(--accent); font-weight: 600; }
 .diagram-route-info.is-empty { color: var(--fg-muted); font-weight: 400; }

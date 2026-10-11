@@ -1,5 +1,6 @@
 // src/presentation/diagram/canvas/draw.ts — dibujo del diagrama en Canvas 2D (sin React).
 import type { Category, DiagramModel, TypeNode } from '../../../domain/diagram/model';
+import { FALLBACK_HEAT, FALLBACK_MARK_CYCLE, FALLBACK_MARK_VIOLATION, markOfEdge, type AnalysisOverlay } from '../analysis/overlay';
 import type { Focus } from '../graph/focus';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
 import { isPackageNode, packageNodeName } from '../layout/aggregate';
@@ -34,6 +35,10 @@ export interface Theme {
   noteBg: string;
   noteBorder: string;
   noteFg: string;
+  /** Capa de análisis (T9): rampa de calor (5 pasos, de poco a mucho) y marcas de aristas. Opcionales. */
+  heat?: readonly string[];
+  markCycle?: string;
+  markViolation?: string;
 }
 
 export interface DrawArgs {
@@ -64,6 +69,8 @@ export interface DrawArgs {
   extraTypes?: ReadonlyMap<string, TypeNode> | undefined;
   /** Halo de lo que cambió al recargar: id de tarjeta → intensidad 0‒1. */
   halo?: ReadonlyMap<string, number> | undefined;
+  /** Capa de análisis (T9): solo dibujo, no cambia el layout. Sin valor: el diagrama de siempre. */
+  analysis?: AnalysisOverlay | null | undefined;
 }
 
 /** Tema claro fijo para exportar (mismos valores que los fallbacks de readTheme). */
@@ -197,6 +204,14 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   const dim = (inFocus: boolean): number => (focus && !inFocus ? DIM_ALPHA : 1);
   const s = view.scale;
   const px = 1 / s;
+  const analysis = a.analysis ?? null;
+  const heatRamp = theme.heat ?? FALLBACK_HEAT;
+  const markColor = (m: 'cycle' | 'violation'): string =>
+    m === 'cycle' ? theme.markCycle ?? FALLBACK_MARK_CYCLE : theme.markViolation ?? FALLBACK_MARK_VIOLATION;
+  const heatOf = (id: string): string | undefined => {
+    const bin = analysis?.heat?.get(id);
+    return bin === undefined ? undefined : heatRamp[bin];
+  };
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.globalAlpha = 1;
   if (!a.transparent) {
@@ -257,6 +272,24 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       ctx.strokeStyle = theme.edge;
       ctx.lineWidth = px;
       ctx.stroke();
+      // Capa de análisis: las aristas marcadas, encima y en su color (sin el detalle del trazo a este zoom).
+      if (analysis) {
+        for (const m of ['violation', 'cycle'] as const) {
+          ctx.beginPath();
+          let any = false;
+          for (const i of edges) {
+            const e = layout.edges[i];
+            if (e && markOfEdge(analysis, a.model, e) === m) {
+              tracePath(ctx, e.points);
+              any = true;
+            }
+          }
+          if (!any) continue;
+          ctx.strokeStyle = markColor(m);
+          ctx.lineWidth = 3 * px;
+          ctx.stroke();
+        }
+      }
     }
   } else {
     const hoverId = a.hoverId ?? null;
@@ -267,12 +300,19 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       const hovered = a.hoverEdge === i;
       ctx.globalAlpha = (hovered ? 1 : dim(inFocus)) * (a.fx?.edges.get(i) ?? 1);
       const hot = inFocus || hovered || (hoverId !== null && (e.source === hoverId || e.target === hoverId));
+      const mark = analysis ? markOfEdge(analysis, a.model, e) : null;
       drawEdgeFull(
         ctx,
         e,
         e.rel !== undefined ? a.model.relationships[e.rel] : undefined,
         theme,
-        { labels: showDetail, heads: showDetail, lineWidth: hovered ? 2 * px : px, highlighted: hot },
+        {
+          labels: showDetail,
+          heads: showDetail,
+          lineWidth: hovered ? 2 * px : px,
+          highlighted: hot,
+          ...(mark ? { mark, markColor: markColor(mark) } : {}),
+        },
       );
     }
     ctx.globalAlpha = 1;
@@ -301,7 +341,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       ctx.translate(-(b.x + b.w / 2), -(b.y + b.h / 2));
     }
     if (boxesOnly) {
-      ctx.fillStyle = theme.cat[t?.category ?? 'class'];
+      ctx.fillStyle = (t && heatOf(t.id)) ?? theme.cat[t?.category ?? 'class'];
       ctx.fillRect(b.x, b.y, b.w, b.h);
     } else if (!t) {
       const count = isPkg ? a.packageCounts?.get(packageNodeName(b.id)) : undefined;
@@ -314,6 +354,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
         lineWidth: px,
         display: a.display,
         moreTemplate: labels.moreMembers,
+        heat: heatOf(t.id),
       });
     }
     if (scaled) ctx.restore();

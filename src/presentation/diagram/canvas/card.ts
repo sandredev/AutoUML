@@ -3,7 +3,7 @@ import type { TypeNode } from '../../../domain/diagram/model';
 import { badgeColor, cardContentOf, geometryOf, moreText } from '../layout/cardModel';
 import { CARD, DEFAULT_DETAIL, DEFAULT_DISPLAY, FONTS, type CardDisplay } from '../style/contract';
 import type { NodeBox } from '../types';
-import { resolveColor, textOn } from './color';
+import { readableOn, resolveColor, textOn } from './color';
 
 export interface CardTheme { card: string; cardBorder: string; cardFg: string; accent: string }
 
@@ -21,20 +21,25 @@ export function drawCard(
     display?: Readonly<CardDisplay> | undefined;
     /** Plantilla traducida de "… +{n} más". */
     moreTemplate?: string | undefined;
+    /** Mapa de calor (T9): relleno de toda la tarjeta; manda sobre el color de PlantUML y todo el texto se adapta. */
+    heat?: string | undefined;
   },
 ): void {
   const c = cardContentOf(t, DEFAULT_DETAIL, o.summary, o.display ?? DEFAULT_DISPLAY);
   const g = geometryOf(c);
-  const fill = resolveColor(ctx, t.color) ?? theme.card;
+  const heat = o.heat;
+  const fill = heat ?? resolveColor(ctx, t.color) ?? theme.card;
   const border = resolveColor(ctx, t.lineColor) ?? theme.cardBorder;
-  const headFg = t.color ? textOn(fill) : theme.cardFg;
+  const heatFg = heat ? readableOn(heat) : null;
+  const headFg = heatFg ?? (t.color ? textOn(fill) : theme.cardFg);
+  const rowFg = heatFg ?? theme.cardFg;
 
   ctx.beginPath();
   ctx.roundRect(b.x, b.y, b.w, b.h, CARD.radius);
   ctx.fillStyle = theme.card;
   ctx.fill();
-  if (t.color) {
-    // El color de PlantUML va en toda la tarjeta; la cabecera es lo que se lee primero.
+  if (heat || t.color) {
+    // El color de PlantUML (o el del calor) va en toda la tarjeta; la cabecera es lo que se lee primero.
     ctx.save();
     ctx.clip();
     ctx.fillStyle = fill;
@@ -89,7 +94,7 @@ export function drawCard(
     ctx.strokeStyle = border;
     ctx.stroke();
     let ry = y + CARD.sectionPadY + CARD.rowH / 2;
-    ctx.fillStyle = theme.cardFg;
+    ctx.fillStyle = rowFg;
     for (const row of rows) {
       ctx.font = row.isAbstract ? FONTS.rowItalic : FONTS.row;
       ctx.fillText(row.text, b.x + CARD.padX, ry);

@@ -76,6 +76,12 @@ export interface SidecarFilters {
   hiddenTypes?: string[];
 }
 
+/** Orden de capas de `layers.json` (T9): null si no hay archivo o no es válido (corrupt lo distingue). */
+export interface LayersLoadResult {
+  layers: string[] | null;
+  corrupt: boolean;
+}
+
 export interface SidecarLoadResult {
   state: SidecarState | null;
   /** true si existía pero estaba dañado (usar valores por defecto + aviso). */
@@ -200,9 +206,11 @@ export type IpcChannel =
   | 'puml:files-changed'
   | 'sidecar:load'
   | 'sidecar:save'
+  | 'layers:load'
   | 'export:save-png'
   | 'export:save-svg'
   | 'export:save-pdf'
+  | 'export:save-markdown'
   | 'clipboard:write-png'
   | 'menu:update-state'
   | 'menu:command'
@@ -243,9 +251,13 @@ export interface AutoUmlApi {
   onPumlFilesChanged(callback: (event: PumlFilesChanged) => void): () => void;
   loadSidecar(scope: PumlScope): Promise<Result<SidecarLoadResult>>;
   saveSidecar(scope: PumlScope, state: SidecarState): Promise<Result<void>>;
+  // Lee layers.json del proyecto o junto al .puml externo (T9).
+  loadLayers(scope: PumlScope): Promise<Result<LayersLoadResult>>;
   saveSvg(fileName: string, svg: string): Promise<Result<string | null>>;
   savePdf(fileName: string, svg: string, widthPx: number, heightPx: number): Promise<Result<string | null>>;
   writePngToClipboard(bytes: Uint8Array): Promise<Result<void>>;
+  // Abre el diálogo nativo y guarda el informe de arquitectura en Markdown; null si se cancela (T9).
+  saveMarkdown(fileName: string, text: string): Promise<Result<string | null>>;
   updateMenuState(state: MenuState): void;
   // Pide a main una acción de menú que el renderer no puede hacer (salir, copiar, diálogo "Acerca de"…).
   runMenuCommand(command: MenuCommand): void;
