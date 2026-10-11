@@ -53,6 +53,8 @@ function isEditable(target: unknown): boolean {
 export function viewerShortcut(e: KeyLike): ViewerShortcut | null {
   if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || isEditable(e.target)) return null;
   if (e.key === 'f' || e.key === 'F') return 'toggle-focus';
+  // Enter alterna el foco solo desde el canvas: en un botón o enlace activa el control.
+  if (e.key === 'Enter' && (e.target as { tagName?: unknown }).tagName === 'CANVAS') return 'toggle-focus';
   if (e.key === 'Escape') return 'escape';
   return null;
 }

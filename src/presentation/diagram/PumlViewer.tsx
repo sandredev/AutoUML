@@ -244,11 +244,12 @@ export function PumlViewer({
         exitFocus(false);
         return;
       }
+      // Última capa (destructiva): solo con el teclado dentro del visor, no con un Esc suelto de otro sitio.
       const canvas = handleRef.current;
-      if (canvas?.hasManualPositions()) {
+      const inViewer = e.target instanceof Node && rootRef.current?.contains(e.target) === true;
+      if (inViewer && canvas?.hasManualPositions()) {
         e.preventDefault();
-        canvas.resetPositions();
-        canvas.fit();
+        canvas.resetPositions({ fit: true });
       }
     };
     window.addEventListener('keydown', onKey);

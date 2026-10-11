@@ -54,8 +54,11 @@ export interface DiagramCanvasHandle {
   exportSvg(): { svg: string; width: number; height: number } | null;
   /** Vista y posiciones manuales actuales (para persistir el sidecar). */
   getSnapshot(): { view: ViewState; overrides: Record<string, { dx: number; dy: number }> };
-  /** Devuelve las tarjetas movidas a mano a la posición que calculó el layout. */
-  resetPositions(): void;
+  /**
+   * Devuelve las tarjetas movidas a mano a la posición que calculó el layout. Con `{ fit: true }`
+   * encuadra cuando llega el layout sin overrides (encuadrar enseguida usaría los límites viejos).
+   */
+  resetPositions(opts?: { fit?: boolean }): void;
   /** Quita la ruta resaltada (T8). true si había una (Esc la quita antes de salir del modo foco). */
   clearRoute(): boolean;
   /** true si hay alguna tarjeta movida a mano. */
@@ -544,6 +547,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     [setView, schedule],
   );
 
+  const fitAfterResetRef = useRef(false);
   const fit = useCallback((animate = false) => {
     const size = sizeRef.current;
     if (!canPaint(size)) return;
@@ -650,7 +654,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       },
       // En modo foco se persiste la vista del diagrama completo, no la del foco.
       getSnapshot: () => ({ view: { ...(focusViewRef.current?.view ?? viewRef.current) }, overrides: overridesToRecord(latest.current.overrides) }),
-      resetPositions: () => setOverrides(EMPTY_OVERRIDES),
+      resetPositions: (opts) => {
+        if (opts?.fit && hasOverrides(latest.current.overrides)) fitAfterResetRef.current = true;
+        else if (opts?.fit) fit();
+        setOverrides(EMPTY_OVERRIDES);
+      },
       clearRoute: () => {
         if (latest.current.route === null) return false;
         setRouteReq(null);
@@ -694,6 +702,20 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     });
     return off;
   }
+
+  // Pantalla completa (#36): el botón que la activa queda fuera del elemento a pantalla completa y se
+  // queda con el foco, así que las teclas no llegan al lienzo. Al entrar, el lienzo toma el foco.
+  useEffect(() => {
+    const onFullscreen = (): void => {
+      const full = document.fullscreenElement;
+      const canvas = canvasRef.current;
+      if (!full || !canvas || !full.contains(canvas)) return;
+      if (document.activeElement instanceof Node && full.contains(document.activeElement)) return;
+      canvas.focus({ preventScroll: true });
+    };
+    document.addEventListener('fullscreenchange', onFullscreen);
+    return () => document.removeEventListener('fullscreenchange', onFullscreen);
+  }, []);
 
   // Tamaño del contenedor.
   useEffect(() => {
@@ -744,6 +766,19 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const id = pendingFocusRef.current;
     if (id && focusNodeInView(id)) pendingFocusRef.current = null;
   }, [layout, collapsedPackages, controlled, fit, flyTo, focusNodeInView]);
+
+  // resetPositions({ fit: true }): encuadra con los límites del layout ya sin overrides.
+  useEffect(() => {
+    if (!fitAfterResetRef.current) return;
+    fitAfterResetRef.current = false;
+    fit(true);
+  }, [visibleLayout, fit]);
+
+  // El modo relaciones guarda un índice de arista de visibleLayout: si cambia el layout de origen,
+  // los filtros o los plegados, ese índice ya no apunta a la misma relación (como edgeSel).
+  useEffect(() => {
+    setRelMode((rm) => (rm !== null && rm.edge !== null ? { edge: null, step: 0 } : rm));
+  }, [layout, hidden, collapsedPackages]);
 
   // Transición de layout (T6): cuando lo que se muestra cambia de geometría dentro del MISMO documento
   // (recarga, plegar/desplegar, Restablecer, refinado dagre→ELK) las tarjetas se desplazan, entran y salen
@@ -844,6 +879,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (!canvas) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
+      if (e.ctrlKey) ctrlAloneRef.current = false; // Ctrl+rueda es zoom: al soltar Ctrl no alterna el modo relaciones
       const rect = canvas.getBoundingClientRect();
       const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
       autoFitRef.current = false;
@@ -1298,7 +1334,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onKeyUp={onCanvasKeyUp}
         onBlur={() => { ctrlAloneRef.current = false; }}
         tabIndex={0}
-        aria-keyshortcuts="F Escape Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown Control Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
+        aria-keyshortcuts="F Enter Escape Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown Control Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
       />
       <canvas
         ref={minimapRef}
@@ -1333,7 +1369,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
             <dd>{labels.shortcutsNavLinked}</dd>
             <dt><kbd>Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
             <dd>{labels.shortcutsNavRelation}</dd>
-            <dt><kbd>F</kbd></dt>
+            <dt><kbd>F</kbd> / <kbd>Enter</kbd></dt>
             <dd>{labels.shortcutsFocus}</dd>
             <dt><kbd>Esc</kbd></dt>
             <dd>{labels.shortcutsEscape}</dd>

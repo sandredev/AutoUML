@@ -46,8 +46,9 @@ describe('viewerShortcut', () => {
     expect(viewerShortcut(ev('Escape'))).toBe('escape');
   });
 
-  it('Enter no es un atajo del visor (solo F alterna el foco)', () => {
-    expect(viewerShortcut(ev('Enter'))).toBeNull();
+  it('Enter alterna el foco solo cuando el objetivo es el canvas (no un botón)', () => {
+    expect(viewerShortcut(ev('Enter'))).toBe('toggle-focus');
+    expect(viewerShortcut(ev('Enter', { target: { tagName: 'BUTTON', isContentEditable: false } }))).toBeNull();
   });
 
   it('con Ctrl, Meta o Alt no es un atajo del visor', () => {
