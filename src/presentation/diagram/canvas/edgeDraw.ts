@@ -1,6 +1,7 @@
 // src/presentation/diagram/canvas/edgeDraw.ts — arista completa: cabezas por extremo, estilo, multiplicidades y etiqueta.
 import type { RelationshipModel } from '../../../domain/diagram/model';
 import { FONTS } from '../style/contract';
+import type { EdgeMark } from '../analysis/overlay';
 import type { EdgePath } from '../types';
 import { resolveColor } from './color';
 import {
@@ -62,22 +63,49 @@ export function drawEdgeFull(
   e: EdgePath,
   rel: RelationshipModel | undefined,
   theme: EdgeTheme,
-  o: { labels: boolean; heads: boolean; lineWidth: number; highlighted?: boolean },
+  o: {
+    labels: boolean;
+    heads: boolean;
+    lineWidth: number;
+    highlighted?: boolean;
+    /** Capa de análisis (T9): la arista está en un ciclo o va hacia una capa superior. */
+    mark?: EdgeMark | null;
+    markColor?: string;
+  },
 ): void {
   const pts = simplify(e.points);
   if (pts.length < 4) return;
   const heads = headsOf(rel ?? { type: e.type });
-  const color = o.highlighted ? theme.accent : resolveColor(ctx, rel?.style?.color) ?? theme.edge;
+  const mark = o.mark ?? null;
+  const color = mark && o.markColor ? o.markColor : o.highlighted ? theme.accent : resolveColor(ctx, rel?.style?.color) ?? theme.edge;
   const dashed = rel?.style?.dashed ?? (e.type === 'DEPENDENCY' || e.type === 'IMPLEMENTS');
   const first = firstSegment(pts);
   const last = lastSegment(pts);
   const sh = o.heads && first ? headGeometry(heads.source, ...first) : { inset: 0, shapes: [] };
   const th = o.heads && last ? headGeometry(heads.target, ...last) : { inset: 0, shapes: [] };
 
+  const body = trimEnds(pts, sh.inset, th.inset);
+  const orthogonal = e.routing === 'orthogonal';
   ctx.strokeStyle = color;
-  ctx.lineWidth = o.lineWidth * (rel?.style?.bold ? 2 : 1);
-  ctx.setLineDash(dashed ? [6 * o.lineWidth, 4 * o.lineWidth] : []);
-  strokePath(ctx, trimEnds(pts, sh.inset, th.inset), e.routing === 'orthogonal');
+  if (mark === 'cycle') {
+    // Trazo doble: línea gruesa del color de la marca y, encima, una fina del color del lienzo.
+    ctx.setLineDash([]);
+    ctx.lineWidth = o.lineWidth * 3.5;
+    strokePath(ctx, body, orthogonal);
+    ctx.strokeStyle = theme.bg;
+    ctx.lineWidth = o.lineWidth * 1.1;
+    strokePath(ctx, body, orthogonal);
+    ctx.strokeStyle = color;
+  } else if (mark === 'violation') {
+    // Raya y punto, más gruesa que una arista normal.
+    ctx.lineWidth = o.lineWidth * 2;
+    ctx.setLineDash([9 * o.lineWidth, 3 * o.lineWidth, 2 * o.lineWidth, 3 * o.lineWidth]);
+    strokePath(ctx, body, orthogonal);
+  } else {
+    ctx.lineWidth = o.lineWidth * (rel?.style?.bold ? 2 : 1);
+    ctx.setLineDash(dashed ? [6 * o.lineWidth, 4 * o.lineWidth] : []);
+    strokePath(ctx, body, orthogonal);
+  }
 
   if (o.heads) {
     ctx.lineWidth = o.lineWidth;

@@ -4,6 +4,7 @@ import type { JSX, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouse
 import type { Category, DiagramModel, TypeNode } from '../../../domain/diagram/model';
 import type { Skinparams } from '../../../domain/diagram/skinparam';
 import { ContextMenu } from '../../components/ContextMenu';
+import { FALLBACK_HEAT, FALLBACK_MARK_CYCLE, FALLBACK_MARK_VIOLATION, type AnalysisOverlay } from '../analysis/overlay';
 import { contextMenuEntries, type MenuAction, type MenuSubject } from '../contextMenu';
 import { adjacencyOf } from '../graph/adjacency';
 import { filterLayout, type DrawHidden } from '../graph/filters';
@@ -124,6 +125,8 @@ interface Props {
    * (ruta desde aquí, plegar/desplegar, encuadrar, quitar ruta) se resuelven aquí.
    */
   onMenuAction?: (action: MenuAction, subject: MenuSubject) => void;
+  /** Capa de análisis (T9): ciclos, violaciones de capas y mapa de calor. Solo dibujo: no toca el layout. */
+  analysis?: AnalysisOverlay | null;
 }
 
 type Hover = { kind: 'node'; id: string } | { kind: 'edge'; index: number } | null;
@@ -209,6 +212,9 @@ function readTheme(el: HTMLElement): Theme {
     noteBg: v('--uml-note', '#FEFECE'),
     noteBorder: v('--uml-note-border', cardBorder),
     noteFg: v('--uml-note-fg', '#000000'),
+    heat: [1, 2, 3, 4, 5].map((i) => v(`--heat-${i}`, FALLBACK_HEAT[i - 1] as string)),
+    markCycle: v('--mark-cycle', FALLBACK_MARK_CYCLE),
+    markViolation: v('--mark-violation', FALLBACK_MARK_VIOLATION),
   };
 }
 
@@ -224,7 +230,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
     labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename,
-    focusKey = null, focusAnimate = true, hidden = null, menuContext, onMenuAction,
+    focusKey = null, focusAnimate = true, hidden = null, menuContext, onMenuAction, analysis = null,
   },
   ref,
 ) {
@@ -369,7 +375,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const snapshot = {
     model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, onSelect, onViewChange,
     collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename,
-    inFocus, route, hidden,
+    inFocus, route, hidden, analysis,
   };
   const latest = useRef(snapshot);
   latest.current = snapshot;
@@ -475,6 +481,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         fx,
         extraTypes,
         halo,
+        analysis: L.analysis,
       });
       const minimap = minimapRef.current;
       if (minimap) drawMinimap(minimap, layout, viewRef.current, size.w, size.h, themeRef.current);
@@ -745,7 +752,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // Cualquier cambio de lo que se dibuja ⇒ repintar.
   useEffect(() => {
     schedule();
-  }, [visibleLayout, selectedId, model, focus, liveHover, display, labels, packageCounts, schedule]);
+  }, [visibleLayout, selectedId, model, focus, liveHover, display, labels, packageCounts, analysis, schedule]);
 
   // skinparam distinto ⇒ el tema cacheado ya no vale (antes solo se invalidaba con el tema de la app).
   const skinK = skinKey(skin);

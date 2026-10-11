@@ -51,3 +51,12 @@ export function textOn(bg: string, dark = '#000000', light = '#ffffff'): string 
   if (!rgb) return dark;
   return luminance(rgb) > 0.4 ? dark : light;
 }
+
+/** Negro o blanco, el de MÁS contraste WCAG con el fondo (mapa de calor, T9). Sin color reconocible: negro. */
+export function readableOn(bg: string): string {
+  const rgb = parseRgb(bg);
+  if (!rgb) return '#000000';
+  const l = luminance(rgb);
+  // Contraste con negro: (l + 0.05) / 0.05; con blanco: 1.05 / (l + 0.05).
+  return (l + 0.05) / 0.05 >= 1.05 / (l + 0.05) ? '#000000' : '#ffffff';
+}

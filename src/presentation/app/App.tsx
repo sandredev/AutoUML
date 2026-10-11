@@ -94,6 +94,8 @@ export default function App() {
   const [sourceFiles, setSourceFiles] = useState<string[]>([]);
   const [externalPath, setExternalPath] = useState<string | null>(null);
   const [initialSidecar, setInitialSidecar] = useState<SidecarState | null | undefined>(undefined);
+  // T9: orden de capas de layers.json del documento (null = sin archivo: se usan las capas del modelo).
+  const [analysisLayers, setAnalysisLayers] = useState<string[] | null>(null);
 
   // T7: editor en vivo. El texto vive en CodeMirror; aquí solo refs (cada tecla no re-renderiza la app).
   const editorRef = useRef<CodeEditorHandle | null>(null);
@@ -517,10 +519,16 @@ export default function App() {
   const projectName = project?.meta.name ?? null;
   useEffect(() => {
     setInitialSidecar(undefined);
+    setAnalysisLayers(null);
     if (docKey === undefined) return;
     const scope: PumlScope | null = projectName !== null ? { project: projectName } : externalPath ? { file: externalPath } : null;
     if (scope === null) return;
     let cancelled = false;
+    void api.loadLayers(scope).then((r) => {
+      if (cancelled || !r.ok) return;
+      if (r.value.corrupt) setStatus({ kind: 'info', text: tRef.current('status.layersCorrupt') });
+      setAnalysisLayers(r.value.layers);
+    });
     void api.loadSidecar(scope).then((r) => {
       if (cancelled) return;
       if (!r.ok) {
@@ -599,6 +607,13 @@ export default function App() {
     const result = await api.savePng(docName + '.png', new Uint8Array(await blob.arrayBuffer()));
     if (!result.ok) setStatus({ kind: 'error', text: result.error });
     else if (result.value) setStatus({ kind: 'success', text: t('status.pngSaved', { path: result.value }) });
+  }, [docName, t]);
+
+  // T9: informe de arquitectura en Markdown (lo arma el visor con el mismo análisis que muestra el panel).
+  const handleExportReport = useCallback(async (markdown: string) => {
+    const result = await api.saveMarkdown(t('analysis.reportFile', { name: docName }), markdown);
+    if (!result.ok) setStatus({ kind: 'error', text: result.error });
+    else if (result.value) setStatus({ kind: 'success', text: t('status.reportSaved', { path: result.value }) });
   }, [docName, t]);
 
   const handleExportSvg = useCallback(async () => {
@@ -1082,6 +1097,9 @@ export default function App() {
           {...(docKey !== undefined ? { docKey } : {})}
           {...(initialSidecar !== undefined ? { initialSidecar } : {})}
           onViewStateChange={handleViewStateChange}
+          analysisLayers={analysisLayers}
+          reportTitle={docName}
+          onExportReport={handleExportReport}
         >
           <LoadingIntro
             active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })}
