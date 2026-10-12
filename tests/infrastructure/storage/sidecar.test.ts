@@ -34,6 +34,13 @@ describe('sidecar paths', () => {
 });
 
 describe('validateSidecar', () => {
+  it('conserva los avisos ignorados (T11) y descarta lo que no es texto', () => {
+    const ok = validateSidecar({ ...validState(), ignoredIssues: ['warning:!theme plain', 3, '', 'x'.repeat(600)] });
+    expect(ok?.ignoredIssues).toEqual(['warning:!theme plain']);
+    expect(validateSidecar({ ...validState(), ignoredIssues: [] })).toEqual(validState());
+    expect(validateSidecar({ ...validState(), ignoredIssues: 'no' })).toEqual(validState());
+  });
+
   it('acepta un estado válido y rechaza versión, tipos y NaN', () => {
     expect(validateSidecar(validState())).toEqual(validState());
     expect(validateSidecar({ ...validState(), version: 2 })).toBeNull();

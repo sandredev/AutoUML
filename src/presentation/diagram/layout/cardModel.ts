@@ -146,9 +146,10 @@ export function measureCardBox(
 ): { w: number; h: number; geometry: CardGeometry } {
   const geometry = geometryOf(c);
   const nameW = m(c.name, c.italic ? 'nameItalic' : 'name');
-  const headLeft = c.noBadge ? CARD.padX : CARD.padX + CARD.badgeD + 6;
-  let w = Math.max(CARD.minW, headLeft * 2 + nameW);
-  if (c.stereotype) w = Math.max(w, headLeft * 2 + m(c.stereotype, 'stereo'));
+  // T11: nombre e insignia alineados a la izquierda (insignia + separación + nombre + relleno).
+  const headLeft = c.noBadge ? CARD.padX : CARD.padX + CARD.badgeD + CARD.badgeGap;
+  let w = Math.max(CARD.minW, headLeft + nameW + CARD.padX);
+  if (c.stereotype) w = Math.max(w, headLeft + m(c.stereotype, 'stereo') + CARD.padX);
   for (const rows of c.sections) {
     for (const r of rows) w = Math.max(w, 2 * CARD.padX + m(r.text, r.isAbstract ? 'rowItalic' : 'row'));
   }

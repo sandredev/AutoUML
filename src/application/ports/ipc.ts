@@ -4,6 +4,9 @@ import type { ThemeMode } from '../../domain/rules/themes';
 import type { RelType, Visibility } from '../../domain/diagram/model';
 // El preload solo importa TIPOS de aquí, porque en modo sandbox no puede cargar otros módulos.
 
+/** Alto de la barra de título unificada (menús + documento + paneles); los controles nativos se superponen. */
+export const TITLE_BAR_HEIGHT = 40;
+
 export interface ProjectMeta {
   name: string;
   createdAt: string;
@@ -34,6 +37,19 @@ export interface ProjectSummary {
   hasPuml: boolean;
 }
 
+/** Información técnica para Configuración › Acerca de (T11). */
+export interface AppInfo {
+  version: string;
+  electron: string;
+  chrome: string;
+  /** Sistema operativo legible ("Windows 10.0.26200", "Ubuntu 24.04.1 LTS"). */
+  os: string;
+  /** Carpeta de datos de la app (proyectos, historial). */
+  dataPath: string;
+  /** Compilación de desarrollo (no empaquetada). */
+  dev: boolean;
+}
+
 export interface StorageInfo {
   root: string;
   mode: 'dev' | 'exe' | 'fallback';
@@ -52,6 +68,11 @@ export interface SidecarState {
   filters?: SidecarFilters;
   /** Vistas de presentación (T10). Opcional: sin ellas el sidecar sigue siendo v1. */
   views?: SidecarView[];
+  /**
+   * Avisos que el usuario decidió no ver en este documento (T11): clave = mensaje del aviso sin el número de
+   * línea, así sobrevive a las ediciones. Opcional: sin ellos el sidecar sigue siendo v1.
+   */
+  ignoredIssues?: string[];
 }
 
 /** Una diapositiva del modo presentación (T10): cámara + estado opcional del visor. */
@@ -171,7 +192,12 @@ export type MenuAction =
   | `theme-${ThemeMode}`
   | 'locale-es'
   | 'locale-en'
-  | 'settings-more';
+  | 'settings-more'
+  | 'open-file'
+  | 'save-as'
+  | 'go-home'
+  | 'toggle-inspector'
+  | 'show-about';
 
 // Acciones del menú que solo puede ejecutar el proceso main.
 export const MENU_COMMANDS = ['quit', 'copy', 'select-all', 'dev-tools', 'about', 'copy-project-name'] as const;
@@ -183,6 +209,8 @@ export interface MenuState {
   sidebarVisible: boolean;
   /** Panel del editor de código visible (T7). */
   editorVisible: boolean;
+  /** Panel del inspector visible (T11). */
+  inspectorVisible: boolean;
   /** Hay cambios del editor sin guardar (T7). */
   dirty: boolean;
   locale: 'es' | 'en';
@@ -232,7 +260,10 @@ export type IpcChannel =
   | 'window:controls-colors'
   | 'menu:action'
   | 'app:close-requested'
-  | 'app:confirm-close';
+  | 'app:confirm-close'
+  | 'history:restore'
+  | 'app:info'
+  | 'app:open-data-folder';
 
 // API expuesta en window.autouml (bridge tipado del shell Electron).
 export interface AutoUmlApi {
@@ -240,6 +271,10 @@ export interface AutoUmlApi {
   // Obtiene y abre el archivo nativo soltado sin exponer su ruta al renderer.
   openDroppedPuml(file: { readonly name: string }): Promise<Result<OpenPumlFile>>;
   getStorageInfo(): Promise<StorageInfo>;
+  // Versiones, sistema y carpeta de datos para Acerca de (T11).
+  getAppInfo(): Promise<AppInfo>;
+  // Abre la carpeta de datos en el explorador del sistema (T11).
+  openDataFolder(): Promise<Result<void>>;
   listProjects(): Promise<Result<ProjectSummary[]>>;
   createProject(name: string): Promise<Result<ProjectInfo>>;
   openProject(name: string): Promise<Result<ProjectInfo>>;

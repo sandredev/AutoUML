@@ -102,13 +102,14 @@ export function drawEdgeFull(
     ctx.setLineDash([9 * o.lineWidth, 3 * o.lineWidth, 2 * o.lineWidth, 3 * o.lineWidth]);
     strokePath(ctx, body, orthogonal);
   } else {
-    ctx.lineWidth = o.lineWidth * (rel?.style?.bold ? 2 : 1);
+    // T11: aristas de 1,5 px (2 px resaltadas); la raya conserva su ritmo de 6/4.
+    ctx.lineWidth = o.lineWidth * (rel?.style?.bold ? 2 : o.highlighted ? 2 : 1.5);
     ctx.setLineDash(dashed ? [6 * o.lineWidth, 4 * o.lineWidth] : []);
     strokePath(ctx, body, orthogonal);
   }
 
   if (o.heads) {
-    ctx.lineWidth = o.lineWidth;
+    ctx.lineWidth = o.lineWidth * (mark ? 1 : 1.5);
     drawShapes(ctx, sh.shapes, color, theme.bg);
     drawShapes(ctx, th.shapes, color, theme.bg);
   }

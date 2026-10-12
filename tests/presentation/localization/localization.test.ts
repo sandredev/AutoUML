@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { detectLocale, parseLocale, translate, withShortcut } from '../../../src/presentation/localization/translations';
 import { localeStorageKey, readStoredLocale, writeStoredLocale, type KeyValueStore } from '../../../src/presentation/localization/localeStorage';
-import { filterCategories, pickActive } from '../../../src/presentation/components/settingsModel';
+import { settingsCategories } from '../../../src/presentation/components/settingsModel';
 
 function memoryStore(): KeyValueStore & { data: Map<string, string> } {
   const data = new Map<string, string>();
@@ -62,15 +62,10 @@ describe('localización (issue #1)', () => {
     expect(translate('en', 'drop.opening')).toBe('Opening diagram…');
   });
 
-  it('filtra categorías por título u opción, sin acentos', () => {
+  it('define tres secciones de configuración sin buscador', () => {
+    expect(settingsCategories.map((c) => c.id)).toEqual(['appearance', 'language', 'about']);
     const tEs = (k: Parameters<typeof translate>[1]) => translate('es', k);
-    expect(filterCategories('', tEs).length).toBe(3);
-    expect(filterCategories('oscuro', tEs).map((c) => c.id)).toEqual(['appearance']);
-    expect(filterCategories('english', tEs).map((c) => c.id)).toEqual(['language']);
-    expect(filterCategories('apariencia', tEs).map((c) => c.id)).toEqual(['appearance']);
-    expect(filterCategories('zzz', tEs)).toEqual([]);
-    expect(pickActive('about', filterCategories('oscuro', tEs))).toBe('appearance');
-    expect(pickActive('about', [])).toBeNull();
+    for (const c of settingsCategories) expect(tEs(c.title).startsWith('settings.')).toBe(false);
   });
 });
 

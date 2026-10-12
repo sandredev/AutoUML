@@ -222,7 +222,7 @@ function readTheme(el: HTMLElement): Theme {
   for (const c of CATEGORIES) cat[c] = v(`--cat-${c}`, '#57606a');
   const cardBorder = v('--uml-card-border', '#181818');
   return {
-    bg: v('--bg-elev', '#ffffff'),
+    bg: v('--canvas', v('--bg-elev', '#ffffff')),
     fg: v('--fg', '#1f2328'),
     muted: v('--fg-muted', '#656d76'),
     border: v('--border', '#d0d7de'),
@@ -233,6 +233,7 @@ function readTheme(el: HTMLElement): Theme {
     cardFg: v('--uml-card-fg', '#000000'),
     edge: v('--uml-edge', '#181818'),
     pkg: v('--uml-pkg', '#555b62'),
+    pkgFg: v('--uml-pkg-fg', v('--fg-muted', '#555b70')),
     noteBg: v('--uml-note', '#FEFECE'),
     noteBorder: v('--uml-note-border', cardBorder),
     noteFg: v('--uml-note-fg', '#000000'),

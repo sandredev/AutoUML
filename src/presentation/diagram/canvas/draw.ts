@@ -28,8 +28,10 @@ export interface Theme {
   cardFg: string;
   /** Color de las relaciones. */
   edge: string;
-  /** Borde y nombre de los paquetes. */
+  /** Borde de los paquetes (≥ 3:1 sobre el lienzo). */
   pkg: string;
+  /** Prefijo del nombre del paquete (gris legible); el último segmento va en `fg`. Sin él, `pkg`. */
+  pkgFg?: string;
   /** Relleno de los paquetes (skinparam PackageBackgroundColor); sin valor no se rellenan. */
   pkgBg?: string;
   /** Notas: papel, borde y texto. */
@@ -82,29 +84,30 @@ export interface DrawArgs {
 /** Tema claro fijo para exportar (mismos valores que los fallbacks de readTheme). */
 export const LIGHT_THEME: Theme = {
   bg: '#ffffff',
-  fg: '#1f2328',
-  muted: '#656d76',
-  border: '#d0d7de',
-  accent: '#0969da',
+  fg: '#1e2033',
+  muted: '#555b70',
+  border: '#d9dce5',
+  accent: '#b8360f',
   cat: {
-    sealed: '#57606a',
-    abstract: '#57606a',
-    interface: '#57606a',
-    enum: '#57606a',
-    record: '#57606a',
-    annotation: '#57606a',
-    class: '#57606a',
-    external: '#57606a',
-    undeclared: '#57606a',
+    sealed: '#683fb4',
+    abstract: '#5d46b1',
+    interface: '#0a56b1',
+    enum: '#15662c',
+    record: '#0b6262',
+    annotation: '#973d00',
+    class: '#545a69',
+    external: '#755300',
+    undeclared: '#a62049',
   },
-  card: '#F1F1F1',
-  cardBorder: '#181818',
-  cardFg: '#000000',
-  edge: '#181818',
-  pkg: '#555b62',
+  card: '#ffffff',
+  cardBorder: '#454a62',
+  cardFg: '#1e2033',
+  edge: '#4f546c',
+  pkg: '#7d8297',
+  pkgFg: '#555b70',
   noteBg: '#FEFECE',
-  noteBorder: '#181818',
-  noteFg: '#000000',
+  noteBorder: '#454a62',
+  noteFg: '#1e2033',
 };
 
 export const LOD_BOXES = 0.15;
@@ -118,7 +121,7 @@ export const LOD_DETAIL = 0.8;
 export const FULL_DETAIL_MAX_NODES = 600;
 /** Tamaño mínimo en pantalla (px) que se intenta dar a los nombres al alejar, sin salirse de la cabecera. */
 const MIN_NAME_SCREEN_PX = 10;
-const PKG_PX = 10;
+const PKG_PX = 12;
 const PKG_PX_MAX = 18;
 const MAX_LOW_EDGES = 1500;
 const SELECT_RADIUS = 4;
@@ -185,6 +188,40 @@ function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
   ctx.closePath();
 }
 
+const PKG_RADIUS = 6;
+const UI_SANS = '"Segoe UI Variable Text", "Segoe UI", system-ui, Ubuntu, Cantarell, "DejaVu Sans", sans-serif';
+
+/**
+ * Nombre de paquete: prefijo en gris y último segmento en negrita ("domain.model." + "core"), como en la lista
+ * de entidades. Si no cabe, se recorta entero con "…" (el nombre completo está en el tooltip y en la lista).
+ */
+function drawPackageLabel(ctx: CanvasRenderingContext2D, name: string, x: number, y: number, maxW: number, size: number, theme: Theme): void {
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const dot = name.lastIndexOf('.');
+  const prefix = dot < 0 ? '' : name.slice(0, dot + 1);
+  const leaf = dot < 0 ? name : name.slice(dot + 1);
+  const muted = theme.pkgFg ?? theme.pkg;
+  ctx.font = `${size}px ${UI_SANS}`;
+  const pw = ctx.measureText(prefix).width;
+  ctx.font = `600 ${size}px ${UI_SANS}`;
+  const lw = ctx.measureText(leaf).width;
+  if (pw + lw <= maxW) {
+    if (prefix) {
+      ctx.font = `${size}px ${UI_SANS}`;
+      ctx.fillStyle = muted;
+      ctx.fillText(prefix, x, y);
+    }
+    ctx.font = `600 ${size}px ${UI_SANS}`;
+    ctx.fillStyle = theme.fg;
+    ctx.fillText(leaf, x + pw, y);
+    return;
+  }
+  ctx.font = `600 ${size}px ${UI_SANS}`;
+  ctx.fillStyle = theme.fg;
+  ctx.fillText(fitText(ctx, name, maxW), x, y);
+}
+
 /** Tarjeta de paquete contraído (sin TypeNode): resumen con nombre y subtítulo. */
 function drawPackageNode(ctx: CanvasRenderingContext2D, b: NodeBox, px: number, theme: Theme, subtitle?: string): void {
   roundRectPath(ctx, b.x, b.y, b.w, b.h, SELECT_RADIUS);
@@ -197,11 +234,11 @@ function drawPackageNode(ctx: CanvasRenderingContext2D, b: NodeBox, px: number, 
   ctx.fillStyle = theme.cardFg;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = '13px system-ui, sans-serif';
+  ctx.font = `600 13px ${UI_SANS}`;
   ctx.fillText(fitText(ctx, name, b.w - 16), b.x + b.w / 2, b.y + 16);
   const sub = subtitle ?? b.subtitle;
   if (sub) {
-    ctx.font = '10px system-ui, sans-serif';
+    ctx.font = `12px ${UI_SANS}`;
     ctx.fillStyle = theme.muted;
     ctx.fillText(fitText(ctx, sub, b.w - 16), b.x + b.w / 2, b.y + 34);
   }
@@ -349,20 +386,16 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       ctx.fillStyle = theme.pkgBg;
       ctx.fillRect(p.x, p.y, p.w, p.h);
     }
+    // T11: marco sólido de 1 px con --uml-pkg (≥ 3:1) y radio 6; el nombre va dentro, sin pestaña.
     ctx.strokeStyle = theme.pkg;
-    ctx.strokeRect(p.x, p.y, p.w, p.h);
+    roundRectPath(ctx, p.x, p.y, p.w, p.h, PKG_RADIUS);
+    ctx.stroke();
     if (!boxesOnly) {
-      // Pestaña con el nombre del paquete, como en PlantUML.
-      ctx.font = full ? `600 ${fontPx(PKG_PX, PKG_PX_MAX, s)}px system-ui, sans-serif` : '600 10px system-ui, sans-serif';
-      const label = fitText(ctx, p.name, p.w - 36);
-      const tabW = Math.min(p.w, ctx.measureText(label).width + 16);
-      ctx.strokeRect(p.x, p.y, tabW, 22);
-      ctx.fillStyle = theme.pkg;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, p.x + 8, p.y + 11);
+      const size = full ? fontPx(PKG_PX, PKG_PX_MAX, s) : PKG_PX;
+      drawPackageLabel(ctx, p.name, p.x + 12, p.y + 11, p.w - 36, size, theme);
       ctx.textAlign = 'right';
       ctx.fillStyle = theme.accent;
+      ctx.font = `600 ${size}px ${UI_SANS}`;
       ctx.fillText('−', p.x + p.w - 8, p.y + 11);
     }
   }
@@ -514,16 +547,18 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     ctx.globalAlpha = 1;
   }
 
+  // T11: hover = borde con el color del texto; la selección ya la dibuja la tarjeta (2 px de acento + cabecera
+  // tintada). Las tarjetas sin TypeNode (paquete plegado) llevan aquí su borde de selección.
   if (hoverBox && hoverBox !== selBox) {
     roundRectPath(ctx, hoverBox.x, hoverBox.y, hoverBox.w, hoverBox.h, SELECT_RADIUS);
-    ctx.strokeStyle = theme.accent;
-    ctx.lineWidth = 2 * px;
+    ctx.strokeStyle = theme.cardFg;
+    ctx.lineWidth = 1.5 * px;
     ctx.stroke();
   }
-  if (selBox) {
+  if (selBox && isPackageNode(selBox.id)) {
     roundRectPath(ctx, selBox.x, selBox.y, selBox.w, selBox.h, SELECT_RADIUS);
     ctx.strokeStyle = theme.accent;
-    ctx.lineWidth = 3 * px;
+    ctx.lineWidth = 2 * px;
     ctx.stroke();
   }
 

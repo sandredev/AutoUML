@@ -2,8 +2,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { HistoryApi, HistoryEntry } from '../../../src/application/ports/history';
 import {
-  clearHistory,
-  HistoryView,
   isPumlPath,
   javaMessage,
   openDroppedFiles,
@@ -11,8 +9,8 @@ import {
   reopenEntry,
   saveAs,
   togglePin,
-  type HistoryViewProps,
-} from '../../../src/presentation/components/HistoryPanel';
+} from '../../../src/presentation/components/historyActions';
+import { formatRecentDate, RecentsView, type RecentsViewProps } from '../../../src/presentation/components/StartScreen';
 
 const entry = (overrides: Partial<HistoryEntry> = {}): HistoryEntry => ({
   id: 'puml:a',
@@ -41,6 +39,7 @@ function makeApi(overrides: Partial<HistoryApi> = {}): HistoryApi {
     setPinned: vi.fn(async () => ({ ok: true as const, value: [entry({ pinned: true })] })),
     remove: vi.fn(async () => ({ ok: true as const, value: [] })),
     clear: vi.fn(async () => ({ ok: true as const, value: undefined })),
+    restore: vi.fn(async () => ({ ok: true as const, value: [entry()] })),
     savePumlAs: vi.fn(async () => ({ ok: true as const, value: null })),
     ...overrides,
   };
@@ -48,19 +47,19 @@ function makeApi(overrides: Partial<HistoryApi> = {}): HistoryApi {
 
 const noop = (): void => undefined;
 
-function renderView(overrides: Partial<HistoryViewProps> = {}): string {
+function renderView(overrides: Partial<RecentsViewProps> = {}): string {
   return renderToStaticMarkup(
-    <HistoryView
+    <RecentsView
       entries={[]}
       busy={false}
       error={null}
-      canSave={false}
-      onSave={noop}
-      onRefresh={noop}
-      onClear={noop}
+      cleared={null}
       onReopen={noop}
       onPin={noop}
       onRemove={noop}
+      onLocate={noop}
+      onClear={noop}
+      onUndoClear={noop}
       {...overrides}
     />,
   );
@@ -76,43 +75,42 @@ describe('isPumlPath', () => {
   });
 });
 
-describe('HistoryView', () => {
-  it('colapsado oculta el contenido y deja el botón para mostrarlo', () => {
-    const html = renderView({ open: false, onToggle: noop, entries: [entry()] });
-    expect(html).toContain('collapsed');
-    expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('Mostrar historial');
-    expect(html).not.toContain('/tmp/a.puml');
-  });
-
-  it('abierto expone el botón para ocultar', () => {
-    const html = renderView({ open: true, onToggle: noop, entries: [entry()] });
-    expect(html).toContain('aria-expanded="true"');
-    expect(html).toContain('Ocultar historial');
-    expect(html).toContain('/tmp/a.puml');
-  });
-
-  it('muestra el estado vacío y desactiva guardar sin contenido', () => {
+describe('Recientes en Inicio (T11)', () => {
+  it('primera ejecución: explica qué hacer cuando no hay recientes', () => {
     const html = renderView();
-    expect(html).toContain('Historial vacío');
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Guardar como/);
+    expect(html).toContain('Aún no has abierto ningún diagrama');
+    expect(html).not.toContain('Borrar recientes');
   });
 
-  it('muestra la ruta y el estado fijado', () => {
-    const html = renderView({ entries: [entry({ pinned: true })], canSave: true });
-    expect(html).toContain('/tmp/a.puml');
-    expect(html).toContain('aria-pressed="true"');
-    expect(html).toContain('Desfijar');
+  it('separa fijados y recientes, y la fila entera abre', () => {
+    const html = renderView({ entries: [entry({ pinned: true }), entry({ id: 'b', name: 'b.puml', path: '/tmp/b.puml' })] });
+    expect(html).toContain('Fijados');
+    expect(html).toContain('Recientes');
+    expect(html).toContain('aria-label="Abrir a.puml"');
+    expect(html).toContain('aria-label="Desfijar a.puml"');
+    expect(html).toContain('/tmp/b.puml');
   });
 
-  it('desactiva reabrir para una entrada no disponible', () => {
+  it('un reciente que ya no existe dice "No se encuentra" como estado, con Buscar y Quitar', () => {
     const html = renderView({ entries: [entry({ available: false })] });
-    expect(html).toContain('No disponible');
-    expect(html).toMatch(/<button[^>]*aria-label="Reabrir a\.puml"[^>]*disabled=""/);
+    expect(html).toContain('No se encuentra');
+    expect(html).toContain('Buscar…');
+    expect(html).toContain('aria-label="Quitar a.puml de recientes"');
+    expect(html).not.toContain('aria-label="Abrir a.puml"');
+    expect(html).not.toContain('opacity');
   });
 
-  it('expone errores como alerta accesible', () => {
+  it('tras borrar ofrece deshacer y expone errores como alerta', () => {
+    expect(renderView({ cleared: [entry()] })).toContain('Deshacer');
     expect(renderView({ error: 'Fallo' })).toContain('role="alert"');
+  });
+
+  it('fecha corta y relativa', () => {
+    const now = new Date(2026, 9, 12, 21, 0);
+    expect(formatRecentDate(new Date(2026, 9, 12, 20, 52).toISOString(), 'es', now).today).toBe(true);
+    expect(formatRecentDate(new Date(2026, 9, 11, 9, 0).toISOString(), 'es', now).yesterday).toBe(true);
+    expect(formatRecentDate(new Date(2026, 9, 9).toISOString(), 'es', now).text).not.toContain('2026');
+    expect(formatRecentDate(new Date(2025, 9, 9).toISOString(), 'es', now).text).toContain('2025');
   });
 });
 
@@ -168,14 +166,6 @@ describe('acciones del historial', () => {
     expect(api.remove).toHaveBeenCalledWith('puml:a');
     expect(outcome.entries).toEqual([]);
     expect(outcome.status?.text).toContain('no se borró');
-  });
-
-  it('limpia solo después de confirmar', async () => {
-    const api = makeApi();
-    expect((await clearHistory(api, () => false)).status).toBeNull();
-    expect(api.clear).not.toHaveBeenCalled();
-    expect((await clearHistory(api, () => true)).entries).toEqual([]);
-    expect(api.clear).toHaveBeenCalledTimes(1);
   });
 
   it('maneja guardar como sin texto, cancelación y éxito', async () => {

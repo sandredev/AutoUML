@@ -5,6 +5,27 @@ import type { ReportLabels } from '../../domain/analysis/report';
 import type { Category, RelType } from '../../domain/diagram/model';
 import type { PaletteActionLabels } from './palette/actions';
 
+/** Barra del visor y aviso de vista (T11). Los títulos ya llevan el atajo entre paréntesis. */
+export interface ToolbarLabels {
+  palette: string;
+  zoomIn: string;
+  zoomOut: string;
+  zoomLevel: string;
+  fit: string;
+  fullscreen: string;
+  relayout: string;
+  relayoutTitle: string;
+  exportLabel: string;
+  exportPng: string;
+  exportSvg: string;
+  exportPdf: string;
+  copyPng: string;
+  view: string;
+  filtered: string;
+  focused: string;
+  showAll: string;
+}
+
 export interface ViewerLabels {
   // Lienzo
   canvasAria: string;
@@ -126,6 +147,7 @@ export interface ViewerLabels {
   routePick: string;
   /** Diagnóstico de arquitectura (T9). */
   analysis: AnalysisLabels;
+  toolbar: ToolbarLabels;
   /** Paleta de comandos (T10). */
   palette: PaletteLabels;
   /** Vistas de presentación (T10). */
@@ -325,6 +347,25 @@ export const DEFAULT_LABELS: ViewerLabels = {
   menuExitFocus: 'Salir del foco',
   menuClearFilters: 'Quitar filtros',
   routePick: 'Ruta desde {from}: haz clic en la clase de destino',
+  toolbar: {
+    palette: 'Comandos y búsqueda (Ctrl+K)',
+    zoomIn: 'Acercar (Ctrl+=)',
+    zoomOut: 'Alejar (Ctrl+-)',
+    zoomLevel: 'Zoom',
+    fit: 'Ajustar a la vista (Ctrl+0)',
+    fullscreen: 'Pantalla completa (F11)',
+    relayout: 'Disposición',
+    relayoutTitle: 'Recalcular la disposición (Ctrl+Shift+L)',
+    exportLabel: 'Exportar',
+    exportPng: 'Imagen PNG…',
+    exportSvg: 'Imagen SVG…',
+    exportPdf: 'Documento PDF…',
+    copyPng: 'Copiar como imagen',
+    view: 'Vista',
+    filtered: 'Filtros aplicados',
+    focused: 'Foco en {name}',
+    showAll: 'Mostrar todo',
+  },
   palette: {
     title: 'Paleta de comandos',
     placeholder: 'Buscar clase, paquete o acción…',

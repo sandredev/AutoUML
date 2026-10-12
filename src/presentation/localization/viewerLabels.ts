@@ -2,6 +2,8 @@
 import type { Category, RelType } from '../../domain/diagram/model';
 import type { ViewerLabels } from '../diagram/labels';
 import type { TranslateFn } from './LocalizationProvider';
+import { keysOf } from '../../application/shortcuts';
+import { withShortcut } from './translations';
 
 const CATEGORIES: Category[] = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
 const REL_TYPES: RelType[] = ['EXTENDS', 'IMPLEMENTS', 'ASSOCIATION', 'DEPENDENCY', 'COMPOSITION', 'AGGREGATION'];
@@ -107,6 +109,25 @@ export function viewerLabels(t: TranslateFn): ViewerLabels {
     menuExitFocus: t('viewer.menuExitFocus'),
     menuClearFilters: t('viewer.menuClearFilters'),
     routePick: t('viewer.routePick'),
+    toolbar: {
+      palette: withShortcut(t('viewer.toolbar.palette'), keysOf('palette')),
+      zoomIn: withShortcut(t('header.zoomIn'), keysOf('zoomIn')),
+      zoomOut: withShortcut(t('header.zoomOut'), keysOf('zoomOut')),
+      zoomLevel: t('viewer.toolbar.zoomLevel'),
+      fit: withShortcut(t('viewer.toolbar.fit'), keysOf('fit')),
+      fullscreen: withShortcut(t('viewer.toolbar.fullscreen'), keysOf('fullscreen')),
+      relayout: t('viewer.toolbar.relayout'),
+      relayoutTitle: withShortcut(t('viewer.toolbar.relayoutTitle'), keysOf('relayout')),
+      exportLabel: t('viewer.toolbar.export'),
+      exportPng: t('viewer.toolbar.exportPng'),
+      exportSvg: t('viewer.toolbar.exportSvg'),
+      exportPdf: t('viewer.toolbar.exportPdf'),
+      copyPng: t('viewer.toolbar.copyPng'),
+      view: t('viewer.toolbar.view'),
+      filtered: t('viewer.toolbar.filtered'),
+      focused: t('viewer.toolbar.focused'),
+      showAll: t('viewer.toolbar.showAll'),
+    },
     palette: {
       title: t('viewer.palette.title'),
       placeholder: t('viewer.palette.placeholder'),

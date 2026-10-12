@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../../src/presentation/diagram/layout/layout.worker?worker', async () => {
@@ -64,33 +64,47 @@ beforeAll(() => {
 });
 afterEach(cleanup);
 
-describe('herramientas del header (#34)', () => {
-  it('Exportar, Relayout y Encuadrar responden con un diagrama abierto', async () => {
+describe('herramientas del visor (#34, T11)', () => {
+  it('Exportar, Disposición y Pantalla completa responden con un diagrama abierto', async () => {
     const { LocalizationProvider } = await import('../../../src/presentation/localization/LocalizationProvider');
     const { default: App } = await import('../../../src/presentation/app/App');
     render(<LocalizationProvider><App /></LocalizationProvider>);
-    await waitFor(() => expect(screen.getByRole('button', { name: /p/ })).toBeTruthy(), { timeout: 3000 }).catch(() => undefined);
-    const buttons = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.toolbar .tool-btn'));
-    const report = (): string => buttons().map((b) => `${b.getAttribute('aria-label')}:${b.disabled ? 'off' : 'on'}`).join(' | ');
-    fireEvent.click(document.querySelector('.choice-btn')!);
+    // Inicio es la pantalla de arranque: "Diagramas guardados…" abre la lista de diagramas.
+    const saved = await waitFor(() => {
+      const el = document.querySelector<HTMLButtonElement>('.start-saved');
+      if (!el) throw new Error('sin Inicio');
+      return el;
+    }, { timeout: 3000 });
+    fireEvent.click(saved);
     const item = await waitFor(() => {
       const el = document.querySelector('.project-item');
       if (!el) throw new Error('sin item p');
       return el;
     }, { timeout: 3000 });
     fireEvent.click(item);
-    await waitFor(() => expect(/Zoom in[^|]*:on/.test(report())).toBe(true), { timeout: 5000 });
-    const byLabel = (re: RegExp) => buttons().find((b) => re.test(b.getAttribute('aria-label') ?? ''))!;
-    const status = (): string => document.querySelector('.statusbar, .status-bar, footer')?.textContent ?? '';
+    const buttons = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.puml-viewer-bar button'));
+    const byLabel = (re: RegExp) => buttons().find((b) => re.test(b.getAttribute('aria-label') ?? b.getAttribute('title') ?? b.textContent ?? ''));
+    await waitFor(() => expect(byLabel(/zoom in/i)).toBeTruthy(), { timeout: 5000 });
+    const status = (): string => document.querySelector('.statusbar')?.textContent ?? '';
     await waitFor(() => expect(document.querySelector('canvas')).not.toBeNull(), { timeout: 5000 });
 
-    fireEvent.click(byLabel(/export/i));
+    // Exportar es un menú: PNG está dentro.
+    fireEvent.click(buttons().find((b) => /export/i.test(b.textContent ?? ''))!);
+    const png = await waitFor(() => {
+      const el = Array.from(document.querySelectorAll<HTMLButtonElement>('.menu-popup .menu-item')).find((b) => /png/i.test(b.textContent ?? ''));
+      if (!el) throw new Error('sin menú de exportar');
+      return el;
+    });
+    fireEvent.click(png);
     await waitFor(() => expect(calls).toContain('savePng'));
 
-    fireEvent.click(byLabel(/restore|relayout/i));
+    fireEvent.click(buttons().find((b) => /recompute the layout/i.test(b.getAttribute('title') ?? ''))!);
     await waitFor(() => expect(status()).toMatch(/layout restored/i));
 
-    fireEvent.click(byLabel(/full screen|fit/i));
+    fireEvent.click(byLabel(/full screen/i)!);
     await waitFor(() => expect(calls).toContain('requestFullscreen'));
+
+    // Totales en la barra de estado.
+    await waitFor(() => expect(status()).toMatch(/2 types · 1 relationships/i));
   }, 20000);
 });

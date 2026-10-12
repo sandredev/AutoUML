@@ -87,6 +87,12 @@ class B
     expect(m.issues.some((i) => i.severity === 'error' && i.line === 2)).toBe(true);
   });
 
+  it('@enduml dentro de una llave abierta no da un aviso en cascada', () => {
+    const m = parsePuml('@startuml\nclass A {\n- area : dou\n\n@enduml\nclass Tras');
+    expect(m.issues).toEqual([{ line: 2, severity: 'error', message: 'Llave sin cerrar (abierta en la línea 2)' }]);
+    expect(m.types.map((t) => t.id)).toEqual(['A']);
+  });
+
   it('soporta BOM, CRLF y tabs', () => {
     const m = parsePuml('﻿@startuml\r\n\tclass Estudiánte {\r\n\t\t- nombre: String\r\n\t}\r\n@enduml\r\n');
     expect(m.issues).toEqual([]);

@@ -151,6 +151,27 @@ export function createHistoryStore(backend: HistoryBackend, options: HistoryStor
     async clear() {
       backend.write([]);
     },
+    async restore(items) {
+      const entries = load();
+      const known = new Set(entries.map((entry) => entry.id));
+      const added: PersistedEntry[] = [];
+      for (const item of items) {
+        if ((item.kind !== 'puml' && item.kind !== 'java') || typeof item.path !== 'string' || item.path.length === 0) continue;
+        const normalized = normalizeHistoryPath(item.path, platform);
+        const id = entryId(item.kind, normalized, platform);
+        if (known.has(id)) continue;
+        known.add(id);
+        added.push({
+          id,
+          kind: item.kind,
+          path: normalized,
+          name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : path.basename(normalized),
+          lastOpenedAt: typeof item.lastOpenedAt === 'string' && Number.isFinite(Date.parse(item.lastOpenedAt)) ? item.lastOpenedAt : now().toISOString(),
+          pinned: item.pinned === true,
+        });
+      }
+      return publicEntries(save([...entries, ...added]));
+    },
   };
 }
 
@@ -280,6 +301,16 @@ export function registerHistoryIpc(store: HistoryStore = createHistoryStore(crea
   }));
   ipcMain.handle('history:remove', (_event, id: unknown) => guard(() => store.remove(argumentString(id, 'id'))));
   ipcMain.handle('history:clear', () => guard(async () => { await store.clear(); }));
+  ipcMain.handle('history:restore', (_event, raw: unknown) => guard(async () => {
+    if (!Array.isArray(raw) || raw.length > HISTORY_LIMIT) throw new HistoryError('Argumento inválido: entries.');
+    const items = raw.filter((value): value is HistoryEntry => {
+      if (typeof value !== 'object' || value === null) return false;
+      const e = value as Record<string, unknown>;
+      return (e.kind === 'puml' || e.kind === 'java') && typeof e.path === 'string' && e.path.length <= MAX_ARG_LENGTH
+        && path.isAbsolute(e.path) && typeof e.name === 'string' && typeof e.lastOpenedAt === 'string' && typeof e.pinned === 'boolean';
+    });
+    return store.restore(items);
+  }));
   ipcMain.handle('history:savePumlAs', (_event, source: unknown, suggestedName: unknown) => guard(async () => {
     if (typeof source !== 'string' || Buffer.byteLength(source, 'utf8') > MAX_PUML_BYTES) {
       throw new HistoryError('El contenido es inválido o supera el límite de 5 MB.');

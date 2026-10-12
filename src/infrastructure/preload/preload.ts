@@ -17,6 +17,7 @@ const history: HistoryApi = {
   setPinned: (id, pinned) => invoke('history:setPinned', id, pinned),
   remove: (id) => invoke('history:remove', id),
   clear: () => invoke('history:clear'),
+  restore: (entries) => invoke('history:restore', entries),
   savePumlAs: (source, suggestedName) => invoke('history:savePumlAs', source, suggestedName),
 };
 
@@ -35,6 +36,8 @@ const api: AutoUmlApi = {
     return invoke('history:openPumlPath', resourcePath);
   },
   getStorageInfo: () => invoke('storage:info'),
+  getAppInfo: () => invoke('app:info'),
+  openDataFolder: () => invoke('app:open-data-folder'),
   listProjects: () => invoke('projects:list'),
   createProject: (name) => invoke('projects:create', name),
   openProject: (name) => invoke('projects:open', name),
