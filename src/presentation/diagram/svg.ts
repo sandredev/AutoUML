@@ -19,9 +19,9 @@ export interface SvgOptions {
   cards?: ReadonlyMap<string, SvgCardContent>;
 }
 
-const CARD_FILL = '#F1F1F1';
-const INK = '#181818';
-const PKG_STROKE = '#555b62';
+const CARD_FILL = '#ffffff';
+const INK = '#454a62';
+const PKG_STROKE = '#7d8297';
 const NOTE_FILL = '#FEFECE';
 const FOLD = 12;
 

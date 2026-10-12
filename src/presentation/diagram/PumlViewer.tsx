@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { JSX, RefObject } from 'react';
+import type { JSX, ReactNode, RefObject } from 'react';
 import { analyzeDiagram } from '../../domain/analysis/analyze';
 import { analysisReport } from '../../domain/analysis/report';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { SidecarState } from '../../application/ports/ipc';
 import { CommandPalette, type PaletteItem } from '../components/CommandPalette';
+import { FullscreenIcon, MinusIcon, PlusIcon, ScanIcon, SearchIcon } from '../components/Icons';
+import { MenuButton } from '../components/MenuButton';
 import { AnalysisPanel } from './AnalysisPanel';
 import { buildOverlay, type HeatMetric } from './analysis/overlay';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
+import { EMPTY_SELECTION } from './canvas/selection';
 import type { MenuAction, MenuSubject } from './contextMenu';
 import { FiltersPanel, withListItem } from './FiltersPanel';
 import { focusTargetOf, focusToggle, isEditable, viewerShortcut } from './focusMode';
@@ -22,6 +25,17 @@ import { ViewsPanel, type SaveViewOptions } from './ViewsPanel';
 import { useDiagramLayout } from './layout/useDiagramLayout';
 import type { LayoutOptions, ViewState } from './types';
 import { initialViewOptions, resetViewOptions, type ViewOptionsState } from './viewOptions';
+import { hiddenByPuml, outOfViewOf, shownRelationsOf, type ViewerControl, type ViewerInfo } from './viewerInfo';
+
+/** Acciones de la barra del visor que ejecuta la app (zoom, encuadre, exportar…). (T11) */
+export interface ViewerToolbarHost {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFit: () => void;
+  onFullscreen: () => void;
+  onRelayout: () => void;
+  onExport: (kind: 'png' | 'svg' | 'pdf' | 'copy') => void;
+}
 
 /**
  * Electron-independent view for the puml-viewer capability. The host owns
@@ -38,7 +52,9 @@ export interface PaletteHost {
 export interface PumlViewerProps {
   model: DiagramModel | null;
   selectedId?: string | null;
-  onSelect?: (id: string | null) => void;
+  /** Selección completa (Ctrl+clic, marco). Siempre contiene `selectedId` si no es null. */
+  selectedIds?: ReadonlySet<string>;
+  onSelect?: (id: string | null, ids: ReadonlySet<string>) => void;
   canvasRef?: RefObject<DiagramCanvasHandle | null>;
   className?: string;
   /** Notifica cuando el layout empieza o termina de calcularse (la intro de carga lo usa). */
@@ -74,6 +90,14 @@ export interface PumlViewerProps {
   onExportReport?: (markdown: string) => void;
   /** Cada incremento restablece el visor: tarjetas a su posición inicial, opciones por defecto y encuadre. */
   resetSignal?: number;
+  /** Barra del visor (T11): sin él no se muestran zoom, encuadre, disposición ni exportar. */
+  toolbarHost?: ViewerToolbarHost;
+  /** Qué se ve del documento (T11): conteos de la barra de estado y bloque "Fuera de la vista". */
+  onViewInfo?: (info: ViewerInfo) => void;
+  /** Mandos del visor que usa la app (T11). */
+  controlRef?: RefObject<ViewerControl | null>;
+  /** Aviso fijo sobre el lienzo (p. ej. "se muestra el último diagrama válido"). */
+  banner?: ReactNode;
 }
 
 export type CodeTarget = { kind: 'type'; id: string } | { kind: 'relation'; line: number };
@@ -87,6 +111,7 @@ const FOCUS_DIRECTIONS: FocusDirection[] = ['both', 'out', 'in'];
 export function PumlViewer({
   model,
   selectedId = null,
+  selectedIds,
   onSelect,
   canvasRef,
   className = '',
@@ -105,6 +130,10 @@ export function PumlViewer({
   reportTitle = '',
   onExportReport,
   resetSignal = 0,
+  toolbarHost,
+  onViewInfo,
+  controlRef,
+  banner,
 }: PumlViewerProps): JSX.Element {
   const [view, setView] = useState<ViewOptionsState>(initialViewOptions);
   const [manual, setManual] = useState(false);
@@ -118,6 +147,9 @@ export function PumlViewer({
   // Vistas guardadas como diapositivas (T10), por documento: también viajan con el sidecar.
   const [views, setViews] = useState<readonly DeckView[]>(NO_VIEWS);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Vista guardada aplicada (T11): su nombre se muestra mientras sus filtros sigan siendo los actuales.
+  const [appliedView, setAppliedView] = useState<{ title: string; filters: string } | null>(null);
+  const [zoom, setZoom] = useState(100);
   // Diagnóstico de arquitectura (T9): capa opcional de SOLO dibujo. Se calcula sobre el documento entero
   // (no sobre lo filtrado o enfocado) y no entra en useDiagramLayout: activarla no recalcula posiciones.
   const [analysisOn, setAnalysisOn] = useState(false);
@@ -137,6 +169,7 @@ export function PumlViewer({
     setFilters(NO_FILTERS);
     setViews(NO_VIEWS);
     setPaletteOpen(false);
+    setAppliedView(null);
   }
   if (sidecarKey !== null && initialSidecar !== undefined && lastAppliedSidecar.current !== initialSidecar) {
     lastAppliedSidecar.current = initialSidecar;
@@ -157,7 +190,7 @@ export function PumlViewer({
   const moreTemplate = labels.moreMembers;
   const options = useMemo<LayoutOptions>(() => ({ ...view.options, moreTemplate }), [view.options, moreTemplate]);
   const {
-    layout, layoutModel, viewModel, packageCounts, display, loading, refining, error, engine, fallback, ms, focusableModel, focusApplied,
+    layout, layoutModel, viewModel, packageCounts, display, loading, error, fallback, ms, focusableModel, focusApplied,
   } = useDiagramLayout(model, liveCollapsed, options, view.layoutVersion, focus, filters);
   // Filtros de dibujo sobre el modelo que se dibuja (no recalculan el layout).
   const drawHidden = useMemo(() => (viewModel ? drawHiddenOf(viewModel, filters) : null), [viewModel, filters]);
@@ -248,7 +281,7 @@ export function PumlViewer({
       // Última capa de Retroceso: el diagrama en su estado normal (sin selección y encuadrado completo).
       if (shortcut === 'back') {
         e.preventDefault();
-        selectRef.current?.(null);
+        selectRef.current?.(null, EMPTY_SELECTION);
         handleRef.current?.fit({ animate: true });
         // Sin aro de foco naranja en el lienzo hasta la siguiente tecla (distinta de Retroceso) o clic.
         rootRef.current?.classList.add('is-reset');
@@ -334,7 +367,7 @@ export function PumlViewer({
   selectRef.current = onSelect;
   const goToClass = useCallback((id: string, animate: boolean) => {
     handleRef.current?.focusNode(id, { animate });
-    selectRef.current?.(id);
+    selectRef.current?.(id, new Set([id]));
   }, [handleRef]);
   const closeAnalysis = useCallback(() => setAnalysisOn(false), []);
 
@@ -457,6 +490,7 @@ export function PumlViewer({
     });
     if (nextCollapsed !== null && collapsedChanges) setCollapsed(nextCollapsed);
     if (v.filters !== undefined) setFilters(v.filters);
+    setAppliedView({ title: v.title, filters: JSON.stringify(v.filters ?? filters) });
     if (leavesFocus) exitFocus(animate);
     else if (v.focusKey !== undefined && focusChanges) focusOn(v.focusKey, true);
   }, [views, model, liveCollapsed, filters, activeFocus, handleRef, focusOn, exitFocus]);
@@ -555,9 +589,75 @@ export function PumlViewer({
     setManual(has);
     notify();
   }, [notify]);
-  const handleViewChange = useCallback((_v: ViewState) => {
+  const handleViewChange = useCallback((v: ViewState) => {
+    setZoom(Math.round(v.scale * 100));
     notify();
   }, [notify]);
+
+  // Lo que se ve (T11): la app lo usa en la barra de estado y en la lista de entidades.
+  const outOfView = useMemo(
+    () => (model && viewModel ? outOfViewOf(model, viewModel, drawHidden, liveCollapsed) : null),
+    [model, viewModel, drawHidden, liveCollapsed],
+  );
+  const viewName = appliedView !== null && appliedView.filters === JSON.stringify(filters) ? appliedView.title : null;
+  const narrowed = filtersActive || activeFocus !== null;
+  const infoRef = useRef(onViewInfo);
+  infoRef.current = onViewInfo;
+  useEffect(() => {
+    if (!model || !viewModel || !outOfView) return;
+    infoRef.current?.({
+      totalTypes: model.types.length,
+      shownTypes: model.types.length - outOfView.size,
+      totalRelations: model.relationships.length,
+      shownRelations: shownRelationsOf(viewModel, drawHidden),
+      outOfView,
+      viewName,
+      narrowed,
+      zoom,
+      fallback: fallback ?? null,
+      layoutMs: ms ?? null,
+    });
+  }, [model, viewModel, outOfView, drawHidden, viewName, narrowed, zoom, fallback, ms]);
+
+  // Mandos para la app (T11): el ojo de la lista, "Mostrar todo" y reintentar el layout.
+  const pumlHidden = useMemo(() => (model ? hiddenByPuml(model, null) : new Map<string, number | null>()), [model]);
+  const ctrlState = useRef({ model, activeFocus, pumlHidden });
+  ctrlState.current = { model, activeFocus, pumlHidden };
+  const showAll = useCallback(() => {
+    setFilters(NO_FILTERS);
+    setAppliedView(null);
+    exitFocus(true);
+  }, [exitFocus]);
+  useEffect(() => {
+    if (!controlRef) return;
+    controlRef.current = {
+      setTypeVisible: (id, visible) => {
+        const { model: m, activeFocus: foc } = ctrlState.current;
+        const t = m?.types.find((x) => x.id === id);
+        if (!t) return false;
+        if (!visible) {
+          setFilters((prev) => ({ ...prev, hiddenTypes: withListItem(prev.hiddenTypes, id, true) }));
+          return true;
+        }
+        // Lo oculta el propio .puml (hide): la interfaz no puede mostrarlo.
+        if (ctrlState.current.pumlHidden.has(id)) return false;
+        setFilters((prev) => {
+          const next: DiagramFilters = { ...prev, hiddenTypes: withListItem(prev.hiddenTypes, id, false) };
+          if ((prev.hiddenPackages ?? []).includes(t.packageName)) next.hiddenPackages = withListItem(prev.hiddenPackages, t.packageName, false);
+          if (prev.hideExternal && t.category === 'external') next.hideExternal = false;
+          if (prev.hideUndeclared && t.category === 'undeclared') next.hideUndeclared = false;
+          return next;
+        });
+        if (foc !== null) exitFocus(true);
+        return true;
+      },
+      showAll,
+      retryLayout: () => setView((v) => resetViewOptions(v)),
+    };
+    return () => {
+      controlRef.current = null;
+    };
+  }, [controlRef, showAll, exitFocus]);
 
   if (error) {
     return (
@@ -593,28 +693,36 @@ export function PumlViewer({
   const focusName = (id: string): string =>
     isPackageNode(id) ? packageNodeName(id) : (model.types.find((t) => t.id === id)?.name ?? id);
 
-  const engineInfo = engine
-    ? `${engine.toUpperCase()} · ${ms ?? 0} ms${refining ? ' · ' + labels.refining : ''}`
-    : '';
+  const tb = labels.toolbar;
+  // Aviso de vista sobre el lienzo (T11): nombre de la vista o filtros/foco, con "Mostrar todo". Los totales van
+  // en la barra de estado.
+  const chipText = viewName !== null
+    ? <>{tb.view} <strong>{viewName}</strong></>
+    : activeFocus !== null
+      ? fill(tb.focused, { name: focusName(activeFocus.id) })
+      : filtersActive ? tb.filtered : null;
+  const chip = chipText !== null ? (
+    <div className="view-chip" role="status">
+      <span>{chipText}</span>
+      <button type="button" className="ghost-btn" onClick={showAll}>{tb.showAll}</button>
+    </div>
+  ) : null;
 
   return (
     <section ref={rootRef} className={`${classes} has-canvas`}>
       <div className="puml-viewer-bar" role="toolbar" aria-label={labels.toolbarAria}>
-        <span className="puml-viewer-bar-info" title={fallback} aria-live="polite">
-          {loading ? labels.relayouting : fallback ? fill(labels.fallback, { reason: fallback }) : manual ? labels.manual : ''}
-          {engineInfo ? <span className="puml-viewer-bar-engine"> · {engineInfo}</span> : null}
-          {fallback ? <span className="puml-viewer-bar-warn" title={fallback}> {labels.fallbackBadge}</span> : null}
-        </span>
         <button
           type="button"
-          className="puml-viewer-reset"
-          title={labels.palette.toolbarTitle}
+          className="tool-btn"
+          title={tb.palette}
+          aria-label={tb.palette}
           aria-keyshortcuts="Control+K"
           aria-haspopup="dialog"
           onClick={openPalette}
         >
-          {labels.palette.toolbar}
+          <SearchIcon />
         </button>
+        <span className="toolbar-sep" aria-hidden="true" />
         <ViewsPanel
           views={views}
           labels={labels.views}
@@ -663,15 +771,44 @@ export function PumlViewer({
             type="button"
             className="puml-viewer-reset"
             onClick={() => enterFocus(true)}
-            disabled={focusTarget === null}
+            aria-disabled={focusTarget === null}
             title={labels.focusTitle}
             aria-keyshortcuts="F"
           >
             {labels.focus}
           </button>
         )}
+        <span className="puml-viewer-bar-info" aria-live="polite">{loading ? labels.relayouting : manual ? labels.manual : ''}</span>
+        {toolbarHost && (
+          <>
+            <button type="button" className="tool-btn" title={tb.zoomOut} aria-label={tb.zoomOut} onClick={toolbarHost.onZoomOut}><MinusIcon /></button>
+            <span className="puml-viewer-zoom" aria-label={tb.zoomLevel}>{zoom} %</span>
+            <button type="button" className="tool-btn" title={tb.zoomIn} aria-label={tb.zoomIn} onClick={toolbarHost.onZoomIn}><PlusIcon /></button>
+            <button type="button" className="tool-btn" title={tb.fit} aria-label={tb.fit} onClick={toolbarHost.onFit}><ScanIcon /></button>
+            <button type="button" className="tool-btn" title={tb.fullscreen} aria-label={tb.fullscreen} onClick={toolbarHost.onFullscreen}><FullscreenIcon /></button>
+            <button type="button" className="puml-viewer-reset" title={tb.relayoutTitle} onClick={toolbarHost.onRelayout}>{tb.relayout}</button>
+            <span className="toolbar-sep" aria-hidden="true" />
+            <MenuButton
+              className="export-menu"
+              label={tb.exportLabel}
+              alignEnd
+              items={[
+                { id: 'png', label: tb.exportPng, run: () => toolbarHost.onExport('png') },
+                { id: 'svg', label: tb.exportSvg, run: () => toolbarHost.onExport('svg') },
+                { id: 'pdf', label: tb.exportPdf, run: () => toolbarHost.onExport('pdf') },
+                { id: 'copy', label: tb.copyPng, run: () => toolbarHost.onExport('copy') },
+              ]}
+            />
+          </>
+        )}
       </div>
       <div className="puml-viewer-body">
+      {banner || chip ? (
+        <div className="puml-viewer-overlays">
+          {banner}
+          {chip}
+        </div>
+      ) : null}
       <DiagramCanvas
         ref={handleRef}
         model={viewModel}
@@ -681,6 +818,7 @@ export function PumlViewer({
         {...(docKey !== undefined ? { docKey } : {})}
         {...(initialSidecar ? { initialOverrides: initialSidecar.overrides, initialView: initialSidecar.view } : {})}
         selectedId={selectedId}
+        {...(selectedIds ? { selectedIds } : {})}
         onSelect={onSelect}
         onViewChange={handleViewChange}
         onManualPositionsChange={handleManualPositions}

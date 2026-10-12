@@ -1,7 +1,8 @@
 import { useMemo, type JSX, type ReactNode, type RefObject } from 'react';
+import type { ViewerControl, ViewerInfo } from '../diagram/viewerInfo';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { ProjectInfo, SidecarFilters, SidecarState, SidecarView } from '../../application/ports/ipc';
-import { PumlViewer, type CodeTarget, type PaletteHost } from '../diagram/PumlViewer';
+import { PumlViewer, type CodeTarget, type PaletteHost, type ViewerToolbarHost } from '../diagram/PumlViewer';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { viewerLabels } from '../localization/viewerLabels';
@@ -12,7 +13,9 @@ interface Props {
   project: ProjectInfo | null;
   model: DiagramModel | null;
   selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  /** Selección completa (Ctrl+clic, marco). Siempre contiene `selectedId` si no es null. */
+  selectedIds?: ReadonlySet<string>;
+  onSelect: (id: string | null, ids: ReadonlySet<string>) => void;
   canvasRef: RefObject<DiagramCanvasHandle | null>;
   /** Contenedor que pasa a pantalla completa (botón de ajustar del header). */
   areaRef?: RefObject<HTMLElement | null>;
@@ -41,12 +44,20 @@ interface Props {
   onExportReport?: (markdown: string) => void;
   /** Cada incremento restablece el visor (tarjetas, opciones de vista y encuadre). */
   resetSignal?: number;
+  /** Barra del visor, información de la vista, mandos y aviso sobre el lienzo (T11). */
+  toolbarHost?: ViewerToolbarHost;
+  onViewInfo?: (info: ViewerInfo) => void;
+  controlRef?: RefObject<ViewerControl | null>;
+  banner?: ReactNode;
+  /** Diagrama guardado todavía sin código: "Cargar .puml…". */
+  onLoadPuml?: () => void;
 }
 
 export function RenderArea({
   project,
   model,
   selectedId,
+  selectedIds,
   onSelect,
   canvasRef,
   areaRef,
@@ -66,6 +77,11 @@ export function RenderArea({
   reportTitle,
   onExportReport,
   resetSignal,
+  toolbarHost,
+  onViewInfo,
+  controlRef,
+  banner,
+  onLoadPuml,
 }: Props): JSX.Element {
   const { t } = useLocalization();
   const labels = useMemo(() => viewerLabels(t), [t]);
@@ -86,8 +102,14 @@ export function RenderArea({
   }
 
   if (project && !project.puml && !model) {
+    // Diagrama guardado sin código todavía: se dice qué falta y cómo seguir.
     return (
       <main className="render-area">
+        <div className="render-empty">
+          <h2 className="render-title">{t('render.noCodeTitle', { name: project.meta.name })}</h2>
+          <p className="render-meta">{t('render.noCodeBody')}</p>
+          {onLoadPuml && <button type="button" className="btn" onClick={onLoadPuml}>{t('menu.loadPuml')}</button>}
+        </div>
         {children}
       </main>
     );
@@ -98,6 +120,7 @@ export function RenderArea({
       <PumlViewer
         model={model}
         selectedId={selectedId}
+        {...(selectedIds ? { selectedIds } : {})}
         onSelect={onSelect}
         canvasRef={canvasRef}
         onLayoutLoadingChange={onLayoutLoadingChange}
@@ -116,6 +139,10 @@ export function RenderArea({
         {...(reportTitle !== undefined ? { reportTitle } : {})}
         {...(onExportReport ? { onExportReport } : {})}
         {...(resetSignal !== undefined ? { resetSignal } : {})}
+        {...(toolbarHost ? { toolbarHost } : {})}
+        {...(onViewInfo ? { onViewInfo } : {})}
+        {...(controlRef ? { controlRef } : {})}
+        {...(banner ? { banner } : {})}
       />
       {children}
     </main>

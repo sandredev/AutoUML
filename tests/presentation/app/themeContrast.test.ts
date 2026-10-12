@@ -100,3 +100,51 @@ describe('contraste de la capa de análisis (T9)', () => {
     for (let i = 1; i < steps.length; i++) expect(steps[i]).toBeGreaterThan(steps[i - 1] as number);
   });
 });
+
+// Rediseño (T11): paneles, lienzo, selección y diagrama. Texto ≥ 4.5:1; bordes de controles, líneas del
+// diagrama, iconos de estado y foco ≥ 3:1.
+describe('contraste de la paleta del rediseño (T11)', () => {
+  const TEXT: Array<[string, string]> = [
+    ['fg', 'bg-chrome'], ['fg-muted', 'bg-chrome'], ['fg', 'canvas'], ['fg-muted', 'canvas'],
+    ['fg-muted', 'bg-elev'], ['fg', 'selected'], ['fg-muted', 'selected'], ['accent', 'bg-chrome'],
+    ['fg-muted', 'bg-sunken'], ['uml-card-fg', 'uml-card'], ['uml-pkg-fg', 'canvas'],
+    ['cat-class', 'uml-card'], ['cat-abstract', 'uml-card'], ['cat-interface', 'uml-card'], ['cat-enum', 'uml-card'],
+    ['cat-class', 'bg-chrome'], ['cat-abstract', 'bg-chrome'], ['cat-interface', 'bg-chrome'], ['cat-enum', 'bg-chrome'],
+  ];
+  const LINES: Array<[string, string]> = [
+    ['border-strong', 'bg-chrome'], ['border-strong', 'canvas'], ['uml-pkg', 'canvas'], ['uml-card-border', 'canvas'],
+    ['uml-card-border', 'uml-card'], ['uml-edge', 'canvas'], ['warn', 'bg-chrome'], ['danger', 'bg-chrome'],
+    ['focus-ring', 'bg-chrome'], ['focus-ring', 'canvas'], ['accent', 'canvas'],
+  ];
+  it.each(THEME_IDS.flatMap((id) => TEXT.map(([fg, bg]) => [id, fg, bg] as const)))('%s: texto --%s sobre --%s ≥ 4.5', (id, fg, bg) => {
+    const t = themeTokens(id);
+    expect(contrast(t.get(fg) as string, t.get(bg) as string)).toBeGreaterThanOrEqual(4.5);
+  });
+  it.each(THEME_IDS.flatMap((id) => LINES.map(([fg, bg]) => [id, fg, bg] as const)))('%s: línea --%s sobre --%s ≥ 3', (id, fg, bg) => {
+    const t = themeTokens(id);
+    expect(contrast(t.get(fg) as string, t.get(bg) as string)).toBeGreaterThanOrEqual(3);
+  });
+  it('el ámbar de los avisos no es el color de las abstractas', () => {
+    for (const id of THEME_IDS) {
+      const t = themeTokens(id);
+      expect(t.get('cat-abstract')).not.toBe(t.get('warn'));
+    }
+  });
+});
+
+// El glifo de categoría (lista, inspector y lienzo) es la letra sobre un tinte del 16 % de su propio color: la
+// letra (12 px, negrita) tiene que dar 4.5:1 sobre ese tinte en los paneles, la tarjeta y la fila seleccionada.
+describe('glifos de categoría sobre su tinte (T11)', () => {
+  const mix = (c: string, b: string, a: number): string =>
+    '#' + [1, 3, 5].map((i) => Math.round(parseInt(c.slice(i, i + 2), 16) * a + parseInt(b.slice(i, i + 2), 16) * (1 - a)).toString(16).padStart(2, '0')).join('');
+  const CATS = ['sealed', 'abstract', 'interface', 'enum', 'record', 'annotation', 'class', 'external', 'undeclared'];
+  it.each(THEME_IDS.flatMap((id) => CATS.flatMap((c) => ['bg-chrome', 'uml-card', 'selected'].map((bg) => [id, c, bg] as const))))(
+    '%s: --cat-%s sobre su tinte en --%s ≥ 4.5',
+    (id, c, bg) => {
+      const t = themeTokens(id);
+      const fg = t.get(`cat-${c}`) as string;
+      const under = id === 'contrast' ? (t.get(bg) as string) : mix(fg, t.get(bg) as string, 0.16);
+      expect(contrast(fg, under)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+});

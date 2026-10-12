@@ -78,26 +78,36 @@ export interface CardGeometry {
 export type FontKey = 'name' | 'nameItalic' | 'stereo' | 'row' | 'rowItalic' | 'pkg' | 'edge';
 export type TextMeasurer = (text: string, font: FontKey) => number;
 
-const SANS = '"DejaVu Sans", "Segoe UI", system-ui, -apple-system, Roboto, Ubuntu, sans-serif';
+const SANS = '"Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Ubuntu, Cantarell, "DejaVu Sans", sans-serif';
+const MONO = '"Cascadia Code", "JetBrains Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace';
+/**
+ * T11 (anatomía del nodo): nombre 13 px/600, miembros en monoespaciada de 12 px, estereotipo y etiquetas de
+ * aristas a 12 px (mínimo de la interfaz). La medida (Worker) y el dibujo usan exactamente estas fuentes.
+ */
 export const FONTS: Record<FontKey, string> = {
-  name: `13px ${SANS}`,
-  nameItalic: `italic 13px ${SANS}`,
-  stereo: `10px ${SANS}`,
-  row: `11px ${SANS}`,
-  rowItalic: `italic 11px ${SANS}`,
+  name: `600 13px ${SANS}`,
+  nameItalic: `italic 600 13px ${SANS}`,
+  stereo: `12px ${SANS}`,
+  row: `12px ${MONO}`,
+  rowItalic: `italic 12px ${MONO}`,
   pkg: `bold 12px ${SANS}`,
-  edge: `10px ${SANS}`,
+  edge: `12px ${SANS}`,
 };
 
+/**
+ * Geometría de la tarjeta (T11): cabecera 32, relleno lateral 12, filas de 18 con 4 arriba y abajo por
+ * compartimento, insignia cuadrada de 18 separada 8 del nombre, radio 4. El ancho sale de medir el texto.
+ */
 export const CARD = {
-  minW: 150,
-  padX: 10,
-  headerH: 34,
-  headerHStereo: 46,
-  rowH: 16,
+  minW: 120,
+  padX: 12,
+  headerH: 32,
+  headerHStereo: 48,
+  rowH: 18,
   sectionPadY: 4,
   badgeD: 18,
-  radius: 3,
+  badgeGap: 8,
+  radius: 4,
 } as const;
 
 export const PACKAGE = {

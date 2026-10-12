@@ -1,7 +1,7 @@
 import { app, BrowserWindow, nativeTheme, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { MenuState } from '../../application/ports/ipc';
+import { TITLE_BAR_HEIGHT, type MenuState } from '../../application/ports/ipc';
 import { attachCloseFlow, registerCloseFlow } from './closeFlow';
 import { registerIpc } from './ipcHandlers';
 import { ensureLinuxDesktopEntry } from './linuxDesktop';
@@ -14,6 +14,7 @@ let menuState: MenuState = {
   hasPuml: false,
   sidebarVisible: true,
   editorVisible: false,
+  inspectorVisible: true,
   dirty: false,
   locale: 'es',
   themeMode: 'system',
@@ -67,9 +68,9 @@ function createWindow(): void {
     // Sin barra de título nativa; los controles de ventana quedan como overlay sobre la cabecera.
     titleBarStyle: 'hidden',
     titleBarOverlay: nativeTheme.shouldUseDarkColors
-      ? { color: '#1b1c26', symbolColor: '#e6e7ee', height: 32 }
-      : { color: '#f4f5f8', symbolColor: '#1e2033', height: 32 },
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1c26' : '#f4f5f8',
+      ? { color: '#1f202d', symbolColor: '#e0e2ed', height: TITLE_BAR_HEIGHT }
+      : { color: '#eef0f5', symbolColor: '#1e2033', height: TITLE_BAR_HEIGHT },
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#191a24' : '#f8f9fb',
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.js'),
       contextIsolation: true,

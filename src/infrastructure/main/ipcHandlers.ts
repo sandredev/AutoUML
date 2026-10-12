@@ -1,8 +1,9 @@
 // Manejadores IPC. Todos validan sus argumentos y devuelven Result<T>, nunca lanzan al renderer.
-import { BrowserWindow, clipboard, dialog, ipcMain, nativeImage, type IpcMainInvokeEvent, type MessageBoxOptions } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell, type IpcMainInvokeEvent, type MessageBoxOptions } from 'electron';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { MENU_COMMANDS, type LoadOutcome, type MenuCommand, type MenuState, type ProjectInfo, type PumlScope, type PumlSourceResult, type Result, type SavePumlOutcome, type SaveSourceOutcome, type SidecarState } from '../../application/ports/ipc';
+import { MENU_COMMANDS, TITLE_BAR_HEIGHT, type AppInfo, type LoadOutcome, type MenuCommand, type MenuState, type ProjectInfo, type PumlScope, type PumlSourceResult, type Result, type SavePumlOutcome, type SaveSourceOutcome, type SidecarState } from '../../application/ports/ipc';
 import { runMenuCommand } from './menu';
 import { isThemeMode } from '../../domain/rules/themes';
 import { hasPumlExtension, PUML_EXTENSIONS, validatePumlMarkers } from '../../domain/rules/validation';
@@ -166,9 +167,36 @@ async function loadPumlFlow(event: IpcMainInvokeEvent, name: string): Promise<Re
   return ok({ status: 'loaded', project: savePuml(project.meta.name, file) });
 }
 
+/** Nombre legible del sistema: versión de Windows/macOS o PRETTY_NAME de /etc/os-release en Linux. */
+function osLabel(): string {
+  if (process.platform === 'win32') return `Windows ${process.getSystemVersion()}`;
+  if (process.platform === 'darwin') return `macOS ${process.getSystemVersion()}`;
+  try {
+    const release = fs.readFileSync('/etc/os-release', 'utf8');
+    const pretty = /^PRETTY_NAME="?([^"\n]+)"?/m.exec(release)?.[1];
+    if (pretty) return pretty;
+  } catch {
+    // Sin os-release: núcleo y versión.
+  }
+  return `${os.type()} ${os.release()}`;
+}
+
 export function registerIpc(onMenuState: (state: MenuState) => void): void {
   registerHistoryIpc();
   ipcMain.handle('storage:info', () => getStorage());
+  ipcMain.handle('app:info', (): AppInfo => ({
+    version: app.getVersion(),
+    electron: process.versions.electron ?? '',
+    chrome: process.versions.chrome ?? '',
+    os: osLabel(),
+    dataPath: getStorage().root,
+    dev: !app.isPackaged,
+  }));
+  ipcMain.handle('app:open-data-folder', async (): Promise<Result<void>> => {
+    // openPath devuelve '' si todo fue bien, o el mensaje de error.
+    const error = await shell.openPath(getStorage().root);
+    return error ? { ok: false, error } : { ok: true, value: undefined };
+  });
 
   ipcMain.handle('projects:list', () => {
     try {
@@ -533,6 +561,6 @@ export function registerIpc(onMenuState: (state: MenuState) => void): void {
   ipcMain.on('window:controls-colors', (e, background: unknown, symbols: unknown) => {
     const isHex = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
     if (!isHex(background) || !isHex(symbols)) return;
-    BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay({ color: background, symbolColor: symbols, height: 32 });
+    BrowserWindow.fromWebContents(e.sender)?.setTitleBarOverlay({ color: background, symbolColor: symbols, height: TITLE_BAR_HEIGHT });
   });
 }

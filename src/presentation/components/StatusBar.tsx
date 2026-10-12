@@ -1,29 +1,42 @@
 import type { JSX } from 'react';
-import type { StorageInfo } from '../../application/ports/ipc';
-import { CloseIcon } from './Icons';
+import { CloseIcon, WarningIcon } from './Icons';
 import { useLocalization } from '../localization/LocalizationProvider';
 
 export interface Status {
-  kind: 'info' | 'success' | 'error';
+  kind: 'info' | 'success' | 'error' | 'warning';
   text: string;
+  /** Acción reversible o de recuperación junto al mensaje ("Deshacer", "Reintentar"). */
+  action?: { label: string; run: () => void };
+  /** Segunda acción secundaria (p. ej. "Detalle"). */
+  secondary?: { label: string; run: () => void };
 }
 
 interface Props {
   status: Status | null;
-  storage: StorageInfo | null;
+  /** Totales del documento: "7 de 16 tipos · 7 relaciones". */
   summary?: string | null;
   onDismiss: () => void;
 }
 
-export function StatusBar({ status, storage, summary, onDismiss }: Props): JSX.Element {
+/**
+ * Barra de estado (T11): a la izquierda el último mensaje (con su acción, si la tiene); a la derecha los
+ * totales del documento. Los errores se quedan hasta cerrarlos; el resto se va solo.
+ */
+export function StatusBar({ status, summary, onDismiss }: Props): JSX.Element {
   const { t } = useLocalization();
-  const modeLabel = storage ? t(`status.storage${storage.mode === 'dev' ? 'Dev' : storage.mode === 'exe' ? 'Exe' : 'Fallback'}`) : '';
   return (
     <footer className="statusbar">
       <div className="status-msg">
         {status && (
           <span className={`status-${status.kind}`} role={status.kind === 'error' ? 'alert' : 'status'}>
-            <span>{status.text}</span>
+            {status.kind === 'warning' && <WarningIcon />}
+            <span className="status-text">{status.text}</span>
+            {status.action && (
+              <button type="button" className="status-action strong" onClick={status.action.run}>{status.action.label}</button>
+            )}
+            {status.secondary && (
+              <button type="button" className="status-action" onClick={status.secondary.run}>{status.secondary.label}</button>
+            )}
             <button type="button" className="icon-btn" aria-label={t('status.closeMessage')} onClick={onDismiss}>
               <CloseIcon />
             </button>
@@ -31,15 +44,6 @@ export function StatusBar({ status, storage, summary, onDismiss }: Props): JSX.E
         )}
       </div>
       <div className="status-summary">{summary ?? ''}</div>
-      <div className="status-storage" title={storage ? `${storage.root} (${modeLabel})` : ''}>
-        {storage && (
-          <>
-            <span className="muted">{modeLabel}</span>
-            <span className="sep">·</span>
-            <span className="status-root">{storage.root}</span>
-          </>
-        )}
-      </div>
     </footer>
   );
 }

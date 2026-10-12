@@ -1,22 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
-import { THEME_SCHEME, isThemeMode, type ThemeId, type ThemeMode } from '../../domain/rules/themes';
+import { THEME_SCHEME, migrateThemeMode, type ThemeId, type ThemeMode } from '../../domain/rules/themes';
 
 export type { ThemeId, ThemeMode };
 
 const STORAGE_KEY = 'autouml-theme';
 
-/** Colores de vista previa (fondo, superficie, acento) para el selector de temas. */
-export const themeSwatches: Record<ThemeId, readonly [string, string, string]> = {
-  light: ['#f4f5f8', '#ffffff', '#d9441f'],
-  dark: ['#1b1c26', '#232433', '#ff6a45'],
-  midnight: ['#171829', '#1e2033', '#f5d33b'],
-  ember: ['#1c1613', '#261d19', '#ff5f3c'],
-  sunrise: ['#fbf5ec', '#fffdf8', '#e0481f'],
-  contrast: ['#000000', '#0a0a0f', '#f5d33b'],
+/**
+ * Colores de la miniatura de cada tema en Configuración: barra/paneles, lienzo, acento, tarjeta, borde de
+ * tarjeta y separador. Son los mismos tokens de theme.css.
+ */
+export const themeSwatches: Record<ThemeId, { panel: string; canvas: string; accent: string; card: string; edge: string; line: string }> = {
+  light: { panel: '#eef0f5', canvas: '#f8f9fb', accent: '#b8360f', card: '#ffffff', edge: '#454a62', line: '#d9dce5' },
+  dark: { panel: '#1f202d', canvas: '#191a24', accent: '#ff6a45', card: '#252737', edge: '#6c7190', line: '#2e3042' },
+  contrast: { panel: '#000000', canvas: '#000000', accent: '#f5d33b', card: '#000000', edge: '#ffffff', line: '#8a8db3' },
 };
 
+/** Modo guardado → modo válido (Medianoche y Brasa pasan a Oscuro; Amanecer, a Claro). */
 export function parseThemeMode(raw: unknown): ThemeMode {
-  return isThemeMode(raw) ? raw : 'system';
+  return migrateThemeMode(raw);
 }
 
 export function resolveThemeId(mode: ThemeMode, prefersDark: boolean): ThemeId {
@@ -26,7 +27,11 @@ export function resolveThemeId(mode: ThemeMode, prefersDark: boolean): ThemeId {
 
 function readStoredMode(): ThemeMode {
   try {
-    return parseThemeMode(localStorage.getItem(STORAGE_KEY));
+    const stored = localStorage.getItem(STORAGE_KEY);
+    const mode = parseThemeMode(stored);
+    // Un tema retirado se reescribe ya migrado: el menú y Configuración muestran el tema que se ve.
+    if (stored !== null && stored !== mode) localStorage.setItem(STORAGE_KEY, mode);
+    return mode;
   } catch {
     return 'system';
   }

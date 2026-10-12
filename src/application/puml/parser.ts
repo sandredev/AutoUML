@@ -40,6 +40,7 @@ const RE_ATTR_JAVA = /^([+\-#~])?\s*(\S.*?)\s+([\p{L}_$][\p{L}\p{N}_$]*)$/u;
 const RE_IDENT = /^([+\-#~])?\s*([\p{L}_$][\p{L}\p{N}_$]*)$/u;
 const RE_ENUM_CONST = /^([\p{L}_$][\p{L}\p{N}_$]*)\s*(?:\(.*\))?\s*[,;]?$/u;
 const RE_SEPARATOR = /^(?:--+|\.\.+|==+|__+)/u;
+const RE_END = /^@enduml\b/iu;
 const RE_ABBREV = /^(?:…|\.\.\.)\s*(\d+)$/u;
 const RE_REL_KW = /^("[^"]+"|[^\s":]+)\s+(extends|implements)\s+("[^"]+"|[^\s":]+)\s*$/u;
 const RE_REL =
@@ -475,6 +476,9 @@ export function parsePuml(source: string): DiagramModel {
       } else if (noteBody) noteBody.text += (noteBody.text ? '\n' : '') + line;
       continue;
     }
+    // @enduml cierra el diagrama aunque quede una llave abierta: no es un miembro del tipo sin cerrar
+    // (eso solo añadía un aviso en cascada) y lo que venga después lo ignora PlantUML. La llave sigue como error.
+    if (RE_END.test(line)) break;
     const top = stack[stack.length - 1];
 
     // --- Dentro de un tipo ---

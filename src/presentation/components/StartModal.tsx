@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent, type JSX } from 'react';
 import type { ProjectInfo, ProjectSummary } from '../../application/ports/ipc';
 import { MAX_PROJECT_NAME_LENGTH, validateProjectName } from '../../domain/rules/validation';
-import { CloseIcon, FolderIcon, PlusIcon } from './Icons';
+import { CloseIcon } from './Icons';
 import { useLocalization } from '../localization/LocalizationProvider';
 
-type View = 'choose' | 'new' | 'list';
+/** Qué muestra el diálogo (T11): crear un diagrama nuevo o abrir uno guardado. Inicio sustituye a la elección. */
+export type StartView = 'new' | 'list';
+type View = StartView;
 
 interface Props {
-  dismissable: boolean;
+  view: StartView;
   onClose: () => void;
   onOpened: (project: ProjectInfo) => void;
 }
@@ -22,9 +24,9 @@ function formatDate(iso: string, locale: string): string {
 
 const FOCUSABLE = 'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Element {
+export function StartModal({ view: initialView, onClose, onOpened }: Props): JSX.Element {
   const { t, locale } = useLocalization();
-  const [view, setView] = useState<View>('choose');
+  const [view, setView] = useState<View>(initialView);
   const [name, setName] = useState('');
   const [touched, setTouched] = useState(false);
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
@@ -85,12 +87,11 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || busy) return;
       e.preventDefault();
-      if (view !== 'choose') goTo('choose');
-      else if (dismissable) onClose();
+      onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [view, dismissable, busy, onClose]);
+  }, [busy, onClose]);
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
@@ -120,44 +121,24 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
     }
   };
 
-  const title = view === 'choose' ? 'AutoUML' : view === 'new' ? t('start.newProject') : t('start.openProject');
+  const title = view === 'new' ? t('start.newProject') : t('start.openProject');
 
   return (
     <div
       className="modal-overlay"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && dismissable && !busy) onClose();
+        if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="start-modal-title">
         <div className="modal-header">
           <h2 id="start-modal-title">{title}</h2>
-          {dismissable && (
-            <button type="button" className="icon-btn" onClick={onClose} aria-label={t('start.close')} title={`${t('start.close')} (Esc)`}>
-              <CloseIcon />
-            </button>
-          )}
+          <button type="button" className="icon-btn" onClick={onClose} aria-label={t('start.close')} title={`${t('start.close')} (Esc)`}>
+            <CloseIcon />
+          </button>
         </div>
 
         <div className="modal-body" ref={bodyRef}>
-          {view === 'choose' && (
-            <>
-              <p className="modal-subtitle">{t('start.subtitle')}</p>
-              <div className="choice-grid">
-                <button type="button" className="choice-btn" onClick={() => goTo('list')}>
-                  <FolderIcon />
-                  <span className="choice-label">{t('start.load')}</span>
-                  <span className="choice-hint">{t('start.openExisting')}</span>
-                </button>
-                <button type="button" className="choice-btn" onClick={() => goTo('new')}>
-                  <PlusIcon />
-                  <span className="choice-label">{t('start.new')}</span>
-                  <span className="choice-hint">{t('start.createEmpty')}</span>
-                </button>
-              </div>
-            </>
-          )}
-
           {view === 'new' && (
             <form onSubmit={(e) => void handleCreate(e)} noValidate>
               <label className="field-label" htmlFor="project-name">
@@ -182,8 +163,8 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
                 {showNameError ? nameErrorText(nameError) : serverError ?? t('start.createFolderHint')}
               </p>
               <div className="modal-actions">
-                <button type="button" className="btn" onClick={() => goTo('choose')} disabled={busy}>
-                  {t('start.back')}
+                <button type="button" className="btn" onClick={onClose} disabled={busy}>
+                  {t('common.cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={nameError !== null || busy}>
                   {busy ? t('start.creating') : t('start.create')}
@@ -229,8 +210,8 @@ export function StartModal({ dismissable, onClose, onOpened }: Props): JSX.Eleme
                 </ul>
               )}
               <div className="modal-actions">
-                <button type="button" className="btn" onClick={() => goTo('choose')} disabled={busy}>
-                  {t('start.back')}
+                <button type="button" className="btn" onClick={onClose} disabled={busy}>
+                  {t('common.cancel')}
                 </button>
               </div>
             </>

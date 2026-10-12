@@ -2,7 +2,6 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { MenuAction, MenuState, ProjectInfo, PumlLineRef, PumlScope, SidecarFilters, SidecarState, SidecarView, StorageInfo } from '../../application/ports/ipc';
 import { actionOfShortcut, isShortcutEnabled, matchShortcut } from '../../application/shortcuts';
 import type { OpenPumlFile } from '../../application/ports/history';
-import { buildTree, countByCategory } from '../../domain/diagram/classify';
 import { scanIncludes } from '../../application/puml/include';
 import { nextLiveState, parseDocument, reconcileDiskText, type LiveState } from '../../application/puml/liveDocument';
 import { parsePuml } from '../../application/puml/parser';
@@ -12,15 +11,25 @@ import type { DiagramModel, ParseIssue } from '../../domain/diagram/model';
 import type { CodeEditorHandle } from '../editor/CodeEditor';
 import { createDebouncer, LIVE_PARSE_DELAY_MS } from '../editor/debounce';
 import { EDITOR_DEFAULT_WIDTH } from '../editor/editorSize';
-import { Header } from '../components/Header';
-import { HistoryPanel, openDroppedFiles } from '../components/HistoryPanel';
+import { TitleBar } from '../components/TitleBar';
+import { openDroppedFiles, reopenEntry, saveAs } from '../components/historyActions';
 import { IssuesPanel } from '../components/IssuesPanel';
+import { Inspector } from '../components/Inspector';
+import { canIgnore, issueKey, ignoredCount, visibleIssues } from '../components/issueKeys';
 import { RenderArea } from '../components/RenderArea';
-import { Sidebar } from '../components/Sidebar';
-import { StartModal } from '../components/StartModal';
+import { Sidebar, SIDEBAR_DEFAULT_WIDTH } from '../components/Sidebar';
+import { StartModal, type StartView } from '../components/StartModal';
+import { StartScreen } from '../components/StartScreen';
 import { StatusBar, type Status } from '../components/StatusBar';
+import type { RecentItem } from '../components/AppMenuBar';
+import type { SettingsCategory } from '../components/settingsModel';
+import type { HistoryEntry } from '../../application/ports/history';
+import type { ViewerControl, ViewerInfo } from '../diagram/viewerInfo';
+import { hiddenByPuml } from '../diagram/viewerInfo';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
-import type { CodeTarget } from '../diagram/PumlViewer';
+import { EMPTY_SELECTION } from '../diagram/canvas/selection';
+import { isPackageNode } from '../diagram/layout/aggregate';
+import type { CodeTarget, ViewerToolbarHost } from '../diagram/PumlViewer';
 import { hasActiveFilters } from '../diagram/graph/filters';
 import { serializeViews } from '../diagram/presentation/views';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -28,6 +37,7 @@ import { CloseConfirmModal } from '../components/CloseConfirmModal';
 import { createOpenGuard, type OpenChoice } from './openGuard';
 import { DropOverlay, type DropPhase } from '../components/DropOverlay';
 import { LoadingIntro } from '../components/LoadingIntro';
+import { ErrorDotIcon } from '../components/Icons';
 import { isIntroActive } from '../components/introState';
 import { useTheme } from '../components/useTheme';
 import { isThemeMode } from '../../domain/rules/themes';
@@ -41,6 +51,7 @@ const CodeEditor = lazy(() => import('../editor/CodeEditor').then((m) => ({ defa
 interface ModalState {
   open: boolean;
   dismissable: boolean;
+  view: StartView;
 }
 
 /** Cómo se llega a cargar el documento desde disco (T7: decide qué pasa con el texto del editor). */
@@ -62,12 +73,22 @@ function hasFiles(event: DragEvent): boolean {
 export default function App() {
   const { t, locale, setLocale } = useLocalization();
   const { mode: themeMode, setMode: setThemeMode } = useTheme();
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState<SettingsCategory | null>(null);
   const [project, setProject] = useState<ProjectInfo | null>(null);
-  const [modal, setModal] = useState<ModalState>({ open: true, dismissable: false });
+  // Nuevo diagrama / Diagramas guardados (T11: Inicio es la pantalla de arranque, ya no un diálogo).
+  const [modal, setModal] = useState<ModalState>({ open: false, dismissable: true, view: 'new' });
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
+  const [inspectorVisible, setInspectorVisible] = useState(true);
+  // Lo que se ve del documento (T11): conteos, fuera de la vista, zoom y fallo del motor.
+  const [viewerInfo, setViewerInfo] = useState<ViewerInfo | null>(null);
+  const viewerControl = useRef<ViewerControl | null>(null);
+  // Avisos ignorados en este documento (T11): viven en el sidecar.
+  const [ignored, setIgnored] = useState<ReadonlySet<string>>(() => new Set());
+  const ignoredRef = useRef<ReadonlySet<string>>(ignored);
+  ignoredRef.current = ignored;
+  const [recents, setRecents] = useState<HistoryEntry[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
   const [resetSignal, setResetSignal] = useState(0);
@@ -79,8 +100,12 @@ export default function App() {
   const [diagram, setDiagram] = useState<DiagramModel | null>(null);
   const loadedFor = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [issuesOpen, setIssuesOpen] = useState(true);
-  const [historyOpen, setHistoryOpen] = useState(true);
+  /** Selección completa; `selectedId` es la primaria (Inspector, foco, paleta). */
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(EMPTY_SELECTION);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  // Problemas no se abre solo (tampoco al escribir): lo decide el usuario.
+  const [issuesOpen, setIssuesOpen] = useState(false);
   // Fuerza re-parseo en recarga.
   const [sourceTick, setSourceTick] = useState(0);
   const canvasRef = useRef<DiagramCanvasHandle | null>(null);
@@ -222,11 +247,12 @@ export default function App() {
       hasPuml: project?.puml != null || diagram !== null,
       sidebarVisible,
       editorVisible,
+      inspectorVisible,
       dirty,
       locale,
       themeMode,
     }),
-    [project, diagram, sidebarVisible, editorVisible, dirty, locale, themeMode],
+    [project, diagram, sidebarVisible, editorVisible, inspectorVisible, dirty, locale, themeMode],
   );
   const menuStateRef = useRef(menuState);
   menuStateRef.current = menuState;
@@ -234,12 +260,23 @@ export default function App() {
     api.updateMenuState(menuState);
   }, [menuState]);
 
-  // Los mensajes que no son de error se ocultan solos.
+  // Los mensajes se ocultan solos salvo errores y avisos; con una acción (Deshacer…) duran más.
   useEffect(() => {
-    if (!status || status.kind === 'error') return;
-    const t = window.setTimeout(() => setStatus(null), 5000);
+    if (!status || status.kind === 'error' || status.kind === 'warning') return;
+    const t = window.setTimeout(() => setStatus(null), status.action ? 10000 : 5000);
     return () => window.clearTimeout(t);
   }, [status]);
+
+  // Recientes para Archivo › Recientes (T11); Inicio carga su propia lista.
+  useEffect(() => {
+    let cancelled = false;
+    void api.history.list().then((r) => {
+      if (!cancelled && r.ok) setRecents(r.value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [historyTick]);
 
   /** Texto ya parseado: diagrama (o el último válido si hay errores graves), issues y sincronía. (T7) */
   const applyParsed = useCallback(
@@ -337,7 +374,7 @@ export default function App() {
       setSelectedId(null);
       setExternalName(file.entry.name);
       setExternalPath(file.entry.path);
-      setModal((current) => current.open ? { open: false, dismissable: true } : current);
+      setModal((current) => current.open ? { ...current, open: false } : current);
       void loadDocument({ file: file.entry.path }, 'open');
     });
   }, [loadDocument, openGuard]);
@@ -472,7 +509,20 @@ export default function App() {
 
   // reset: solo la rueda del header restablece la vista; Ctrl+R / Archivo › Recargar conservan posiciones.
   const handleReload = useCallback(async (opts?: { reset?: boolean }) => {
-    if (!project?.puml || busy) return;
+    if (busy) return;
+    // Archivo externo (T11): se relee por el mismo flujo que el watch.
+    if (!project?.puml) {
+      if (!externalPath) return;
+      setBusy(true);
+      try {
+        const ok = await loadDocument({ file: externalPath }, 'reload');
+        if (ok && opts?.reset) setResetSignal((n) => n + 1);
+        setStatus(ok ? { kind: 'success', text: t('status.reloaded') } : { kind: 'error', text: t('status.reloadFailed') });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setBusy(true);
     try {
       // El contenido manda (con !include resueltos); los metadatos se refrescan después
@@ -493,7 +543,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [project, busy, loadDocument, t]);
+  }, [project, externalPath, busy, loadDocument, t]);
 
   // T5.1: vigila la entrada + los incluidos; al cambiar, recarga silenciosa por el
   // mismo flujo (sin busy; la vista se conserva por docKey). Al borrar, aviso sin crash.
@@ -531,6 +581,8 @@ export default function App() {
   useEffect(() => {
     setInitialSidecar(undefined);
     setAnalysisLayers(null);
+    setIgnored(new Set());
+    setViewerInfo(null);
     if (docKey === undefined) return;
     const scope: PumlScope | null = projectName !== null ? { project: projectName } : externalPath ? { file: externalPath } : null;
     if (scope === null) return;
@@ -547,6 +599,7 @@ export default function App() {
         return;
       }
       if (r.value.corrupt) setStatus({ kind: 'info', text: tRef.current('status.sidecarCorrupt') });
+      setIgnored(new Set(r.value.state?.ignoredIssues ?? []));
       setInitialSidecar(r.value.state);
     });
     return () => {
@@ -554,10 +607,8 @@ export default function App() {
     };
   }, [docKey, projectName, externalPath]);
 
-  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>, filters: SidecarFilters, views: readonly SidecarView[]) => {
-    pendingCollapsed.current = _collapsed;
-    pendingFilters.current = filters;
-    pendingViews.current = views;
+  const saveFailed = useRef(false);
+  const scheduleSidecarSave = useCallback(() => {
     if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = undefined;
@@ -575,9 +626,22 @@ export default function App() {
         ...(hasActiveFilters(filters) ? { filters } : {}),
         // Igual con las vistas (T10): sin ninguna guardada el sidecar no cambia.
         ...(pendingViews.current.length > 0 ? { views: serializeViews(pendingViews.current) } : {}),
+        // Y con los avisos ignorados (T11).
+        ...(ignoredRef.current.size > 0 ? { ignoredIssues: [...ignoredRef.current] } : {}),
+      }).then((r) => {
+        // Un fallo de escritura (carpeta de solo lectura, disco lleno…) se avisa una vez, no en cada cambio.
+        if (!r.ok && !saveFailed.current) setStatus({ kind: 'error', text: tRef.current('status.sidecarSaveFailed', { error: r.error }) });
+        saveFailed.current = !r.ok;
       });
     }, 800);
   }, []);
+
+  const handleViewStateChange = useCallback((_collapsed: ReadonlySet<string>, filters: SidecarFilters, views: readonly SidecarView[]) => {
+    pendingCollapsed.current = _collapsed;
+    pendingFilters.current = filters;
+    pendingViews.current = views;
+    scheduleSidecarSave();
+  }, [scheduleSidecarSave]);
 
   useEffect(() => () => {
     if (saveTimer.current !== undefined) window.clearTimeout(saveTimer.current);
@@ -587,7 +651,7 @@ export default function App() {
     setProject(p);
     setExternalName(null);
     setExternalPath(null);
-    setModal({ open: false, dismissable: true });
+    setModal((m) => ({ ...m, open: false }));
     setStatus({ kind: 'info', text: t('status.projectOpened', { name: p.meta.name }) });
   }, [t]);
 
@@ -763,14 +827,18 @@ export default function App() {
     if (!sync) return;
     const at = sync.mapping.toCombined(line);
     const element = at === null ? null : sync.index.elementAt(at);
-    setSelectedId(element?.kind === 'type' ? element.id : null);
+    const id = element?.kind === 'type' ? element.id : null;
+    setSelectedId(id);
+    setSelectedIds(id === null ? EMPTY_SELECTION : new Set([id]));
     setHighlightLine(element?.kind === 'relation' ? element.line : null);
   }, []);
 
-  const handleCanvasSelect = useCallback((id: string | null) => {
-    setSelectedId(id);
+  const handleCanvasSelect = useCallback((id: string | null, ids: ReadonlySet<string>) => {
+    setSelectedIds(ids);
     setHighlightLine(null);
-    if (id !== null) revealType(id);
+    // El marco notifica en cada movimiento: solo se revela en el editor si cambia la primaria.
+    if (id !== null && id !== selectedIdRef.current) revealType(id);
+    setSelectedId(id);
   }, [revealType]);
 
   const handleRelationSelect = useCallback((line: number | null) => {
@@ -799,6 +867,7 @@ export default function App() {
     if (problem !== null) return tRef.current(`rename.${problem}`, { name: next });
     editorRef.current.renameType(id, next);
     setSelectedId(next);
+    setSelectedIds(new Set([next]));
     setStatus({ kind: 'info', text: tRef.current('status.renamed', { from: id, to: next }) });
     return null;
   }, []);
@@ -893,7 +962,7 @@ export default function App() {
       closeSaveSourceRef.current = source;
       setCloseSaveProjectPending(true);
       setClosePromptOpen(false);
-      setModal({ open: true, dismissable: true });
+      setModal({ open: true, dismissable: true, view: 'list' });
       return;
     }
     void saveCloseSourceToProject(project, source);
@@ -902,7 +971,7 @@ export default function App() {
   const handleStartModalOpened = useCallback((opened: ProjectInfo) => {
     if (!closeSaveProjectPending) {
       // Otro proyecto sustituye al documento abierto: con cambios sin guardar se pregunta antes.
-      setModal({ open: false, dismissable: true });
+      setModal((m) => ({ ...m, open: false }));
       if (opened.meta.name === project?.meta.name && !externalName) onProjectOpened(opened);
       else openGuard.request(() => onProjectOpened(opened));
       return;
@@ -910,7 +979,7 @@ export default function App() {
     const text = closeSaveSourceRef.current;
     closeSaveSourceRef.current = null;
     setCloseSaveProjectPending(false);
-    setModal({ open: false, dismissable: true });
+    setModal((m) => ({ ...m, open: false }));
     setClosePromptOpen(true);
     if (text === null) {
       setProject(opened);
@@ -922,7 +991,7 @@ export default function App() {
   }, [closeSaveProjectPending, onProjectOpened, saveCloseSourceToProject, project, externalName, openGuard, t]);
 
   const handleStartModalClose = useCallback(() => {
-    setModal({ open: false, dismissable: true });
+    setModal((m) => ({ ...m, open: false }));
     if (!closeSaveProjectPending) return;
     closeSaveSourceRef.current = null;
     setCloseSaveProjectPending(false);
@@ -942,28 +1011,120 @@ export default function App() {
 
   const handleSidebarSelect = useCallback((id: string) => {
     setSelectedId(id);
+    setSelectedIds(new Set([id]));
     setHighlightLine(null);
     canvasRef.current?.focusNode(id);
     revealType(id);
   }, [revealType]);
 
-  // Derivados del modelo.
-  const groups = useMemo(() => (diagram ? buildTree(diagram) : []), [diagram]);
-  const counts = useMemo(() => (diagram ? countByCategory(diagram) : null), [diagram]);
 
   // Conserva la selección tras recargar solo si el tipo sigue existiendo.
   useEffect(() => {
-    if (!diagram || !selectedId) return;
-    if (!diagram.types.some((t) => t.id === selectedId)) setSelectedId(null);
+    if (!diagram) return;
+    if (selectedId && !diagram.types.some((t) => t.id === selectedId)) setSelectedId(null);
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => isPackageNode(id) || diagram.types.some((t) => t.id === id)));
+      return next.size === prev.size ? prev : next;
+    });
   }, [diagram, selectedId, sourceTick]);
 
+  // Totales de la barra de estado (T11): lo que se ve frente al total; sin vista ni filtros, solo el total.
   const summary = useMemo(() => {
     if (!diagram) return null;
-    // Internos + externos + sin declarar.
-    const totalTypes = diagram.types.length;
-    const warnings = issues.filter((i) => i.severity === 'warning').length;
-    return t('status.summary', { types: totalTypes, relationships: diagram.relationships.length, warnings });
-  }, [diagram, issues, t]);
+    const info = viewerInfo;
+    const types = diagram.types.length;
+    const relations = diagram.relationships.length;
+    if (info && info.shownTypes < info.totalTypes) {
+      return t('status.summaryPartial', { shown: info.shownTypes, types: info.totalTypes, relations: info.shownRelations });
+    }
+    return t('status.summaryAll', { types, relations });
+  }, [diagram, viewerInfo, t]);
+
+  // Problemas visibles (sin los avisos ignorados), errores primero.
+  const shownIssues = useMemo(() => (diagram ? visibleIssues(issues, ignored) : []), [diagram, issues, ignored]);
+  // El editor tampoco marca los avisos ignorados (los errores siempre).
+  const editorIssues = useMemo(() => (ignored.size === 0 ? issues : issues.filter((i) => !(canIgnore(i) && ignored.has(issueKey(i))))), [issues, ignored]);
+  const ignoredNow = useMemo(() => (diagram ? ignoredCount(issues, ignored) : 0), [diagram, issues, ignored]);
+  const handleIgnore = useCallback((issue: ParseIssue) => {
+    setIgnored((prev) => new Set([...prev, issueKey(issue)]));
+    // El sidecar se escribe con el valor nuevo (el ref se actualiza en el siguiente render).
+    requestAnimationFrame(() => scheduleSidecarSave());
+  }, [scheduleSidecarSave]);
+  const handleRestoreIgnored = useCallback(() => {
+    setIgnored(new Set());
+    requestAnimationFrame(() => scheduleSidecarSave());
+  }, [scheduleSidecarSave]);
+
+  // Entidades ocultas por el propio .puml (hide), con la línea de la regla.
+  const pumlHidden = useMemo(() => (diagram ? hiddenByPuml(diagram, combined) : new Map<string, number | null>()), [diagram, combined]);
+
+  // Aviso del motor de disposición (T11): el motivo va en el texto, con Reintentar y el detalle técnico.
+  const lastFallback = useRef<string | null>(null);
+  useEffect(() => {
+    const fb = viewerInfo?.fallback ?? null;
+    if (fb === lastFallback.current) return;
+    lastFallback.current = fb;
+    if (fb === null) return;
+    setStatus({
+      kind: 'warning',
+      text: t('status.fallback'),
+      action: { label: t('status.retry'), run: () => { setStatus(null); viewerControl.current?.retryLayout(); } },
+      secondary: { label: t('status.detail'), run: () => setStatus({ kind: 'info', text: fb }) },
+    });
+  }, [viewerInfo, t]);
+
+  // Abrir un .puml con el diálogo del sistema (Inicio › Abrir…, Archivo › Abrir archivo).
+  const handleOpenFile = useCallback(() => {
+    void api.history.openPumlFile().then((r) => {
+      if (!r.ok) setStatus({ kind: 'error', text: r.error });
+      else if (r.value) {
+        setHistoryTick((n) => n + 1);
+        handlePumlOpened(r.value);
+      }
+    });
+  }, [handlePumlOpened]);
+
+  const handleOpenRecent = useCallback((id: string) => {
+    const entry = recents.find((e) => e.id === id);
+    if (!entry) return;
+    void reopenEntry(api.history, entry, tRef.current).then((outcome) => {
+      if (outcome.status) setStatus(outcome.status);
+      if (outcome.opened) handlePumlOpened(outcome.opened);
+      if (outcome.refresh) setHistoryTick((n) => n + 1);
+    });
+  }, [recents, handlePumlOpened]);
+
+  const handleSaveAs = useCallback(() => {
+    void saveAs(api.history, editorTextRef.current || source, (externalName ?? project?.meta.name ?? 'diagrama') + '.puml', tRef.current).then((outcome) => {
+      if (outcome.status) setStatus(outcome.status);
+      if (outcome.refresh) setHistoryTick((n) => n + 1);
+    });
+  }, [source, externalName, project]);
+
+  // Inicio: cierra el documento (preguntando si hay cambios sin guardar).
+  const goHome = useCallback(() => {
+    openGuard.request(() => {
+      setProject(null);
+      setExternalName(null);
+      setExternalPath(null);
+      setEditorVisible(false);
+      setHistoryTick((n) => n + 1);
+    });
+  }, [openGuard]);
+
+  const toolbarHost = useMemo<ViewerToolbarHost>(() => ({
+    onZoomIn: () => canvasRef.current?.zoomIn(),
+    onZoomOut: () => canvasRef.current?.zoomOut(),
+    onFit: () => canvasRef.current?.fit(),
+    onFullscreen: () => handleFitRef.current(),
+    onRelayout: () => handleRelayoutRef.current(),
+    onExport: (kind) => {
+      if (kind === 'png') void handleExport();
+      else if (kind === 'svg') void handleExportSvg();
+      else if (kind === 'pdf') void handleExportPdf();
+      else void handleCopyPng();
+    },
+  }), [handleExport, handleExportSvg, handleExportPdf, handleCopyPng]);
 
   // Despachador de las acciones del menú nativo (los atajos llegan por aquí).
   // toggle-sidebar y acciones de vista también funcionan con un .puml externo sin proyecto.
@@ -972,7 +1133,15 @@ export default function App() {
     actionRef.current = (action) => {
       if (closePromptOpen || openPromptOpen) return;
       if (action === 'new-project' || action === 'open-project') {
-        setModal({ open: true, dismissable: project !== null || diagram !== null });
+        setModal({ open: true, dismissable: true, view: action === 'new-project' ? 'new' : 'list' });
+        return;
+      }
+      if (action === 'open-file') {
+        handleOpenFile();
+        return;
+      }
+      if (action === 'go-home') {
+        goHome();
         return;
       }
       if (action === 'toggle-sidebar') {
@@ -980,8 +1149,12 @@ export default function App() {
         toggleSidebar();
         return;
       }
-      if (action === 'settings-more') {
-        setSettingsOpen(true);
+      if (action === 'toggle-inspector') {
+        setInspectorVisible((v) => !v);
+        return;
+      }
+      if (action === 'settings-more' || action === 'show-about') {
+        setSettingsOpen(action === 'show-about' ? 'about' : 'appearance');
         return;
       }
       if (action.startsWith('theme-')) {
@@ -1031,59 +1204,84 @@ export default function App() {
         case 'save':
           void handleSave();
           break;
+        case 'save-as':
+          handleSaveAs();
+          break;
         case 'toggle-editor':
           if (source !== null) toggleEditor();
           break;
       }
     };
-  }, [project, diagram, source, modal.open, closePromptOpen, openPromptOpen, handleLoad, handleReload, handleSave, toggleSidebar, toggleEditor, handleZoomIn, handleZoomOut, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
+  }, [project, diagram, source, modal.open, closePromptOpen, openPromptOpen, handleLoad, handleReload, handleSave, handleSaveAs, handleOpenFile, goHome, toggleSidebar, toggleEditor, handleZoomIn, handleZoomOut, handleExport, handleExportSvg, handleExportPdf, handleCopyPng, setThemeMode, setLocale, t]);
 
   useEffect(() => api.onMenuAction((a) => actionRef.current(a)), []);
 
-  const headerName = project?.meta.name ?? externalName?.replace(/\.[^.]+$/, '') ?? null;
+  const hasDocument = project !== null || diagram !== null;
+  const titleDoc = externalName ?? (project ? (project.puml?.originalFileName ? project.meta.name + ' · ' + project.puml.originalFileName : project.meta.name) : null);
+  const menuRecents = useMemo<RecentItem[]>(
+    () => recents.filter((e) => e.available && e.kind === 'puml').slice(0, 5).map((e) => ({ id: e.id, name: e.name, path: e.path })),
+    [recents],
+  );
+  const errorIssues = useMemo(() => issues.filter((i) => i.severity === 'error'), [issues]);
+  const firstError = errorIssues[0];
+  // Aviso fijo sobre el lienzo cuando el código tiene errores: se ve el último diagrama válido.
+  const staleBanner = stale && firstError ? (
+    <div className="canvas-banner" role="status">
+      <span className="sev-icon error" aria-hidden="true"><ErrorDotIcon /></span>
+      <span>{t(errorIssues.length === 1 ? 'banner.staleOne' : 'banner.staleOther', { count: errorIssues.length })}</span>
+      {firstError.file === undefined || firstError.file === entryPath ? (
+        <button type="button" className="ghost-btn" onClick={() => handleIssueSelect(firstError)}>{t('banner.goToLine', { line: firstError.line })}</button>
+      ) : null}
+    </div>
+  ) : null;
+  const intro = <LoadingIntro active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })} />;
 
   return (
     <div className="app">
       {storage?.warning && <div className="banner banner-warning">⚠ {storage.warning}</div>}
-      <Header
-        projectName={headerName}
-        canReload={project?.puml != null && !busy}
+      <TitleBar
+        docName={titleDoc}
+        dirty={dirty}
         sidebarVisible={sidebarVisible}
         editorVisible={editorVisible}
+        inspectorVisible={inspectorVisible}
+        hasDocument={hasDocument}
         canEdit={source !== null}
-        onToggleEditor={toggleEditor}
-        onReload={() => void handleReload({ reset: true })}
-        canView={diagram !== null && diagram.types.length > 0}
+        canReload={(project?.puml != null || externalPath !== null) && !busy}
         onToggleSidebar={toggleSidebar}
-        onZoomIn={handleZoomIn}
-        onZoomOut={handleZoomOut}
-        onFit={handleFit}
-        onRelayout={handleRelayout}
-        onExport={() => void handleExport()}
+        onToggleEditor={toggleEditor}
+        onToggleInspector={() => setInspectorVisible((v) => !v)}
+        onReload={() => void handleReload({ reset: true })}
         menuState={menuState}
         onMenuAction={(a) => actionRef.current(a)}
+        recents={menuRecents}
+        onOpenRecent={handleOpenRecent}
       />
       <div className="workspace" aria-busy={dropPhase === 'opening'}>
-        {sidebarVisible && (project || diagram) && (
+        {sidebarVisible && hasDocument && (
           <Sidebar
-            project={project}
-            externalName={externalName}
+            model={diagram}
+            fileLabel={externalName ?? project?.puml?.originalFileName ?? null}
             width={sidebarWidth}
             onResize={setSidebarWidth}
-            groups={groups}
-            counts={counts}
+            {...(viewerInfo ? { outOfView: viewerInfo.outOfView } : {})}
+            pumlHidden={pumlHidden}
             selectedId={selectedId}
             onSelect={handleSidebarSelect}
+            onSetVisible={(id, visible) => {
+              if (!viewerControl.current?.setTypeVisible(id, visible)) setStatus({ kind: 'info', text: t('status.hiddenByPuml') });
+            }}
+            onGoToLine={(line) => handleGoToCode({ kind: 'relation', line })}
           />
         )}
-        {source !== null && (project || diagram) && (
+        {source !== null && hasDocument && (
           <Suspense fallback={null}>
           <CodeEditor
             key={docGen}
             ref={editorRef}
             hidden={!editorVisible}
             initialText={source}
-            issues={issues}
+            issues={editorIssues}
             entryFile={entryPath}
             fileName={editorFileName}
             width={editorWidth}
@@ -1098,61 +1296,93 @@ export default function App() {
           />
           </Suspense>
         )}
-        <RenderArea
-          project={project}
-          model={diagram}
-          selectedId={selectedId}
-          onSelect={handleCanvasSelect}
-          highlightLine={highlightLine}
-          onRelationSelect={handleRelationSelect}
-          onRename={handleRename}
-          {...(source !== null ? { onGoToCode: handleGoToCode } : {})}
-          onCopyText={handleCopyText}
-          onAppAction={(a) => actionRef.current(a)}
-          onThemeChange={setThemeMode}
-          canvasRef={canvasRef}
-          areaRef={renderAreaRef}
-          onLayoutLoadingChange={setLayoutLoading}
-          {...(docKey !== undefined ? { docKey } : {})}
-          {...(initialSidecar !== undefined ? { initialSidecar } : {})}
-          onViewStateChange={handleViewStateChange}
-          analysisLayers={analysisLayers}
-          reportTitle={docName}
-          onExportReport={handleExportReport}
-          resetSignal={resetSignal}
-        >
-          <LoadingIntro
-            active={isIntroActive({ booting: storage === null, documentLoading: sourceLoading, layoutLoading })}
+        {hasDocument ? (
+          <RenderArea
+            project={project}
+            model={diagram}
+            selectedId={selectedId}
+            selectedIds={selectedIds}
+            onSelect={handleCanvasSelect}
+            highlightLine={highlightLine}
+            onRelationSelect={handleRelationSelect}
+            onRename={handleRename}
+            {...(source !== null ? { onGoToCode: handleGoToCode } : {})}
+            onCopyText={handleCopyText}
+            onAppAction={(a) => actionRef.current(a)}
+            onThemeChange={setThemeMode}
+            canvasRef={canvasRef}
+            areaRef={renderAreaRef}
+            onLayoutLoadingChange={setLayoutLoading}
+            {...(docKey !== undefined ? { docKey } : {})}
+            {...(initialSidecar !== undefined ? { initialSidecar } : {})}
+            onViewStateChange={handleViewStateChange}
+            analysisLayers={analysisLayers}
+            reportTitle={docName}
+            onExportReport={handleExportReport}
+            resetSignal={resetSignal}
+            toolbarHost={toolbarHost}
+            onViewInfo={setViewerInfo}
+            controlRef={viewerControl}
+            banner={staleBanner}
+            onLoadPuml={handleLoad}
+          >
+            {intro}
+          </RenderArea>
+        ) : (
+          <main className="render-area start">
+            <StartScreen
+              api={api.history}
+              refreshKey={historyTick}
+              onOpened={handlePumlOpened}
+              onStatus={setStatus}
+              onNew={() => setModal({ open: true, dismissable: true, view: 'new' })}
+              onOpenFile={handleOpenFile}
+              onOpenSaved={() => setModal({ open: true, dismissable: true, view: 'list' })}
+            />
+            {intro}
+          </main>
+        )}
+        {inspectorVisible && hasDocument && (
+          <Inspector
+            model={diagram}
+            selectedId={selectedId}
+            docName={titleDoc ?? docName}
+            issues={shownIssues}
+            stale={stale}
+            onSelect={handleSidebarSelect}
+            {...(source !== null ? { onGoToType: (id: string) => handleGoToCode({ kind: 'type', id }) } : {})}
+            onIssue={handleIssueSelect}
           />
-        </RenderArea>
-        <HistoryPanel
-          api={api.history}
-          source={source}
-          suggestedName={docName + '.puml'}
-          refreshKey={historyTick}
-          onOpened={handlePumlOpened}
-          onStatus={setStatus}
-          open={historyOpen}
-          onToggle={() => setHistoryOpen((v) => !v)}
-        />
-        <DropOverlay phase={dropPhase} />
+        )}
+        <DropOverlay phase={dropPhase} dirtyName={dirty ? editorFileName : null} />
       </div>
       <IssuesPanel
-        issues={diagram ? issues : []}
-        source={combined}
+        issues={shownIssues}
+        ignored={ignoredNow}
         open={issuesOpen}
         onToggle={() => setIssuesOpen((v) => !v)}
         onSelect={handleIssueSelect}
+        onIgnore={handleIgnore}
+        onRestoreIgnored={handleRestoreIgnored}
+        docName={editorFileName}
       />
-      <StatusBar status={status} storage={storage} summary={summary} onDismiss={() => setStatus(null)} />
+      <StatusBar status={status} summary={summary} onDismiss={() => setStatus(null)} />
       {modal.open && (
         <StartModal
-          dismissable={modal.dismissable}
+          view={modal.view}
           onClose={handleStartModalClose}
           onOpened={handleStartModalOpened}
         />
       )}
-      {settingsOpen && <SettingsDialog themeMode={themeMode} onThemeChange={setThemeMode} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog
+          themeMode={themeMode}
+          onThemeChange={setThemeMode}
+          onClose={() => setSettingsOpen(null)}
+          initial={settingsOpen}
+          lastDiagram={diagram ? { name: editorFileName, types: diagram.types.length, ms: viewerInfo?.layoutMs ?? null } : null}
+        />
+      )}
       {closePromptOpen && (
         <CloseConfirmModal
           saving={closeSaving}

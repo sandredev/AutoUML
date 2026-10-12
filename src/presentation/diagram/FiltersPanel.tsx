@@ -78,7 +78,7 @@ export function FiltersPanel({ filters, packages, labels, onChange, defaultOpen 
         {count > 0 ? fill(labels.filtersActive, { n: count }) : labels.filters}
       </button>
       {open ? (
-        <div id={panelId} className="filters-panel" role="group" aria-label={labels.filtersPanelAria}>
+        <div id={panelId} className="filters-panel align-start" role="group" aria-label={labels.filtersPanelAria}>
           <fieldset>
             <legend>{labels.filtersRelations}</legend>
             {REL_TYPES.map((r) => (

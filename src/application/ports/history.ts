@@ -38,6 +38,8 @@ export interface HistoryApi {
   setPinned(id: string, pinned: boolean): Promise<Result<HistoryEntry[]>>;
   remove(id: string): Promise<Result<HistoryEntry[]>>;
   clear(): Promise<Result<void>>;
+  /** Vuelve a poner entradas borradas ("Deshacer" tras borrar recientes, T11). Devuelve la lista resultante. */
+  restore(entries: HistoryEntry[]): Promise<Result<HistoryEntry[]>>;
   savePumlAs(source: string, suggestedName: string): Promise<Result<string | null>>;
 }
 
@@ -52,4 +54,6 @@ export interface HistoryStore {
   setPinned(id: string, pinned: boolean): Promise<HistoryEntry[]>;
   remove(id: string): Promise<HistoryEntry[]>;
   clear(): Promise<void>;
+  /** Reinserta entradas (las que ya existan no se duplican; su id se recalcula desde tipo + ruta). */
+  restore(entries: readonly Pick<HistoryEntry, 'kind' | 'path' | 'name' | 'lastOpenedAt' | 'pinned'>[]): Promise<HistoryEntry[]>;
 }

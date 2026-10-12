@@ -1,14 +1,19 @@
 /*
- * Temas de AutoUML. Paleta base tomada del icono:
- *   naranja #FF5F3C · azul noche #1E2033 · amarillo #F5D33B
- * useTheme siempre fija data-theme con el tema ya resuelto (el modo "system" se convierte en light/dark).
+ * Temas de AutoUML: Claro, Oscuro y Alto contraste ("Sistema" elige Claro u Oscuro según el SO).
+ * useTheme siempre fija data-theme con el tema ya resuelto. Los temas antiguos (Medianoche, Brasa, Amanecer)
+ * se migran al leer la preferencia guardada.
+ *
+ * Superficies: --bg-chrome = paneles (barra de título, laterales, barra de estado); --canvas = lienzo del
+ * diagrama; --bg-elev = lo que flota (menús, diálogos, tarjetas); --bg-sunken = campos de texto.
+ * Reglas de contraste: texto ≥ 4.5:1 (también --fg-muted sobre paneles y selección); bordes de controles,
+ * foco y líneas del diagrama ≥ 3:1 (--border-strong). --border es solo separador decorativo.
  * Las variables --uml-* las lee el lienzo del diagrama.
  */
 :root {
   --radius: 4px;
   --radius-lg: 8px;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", sans-serif;
-  --mono: ui-monospace, "JetBrains Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  --mono: "Cascadia Code", "JetBrains Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace;
   --brand-orange: #ff5f3c;
   --brand-navy: #1e2033;
   --brand-yellow: #f5d33b;
@@ -17,81 +22,48 @@
 /* ---------- Claro (por defecto) ---------- */
 :root, :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f5f8; --bg-elev: #ffffff; --bg-sunken: #e9ebf1; --bg-chrome: #eceef4;
-  --fg: #1e2033; --fg-muted: #656b82; --border: #d5d8e2; --border-strong: #b9bdcc;
-  --accent: #d9441f; --accent-fg: #ffffff; --selected: #ffe5db; --hover: #e4e7ef;
-  --focus-ring: #ff5f3c;
+  --bg: #f8f9fb; --canvas: #f8f9fb; --bg-elev: #ffffff; --bg-sunken: #e5e8ef; --bg-chrome: #eef0f5;
+  --fg: #1e2033; --fg-muted: #555b70; --border: #d9dce5; --border-strong: #7d8297;
+  --accent: #b8360f; --accent-fg: #ffffff; --selected: #ffe5db; --hover: #e2e5ed;
+  --focus-ring: #b8360f;
   --shadow: 0 12px 40px rgba(30, 32, 51, 0.22); --scrim: rgba(30, 32, 51, 0.45);
-  --uml-card: #F1F1F1; --uml-card-border: #181818; --uml-card-fg: #000000;
-  --uml-edge: #181818; --uml-pkg: #555b62;
+  --uml-card: #ffffff; --uml-card-border: #454a62; --uml-card-fg: #1e2033;
+  --uml-edge: #4f546c; --uml-pkg: #7d8297; --uml-pkg-fg: #555b70;
 }
 
-/* ---------- Oscuro (estilo IDE, tinte azul noche) ---------- */
+/* ---------- Oscuro ---------- */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1b1c26; --bg-elev: #232433; --bg-sunken: #15161e; --bg-chrome: #1f202d;
-  --fg: #dfe1ec; --fg-muted: #8d92a8; --border: #34364a; --border-strong: #4a4d66;
-  --accent: #ff6a45; --accent-fg: #1e2033; --selected: #3c2b33; --hover: #2d2f42;
+  --bg: #191a24; --canvas: #191a24; --bg-elev: #262738; --bg-sunken: #15161e; --bg-chrome: #1f202d;
+  --fg: #e0e2ed; --fg-muted: #9398ae; --border: #2e3042; --border-strong: #6c7190;
+  --accent: #ff6a45; --accent-fg: #1e2033; --selected: #3c2b33; --hover: #2a2c3e;
   --focus-ring: #ff6a45;
   --shadow: 0 16px 48px rgba(0, 0, 0, 0.55); --scrim: rgba(8, 8, 14, 0.62);
-  --uml-card: #2c2e40; --uml-card-border: #8b90ab; --uml-card-fg: #e4e6f2;
-  --uml-edge: #a6abc4; --uml-pkg: #9296ae; --uml-note: #4a462c; --uml-note-border: #a39d6c; --uml-note-fg: #f4efc9;
-}
-
-/* ---------- Medianoche: el azul del icono con acento amarillo ---------- */
-:root[data-theme="midnight"] {
-  color-scheme: dark;
-  --bg: #171829; --bg-elev: #1e2033; --bg-sunken: #12131f; --bg-chrome: #1a1b2e;
-  --fg: #e4e6f5; --fg-muted: #8f94b3; --border: #31334f; --border-strong: #484b72;
-  --accent: #f5d33b; --accent-fg: #1e2033; --selected: #2f3157; --hover: #282a45;
-  --focus-ring: #f5d33b;
-  --shadow: 0 16px 48px rgba(0, 0, 0, 0.6); --scrim: rgba(6, 7, 16, 0.66);
-  --uml-card: #272a45; --uml-card-border: #8087b8; --uml-card-fg: #e8eafa;
-  --uml-edge: #a3a9d6; --uml-pkg: #8e94c2; --uml-note: #45422b; --uml-note-border: #a09a68; --uml-note-fg: #f4efc9;
-}
-
-/* ---------- Brasa: oscuro cálido con el naranja del icono ---------- */
-:root[data-theme="ember"] {
-  color-scheme: dark;
-  --bg: #1c1613; --bg-elev: #261d19; --bg-sunken: #151010; --bg-chrome: #211a16;
-  --fg: #f1e6de; --fg-muted: #a9968a; --border: #3e2f28; --border-strong: #5a453b;
-  --accent: #ff5f3c; --accent-fg: #1e1410; --selected: #4a2619; --hover: #32251f;
-  --focus-ring: #ff7a5c;
-  --shadow: 0 16px 48px rgba(0, 0, 0, 0.6); --scrim: rgba(12, 6, 4, 0.66);
-  --uml-card: #33261f; --uml-card-border: #b09484; --uml-card-fg: #f3e8e0;
-  --uml-edge: #c4a999; --uml-pkg: #ad9486; --uml-note: #4b4129; --uml-note-border: #ab9a6a; --uml-note-fg: #f6ecc8;
-}
-
-/* ---------- Amanecer: claro cálido (crema) ---------- */
-:root[data-theme="sunrise"] {
-  color-scheme: light;
-  --bg: #fbf5ec; --bg-elev: #fffdf8; --bg-sunken: #f2e9db; --bg-chrome: #f6eddf;
-  --fg: #2a2230; --fg-muted: #7b6f66; --border: #e3d6c3; --border-strong: #cdbca3;
-  --accent: #dc4520; --accent-fg: #ffffff; --selected: #ffe3cf; --hover: #efe3d0;
-  --focus-ring: #ff5f3c;
-  --shadow: 0 12px 40px rgba(80, 50, 20, 0.22); --scrim: rgba(60, 40, 20, 0.4);
-  --uml-card: #fff6e4; --uml-card-border: #3a2f2a; --uml-card-fg: #1a1410;
-  --uml-edge: #3a2f2a; --uml-pkg: #7b6f66;
+  --uml-card: #252737; --uml-card-border: #6c7190; --uml-card-fg: #e4e6f2;
+  --uml-edge: #8b90ab; --uml-pkg: #6c7190; --uml-pkg-fg: #9398ae;
+  --uml-note: #4a462c; --uml-note-border: #a39d6c; --uml-note-fg: #f4efc9;
 }
 
 /* ---------- Alto contraste ---------- */
 :root[data-theme="contrast"] {
   color-scheme: dark;
-  --bg: #000000; --bg-elev: #0a0a0f; --bg-sunken: #000000; --bg-chrome: #05050a;
-  --fg: #ffffff; --fg-muted: #c8c8d6; --border: #7a7da3; --border-strong: #a5a8d0;
-  --accent: #f5d33b; --accent-fg: #000000; --selected: #2b2705; --hover: #1a1a26;
+  --bg: #000000; --canvas: #000000; --bg-elev: #0a0a0f; --bg-sunken: #000000; --bg-chrome: #000000;
+  --fg: #ffffff; --fg-muted: #d0d0dc; --border: #8a8db3; --border-strong: #c0c3e6;
+  --accent: #f5d33b; --accent-fg: #000000; --selected: #2b2705; --hover: #1c1c2a;
   --focus-ring: #ffffff;
-  --shadow: 0 0 0 1px #a5a8d0, 0 16px 48px rgba(0, 0, 0, 0.8); --scrim: rgba(0, 0, 0, 0.8);
-  --uml-card: #0a0a0f; --uml-card-border: #ffffff; --uml-card-fg: #ffffff;
-  --uml-edge: #ffffff; --uml-pkg: #d4d4e4; --uml-note: #000000; --uml-note-border: #ffff00; --uml-note-fg: #ffff00;
+  --shadow: 0 0 0 1px #c0c3e6, 0 16px 48px rgba(0, 0, 0, 0.8); --scrim: rgba(0, 0, 0, 0.8);
+  --uml-card: #000000; --uml-card-border: #ffffff; --uml-card-fg: #ffffff;
+  --uml-edge: #ffffff; --uml-pkg: #c0c3e6; --uml-pkg-fg: #d0d0dc;
+  --uml-note: #000000; --uml-note-border: #ffff00; --uml-note-fg: #ffff00;
 }
 
-/* ---------- Semánticos: claros ---------- */
-:root, :root[data-theme="light"], :root[data-theme="sunrise"] {
-  --danger: #c62a37; --success: #1a7f37; --info: #0b62c9;
-  --warning-bg: #fff3bf; --warning-fg: #5c3b00;
-  --cat-sealed: #7c4bd6; --cat-abstract: #b07d00; --cat-interface: #0b62c9; --cat-enum: #1a7f37;
-  --cat-record: #0e8a8a; --cat-annotation: #c04e00; --cat-class: #5b6272; --cat-external: #8f6400; --cat-undeclared: #c62a37;
+/* ---------- Semánticos: claro ---------- */
+:root, :root[data-theme="light"] {
+  --danger: #b4234f; --danger-bg: #fbe3ea; --success: #1a7f37; --info: #0b62c9;
+  --warn: #8a5a00; --warning-bg: #fff3bf; --warning-fg: #5c3b00;
+  /* Abstracta en violeta: el ámbar queda para los avisos. */
+  --cat-sealed: #683fb4; --cat-abstract: #5d46b1; --cat-interface: #0a56b1; --cat-enum: #15662c;
+  --cat-record: #0b6262; --cat-annotation: #973d00; --cat-class: #545a69; --cat-external: #755300; --cat-undeclared: #a62049;
 
   /* Capa de análisis (T9). Marcas de aristas: ciclo (rojo de estado "crítico") y dependencia hacia una capa
      superior (violeta, lejos del acento naranja de la selección); además del color llevan trazo propio.
@@ -100,14 +72,20 @@
   --heat-1: #cde2fb; --heat-2: #86b6ef; --heat-3: #3987e5; --heat-4: #1c5cab; --heat-5: #0d366b;
 }
 
-/* ---------- Semánticos: oscuros ---------- */
-:root[data-theme="dark"], :root[data-theme="midnight"], :root[data-theme="ember"], :root[data-theme="contrast"] {
-  --danger: #ff6b66; --success: #4cc26a; --info: #6cb0ff;
-  --warning-bg: #3d3300; --warning-fg: #ffd866;
-  --cat-sealed: #b794f6; --cat-abstract: #e8bb4a; --cat-interface: #6cb0ff; --cat-enum: #4cc26a;
-  --cat-record: #3fcfc3; --cat-annotation: #ff9a52; --cat-class: #98a0b5; --cat-external: #d9a52b; --cat-undeclared: #ff6b66;
+/* ---------- Semánticos: oscuro y alto contraste ---------- */
+:root[data-theme="dark"], :root[data-theme="contrast"] {
+  --danger: #f2557a; --danger-bg: #3d1a24; --success: #4cc26a; --info: #6cb0ff;
+  --warn: #ffd866; --warning-bg: #3d3300; --warning-fg: #ffd866;
+  --cat-sealed: #c4a7f8; --cat-abstract: #b5aaf2; --cat-interface: #78b6ff; --cat-enum: #57c673;
+  --cat-record: #3fcfc3; --cat-annotation: #ff9a52; --cat-class: #aeb4c8; --cat-external: #ddae40; --cat-undeclared: #ff9794;
 
   /* Capa de análisis (T9): misma rampa, invertida para el lienzo oscuro (poco = se funde con el fondo). */
   --mark-cycle: #e66767; --mark-violation: #9085e9;
   --heat-1: #0d366b; --heat-2: #1c5cab; --heat-3: #3987e5; --heat-4: #86b6ef; --heat-5: #cde2fb;
+}
+
+/* Alto contraste: avisos en naranja (el amarillo es el acento) y categorías más claras. */
+:root[data-theme="contrast"] {
+  --danger: #ff7a9a; --warn: #ffa14a; --warning-bg: #000000; --warning-fg: #ffa14a; --danger-bg: #000000;
+  --cat-abstract: #c4b8ff; --cat-interface: #8cc4ff; --cat-enum: #6fe08a; --cat-class: #d0d4e4;
 }

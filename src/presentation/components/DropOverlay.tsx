@@ -6,10 +6,15 @@ export type DropPhase = 'idle' | 'dragging' | 'opening';
 
 export interface DropOverlayProps {
   phase: DropPhase;
+  /**
+   * Nombre del documento abierto si tiene cambios sin guardar (T11): se avisa de que se preguntará antes de
+   * cerrarlo. Mientras se arrastra no se conoce el nombre del archivo que llega (Chromium solo lo da al soltar).
+   */
+  dirtyName?: string | null;
 }
 
 // Solo presentación: nunca recibe eventos (pointer-events: none). El drop lo gestiona App en window.
-export function DropOverlay({ phase }: DropOverlayProps) {
+export function DropOverlay({ phase, dirtyName = null }: DropOverlayProps) {
   const { t } = useLocalization();
   const active = phase !== 'idle';
   const message =
@@ -45,6 +50,9 @@ export function DropOverlay({ phase }: DropOverlayProps) {
             <p className="drop-overlay-title">{message}</p>
             {phase === 'dragging' && (
               <p className="drop-overlay-hint">{t('drop.hint', { extensions: PUML_EXTENSIONS.join(', ') })}</p>
+            )}
+            {phase === 'dragging' && dirtyName && (
+              <p className="drop-overlay-hint">{t('drop.dirty', { name: dirtyName })}</p>
             )}
             {phase === 'opening' && <span className="drop-overlay-spinner" />}
           </div>

@@ -50,4 +50,9 @@ describe('FiltersPanel', () => {
     expect(html).toContain(DEFAULT_LABELS.filtersHiddenTypes.replace('{n}', '2'));
     expect(html).toContain(DEFAULT_LABELS.filtersShowTypes);
   });
+
+  it('abierto: el panel va anclado a la izquierda (no lo recorta el lienzo)', () => {
+    const html = render({ defaultOpen: true });
+    expect(html).toContain('class="filters-panel align-start"');
+  });
 });

@@ -26,6 +26,8 @@ function isFiniteNumber(v: unknown): v is number {
 const REL_TYPES: ReadonlySet<string> = new Set(['EXTENDS', 'IMPLEMENTS', 'ASSOCIATION', 'DEPENDENCY', 'COMPOSITION', 'AGGREGATION']);
 const VISIBILITIES: ReadonlySet<string> = new Set(['+', '#', '~', '-']);
 const MAX_FILTER_ITEMS = 10000;
+const MAX_IGNORED = 1000;
+const MAX_ISSUE_KEY = 500;
 
 function stringList(v: unknown, allowed?: ReadonlySet<string>): string[] | undefined {
   if (!Array.isArray(v)) return undefined;
@@ -85,9 +87,12 @@ export function validateSidecar(v: unknown): SidecarState | null {
   }
   const filters = validateFilters(v.filters);
   const views = validateViews(v.views, validateFilters);
+  // Avisos ignorados (T11): tolerante como los filtros; lo que no sea texto razonable se descarta.
+  const ignored = stringList(v.ignoredIssues)?.filter((k) => k.length > 0 && k.length <= MAX_ISSUE_KEY).slice(0, MAX_IGNORED);
   return {
     ...(filters ? { filters } : {}),
     ...(views && views.length > 0 ? { views } : {}),
+    ...(ignored && ignored.length > 0 ? { ignoredIssues: ignored } : {}),
     version: 1,
     collapsed: [...(v.collapsed as string[])],
     overrides: Object.fromEntries(entries.map(([id, o]) => [id, { dx: (o as { dx: number }).dx, dy: (o as { dy: number }).dy }])),

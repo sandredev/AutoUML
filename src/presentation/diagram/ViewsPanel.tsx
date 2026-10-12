@@ -25,10 +25,12 @@ interface Props {
   onRename: (index: number, title: string) => void;
   onMove: (from: number, to: number) => void;
   onPresent: () => void;
+  /** Solo para tests y vistas previas: empieza abierto. */
+  defaultOpen?: boolean;
 }
 
-export function ViewsPanel({ views, labels, hasFilters, hasFocus, hasCollapsed, onSave, onApply, onRemove, onRename, onMove, onPresent }: Props): JSX.Element {
-  const [open, setOpen] = useState(false);
+export function ViewsPanel({ views, labels, hasFilters, hasFocus, hasCollapsed, onSave, onApply, onRemove, onRename, onMove, onPresent, defaultOpen = false }: Props): JSX.Element {
+  const [open, setOpen] = useState(defaultOpen);
   const [title, setTitle] = useState('');
   const [inclFilters, setInclFilters] = useState(true);
   const [inclFocus, setInclFocus] = useState(true);
@@ -80,7 +82,7 @@ export function ViewsPanel({ views, labels, hasFilters, hasFocus, hasCollapsed, 
         {views.length > 0 ? `${labels.toggle} (${views.length})` : labels.toggle}
       </button>
       {open ? (
-        <div id={panelId} className="filters-panel" role="group" aria-label={labels.panelAria}>
+        <div id={panelId} className="filters-panel align-start" role="group" aria-label={labels.panelAria}>
           <form
             className="views-panel-form"
             onSubmit={(e) => {
