@@ -27,6 +27,8 @@ import type { HistoryEntry } from '../../application/ports/history';
 import type { ViewerControl, ViewerInfo } from '../diagram/viewerInfo';
 import { hiddenByPuml } from '../diagram/viewerInfo';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
+import { EMPTY_SELECTION } from '../diagram/canvas/selection';
+import { isPackageNode } from '../diagram/layout/aggregate';
 import type { CodeTarget, ViewerToolbarHost } from '../diagram/PumlViewer';
 import { hasActiveFilters } from '../diagram/graph/filters';
 import { serializeViews } from '../diagram/presentation/views';
@@ -98,6 +100,10 @@ export default function App() {
   const [diagram, setDiagram] = useState<DiagramModel | null>(null);
   const loadedFor = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Selección completa; `selectedId` es la primaria (Inspector, foco, paleta). */
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(EMPTY_SELECTION);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
   // Problemas no se abre solo (tampoco al escribir): lo decide el usuario.
   const [issuesOpen, setIssuesOpen] = useState(false);
   // Fuerza re-parseo en recarga.
@@ -821,14 +827,18 @@ export default function App() {
     if (!sync) return;
     const at = sync.mapping.toCombined(line);
     const element = at === null ? null : sync.index.elementAt(at);
-    setSelectedId(element?.kind === 'type' ? element.id : null);
+    const id = element?.kind === 'type' ? element.id : null;
+    setSelectedId(id);
+    setSelectedIds(id === null ? EMPTY_SELECTION : new Set([id]));
     setHighlightLine(element?.kind === 'relation' ? element.line : null);
   }, []);
 
-  const handleCanvasSelect = useCallback((id: string | null) => {
-    setSelectedId(id);
+  const handleCanvasSelect = useCallback((id: string | null, ids: ReadonlySet<string>) => {
+    setSelectedIds(ids);
     setHighlightLine(null);
-    if (id !== null) revealType(id);
+    // El marco notifica en cada movimiento: solo se revela en el editor si cambia la primaria.
+    if (id !== null && id !== selectedIdRef.current) revealType(id);
+    setSelectedId(id);
   }, [revealType]);
 
   const handleRelationSelect = useCallback((line: number | null) => {
@@ -857,6 +867,7 @@ export default function App() {
     if (problem !== null) return tRef.current(`rename.${problem}`, { name: next });
     editorRef.current.renameType(id, next);
     setSelectedId(next);
+    setSelectedIds(new Set([next]));
     setStatus({ kind: 'info', text: tRef.current('status.renamed', { from: id, to: next }) });
     return null;
   }, []);
@@ -1000,6 +1011,7 @@ export default function App() {
 
   const handleSidebarSelect = useCallback((id: string) => {
     setSelectedId(id);
+    setSelectedIds(new Set([id]));
     setHighlightLine(null);
     canvasRef.current?.focusNode(id);
     revealType(id);
@@ -1008,8 +1020,12 @@ export default function App() {
 
   // Conserva la selección tras recargar solo si el tipo sigue existiendo.
   useEffect(() => {
-    if (!diagram || !selectedId) return;
-    if (!diagram.types.some((t) => t.id === selectedId)) setSelectedId(null);
+    if (!diagram) return;
+    if (selectedId && !diagram.types.some((t) => t.id === selectedId)) setSelectedId(null);
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => isPackageNode(id) || diagram.types.some((t) => t.id === id)));
+      return next.size === prev.size ? prev : next;
+    });
   }, [diagram, selectedId, sourceTick]);
 
   // Totales de la barra de estado (T11): lo que se ve frente al total; sin vista ni filtros, solo el total.
@@ -1285,6 +1301,7 @@ export default function App() {
             project={project}
             model={diagram}
             selectedId={selectedId}
+            selectedIds={selectedIds}
             onSelect={handleCanvasSelect}
             highlightLine={highlightLine}
             onRelationSelect={handleRelationSelect}

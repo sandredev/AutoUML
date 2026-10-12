@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LayoutResult } from '../../../../src/presentation/diagram/types';
 import {
   applyOverrides,
+  moveAll,
   moveStart,
   overridesFromRecord,
   overridesToRecord,
@@ -73,6 +74,17 @@ describe('applyOverrides con paquetes', () => {
     };
     const out = applyOverrides(withGhost, setOverride(EMPTY_OVERRIDES, 'A', { dx: 400, dy: 0 }));
     expect(out.packages.find((p) => p.name === 'vacio')).toEqual({ name: 'vacio', x: 0, y: 0, w: 50, h: 50 });
+  });
+});
+
+describe('moveAll', () => {
+  it('acumula sobre varias tarjetas sin mutar el mapa previo', () => {
+    const prev = setOverride(EMPTY_OVERRIDES, 'A', { dx: 1, dy: 1 });
+    const next = moveAll(prev, ['A', 'B'], 2, 3);
+    expect(next.get('A')).toEqual({ dx: 3, dy: 4 });
+    expect(next.get('B')).toEqual({ dx: 2, dy: 3 });
+    expect(prev.get('A')).toEqual({ dx: 1, dy: 1 });
+    expect(prev.has('B')).toBe(false);
   });
 });
 

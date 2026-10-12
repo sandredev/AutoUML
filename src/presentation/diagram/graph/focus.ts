@@ -25,3 +25,16 @@ export function focusOf(layout: LayoutResult, nodeId: string | null, edgeIndex: 
   });
   return { nodes, edges };
 }
+
+/** Multiselección: unión del vecindario de cada id válido. Vacía o sin válidos: sin foco. */
+export function focusUnion(layout: LayoutResult, ids: Iterable<string>): Focus | null {
+  const nodes = new Set<string>();
+  const edges = new Set<number>();
+  for (const id of ids) {
+    const f = focusOf(layout, id, null);
+    if (!f) continue;
+    for (const n of f.nodes) nodes.add(n);
+    for (const e of f.edges) edges.add(e);
+  }
+  return nodes.size === 0 ? null : { nodes, edges };
+}

@@ -84,6 +84,10 @@ export interface ViewerLabels {
   shortcutsEscape: string;
   shortcutsNavLinked: string;
   shortcutsNavRelation: string;
+  shortcutsSelect: string;
+  shortcutsDragKey: string;
+  shortcutsMarquee: string;
+  shortcutsPan: string;
   relMode: string;
   relModeAll: string;
   shortcutsZoom: string;
@@ -292,7 +296,11 @@ export const DEFAULT_LABELS: ViewerLabels = {
   shortcutsTitle: 'Atajos de teclado',
   shortcutsClose: 'Cerrar',
   shortcutsNav: 'Ir a la clase más cercana en esa dirección',
-  shortcutsNavLinked: 'Pulsar y soltar: activar/desactivar el modo relaciones (las flechas recorren la relación elegida: padre → comentario → hija)',
+  shortcutsNavLinked: 'Tab: activar/desactivar el modo relaciones (las flechas recorren la relación elegida: padre → comentario → hija)',
+  shortcutsSelect: 'Ctrl+clic (izquierdo o derecho): añade o quita una clase; sobre un paquete, todo su contenido',
+  shortcutsDragKey: 'Arrastrar',
+  shortcutsMarquee: 'Con Ctrl, dibuja el marco de selección: lo tocado se suma a la selección',
+  shortcutsPan: 'Sin Ctrl, desplaza la vista (izquierdo, derecho, central, Espacio o minimapa)',
   relMode: 'Modo relaciones',
   relModeAll: 'todas',
   shortcutsNavRelation: 'En modo relaciones, elegir relación: ←/→ las recorren (arriba primero, luego abajo); ↑/↓ saltan a las de arriba/abajo',

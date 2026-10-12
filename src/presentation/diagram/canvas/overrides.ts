@@ -23,6 +23,16 @@ export function moveBy(overrides: Overrides, id: string, dx: number, dy: number)
   return next;
 }
 
+/** Suma (dx, dy) al desplazamiento de varias tarjetas (arrastre de una selección múltiple). Mapa nuevo. */
+export function moveAll(overrides: Overrides, ids: Iterable<string>, dx: number, dy: number): Overrides {
+  const next = new Map(overrides);
+  for (const id of ids) {
+    const prev = next.get(id);
+    next.set(id, { dx: (prev?.dx ?? 0) + dx, dy: (prev?.dy ?? 0) + dy });
+  }
+  return next;
+}
+
 /** Fija el desplazamiento de una tarjeta. Devuelve un mapa nuevo. */
 export function setOverride(overrides: Overrides, id: string, offset: Offset): Overrides {
   const next = new Map(overrides);

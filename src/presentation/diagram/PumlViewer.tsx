@@ -10,6 +10,7 @@ import { MenuButton } from '../components/MenuButton';
 import { AnalysisPanel } from './AnalysisPanel';
 import { buildOverlay, type HeatMetric } from './analysis/overlay';
 import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
+import { EMPTY_SELECTION } from './canvas/selection';
 import type { MenuAction, MenuSubject } from './contextMenu';
 import { FiltersPanel, withListItem } from './FiltersPanel';
 import { focusTargetOf, focusToggle, isEditable, viewerShortcut } from './focusMode';
@@ -51,7 +52,9 @@ export interface PaletteHost {
 export interface PumlViewerProps {
   model: DiagramModel | null;
   selectedId?: string | null;
-  onSelect?: (id: string | null) => void;
+  /** Selección completa (Ctrl+clic, marco). Siempre contiene `selectedId` si no es null. */
+  selectedIds?: ReadonlySet<string>;
+  onSelect?: (id: string | null, ids: ReadonlySet<string>) => void;
   canvasRef?: RefObject<DiagramCanvasHandle | null>;
   className?: string;
   /** Notifica cuando el layout empieza o termina de calcularse (la intro de carga lo usa). */
@@ -108,6 +111,7 @@ const FOCUS_DIRECTIONS: FocusDirection[] = ['both', 'out', 'in'];
 export function PumlViewer({
   model,
   selectedId = null,
+  selectedIds,
   onSelect,
   canvasRef,
   className = '',
@@ -277,7 +281,7 @@ export function PumlViewer({
       // Última capa de Retroceso: el diagrama en su estado normal (sin selección y encuadrado completo).
       if (shortcut === 'back') {
         e.preventDefault();
-        selectRef.current?.(null);
+        selectRef.current?.(null, EMPTY_SELECTION);
         handleRef.current?.fit({ animate: true });
         // Sin aro de foco naranja en el lienzo hasta la siguiente tecla (distinta de Retroceso) o clic.
         rootRef.current?.classList.add('is-reset');
@@ -363,7 +367,7 @@ export function PumlViewer({
   selectRef.current = onSelect;
   const goToClass = useCallback((id: string, animate: boolean) => {
     handleRef.current?.focusNode(id, { animate });
-    selectRef.current?.(id);
+    selectRef.current?.(id, new Set([id]));
   }, [handleRef]);
   const closeAnalysis = useCallback(() => setAnalysisOn(false), []);
 
@@ -814,6 +818,7 @@ export function PumlViewer({
         {...(docKey !== undefined ? { docKey } : {})}
         {...(initialSidecar ? { initialOverrides: initialSidecar.overrides, initialView: initialSidecar.view } : {})}
         selectedId={selectedId}
+        {...(selectedIds ? { selectedIds } : {})}
         onSelect={onSelect}
         onViewChange={handleViewChange}
         onManualPositionsChange={handleManualPositions}

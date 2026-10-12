@@ -53,6 +53,8 @@ export interface DrawArgs {
   viewH: number;
   dpr: number;
   selectedId: string | null;
+  /** Selección múltiple (marco, Ctrl+clic): también llevan anillo. */
+  selectedIds?: ReadonlySet<string>;
   theme: Theme;
   /** Tarjeta bajo el puntero (borde resaltado). */
   hoverId?: string | null;
@@ -335,7 +337,7 @@ function drawSemantic(
 }
 
 export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
-  const { layout, index, view, viewW, viewH, dpr, selectedId, theme } = a;
+  const { layout, index, view, viewW, viewH, dpr, selectedId, selectedIds, theme } = a;
   const focus = a.focus ?? null;
   const labels = a.labels ?? DEFAULT_LABELS;
   const dim = (inFocus: boolean): number => (focus && !inFocus ? DIM_ALPHA : 1);
@@ -476,7 +478,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
   for (const i of visibleNodes) {
     const b = layout.nodes[i];
     if (!b) continue;
-    if (b.id === selectedId) selBox = b;
+    if (b.id === selectedId || (selectedIds?.has(b.id) ?? false)) selBox = b;
     const fade = packed(b.id) ? ca : 1;
     if (fade <= 0) continue;
     const isPkg = isPackageNode(b.id);
@@ -502,7 +504,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
       drawCard(ctx, t, b, theme, {
         summary: a.model.summaryMode,
         members: showMembers,
-        selected: t.id === selectedId,
+        selected: t.id === selectedId || (selectedIds?.has(t.id) ?? false),
         lineWidth: px,
         display: a.display,
         moreTemplate: labels.moreMembers,

@@ -8,7 +8,7 @@ import { FALLBACK_HEAT, FALLBACK_MARK_CYCLE, FALLBACK_MARK_VIOLATION, type Analy
 import { contextMenuEntries, type MenuAction, type MenuSubject } from '../contextMenu';
 import { adjacencyOf } from '../graph/adjacency';
 import { filterLayout, type DrawHidden } from '../graph/filters';
-import { focusOf } from '../graph/focus';
+import { focusOf, focusUnion } from '../graph/focus';
 import { pathFocus, shortestPath } from '../graph/shortestPath';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
 import { collapsedOwner, isPackageNode, packageNodeName } from '../layout/aggregate';
@@ -22,11 +22,12 @@ import { collapsePackages, hitTestPackageHeader } from './collapse';
 import { labelAnchor } from './edgePath';
 import { hitTestEdge } from './edgeHit';
 import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './minimap';
-import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveBy, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
+import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveAll, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
+import { EMPTY_SELECTION, marqueeSelection, nodesInRect, packageMemberIds, rectBetween, sameSelection, single, toggleIn, type Selection } from './selection';
 import { buildIndex, hitTestNode } from './spatial';
 import { keysOf } from '../../../application/shortcuts';
 import { hoverAfterKeyNav, pickEdge, relationOrder, relatedNext, relationFlow, shortcutOf, spatialNext, stepAlong, visibleLinks } from './keyboardNav';
-import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt } from './viewport';
+import { canPaint, fitToBounds, panBy, screenToWorld, visibleWorldRect, zoomAt, type Rect } from './viewport';
 import {
   blendLayouts, canAnimate, changedTypes, EASE_IN_OUT, haloIntensity, layoutsDiffer, lerpView, LAYOUT_MS, REDUCED_LAYOUT_MS, snapshotOf, VIEW_MS,
   type Frame, type FrameFx, type Snapshot,
@@ -90,7 +91,10 @@ interface Props {
    */
   docKey?: string;
   selectedId?: string | null;
-  onSelect?: (id: string | null) => void;
+  /** Selección completa (Ctrl+clic, marco). Siempre contiene `selectedId` si no es null. */
+  selectedIds?: ReadonlySet<string>;
+  /** `id` primaria (Inspector, foco, paleta) e `ids` conjunto completo. */
+  onSelect?: (id: string | null, ids: ReadonlySet<string>) => void;
   onViewChange?: (v: ViewState) => void;
   /** Se llama cuando cambia si hay tarjetas movidas a mano (para habilitar "Restablecer"). */
   onManualPositionsChange?: (has: boolean) => void;
@@ -250,9 +254,26 @@ function sameHover(a: Hover, b: Hover): boolean {
   return false;
 }
 
+/** Arrastre en curso. `x/y` = último punto (px de pantalla); `x0/y0` = origen relativo al lienzo. */
+interface Drag {
+  id: number;
+  button: number;
+  x: number;
+  y: number;
+  x0: number;
+  y0: number;
+  moved: boolean;
+  /** 'pan' mueve la vista; 'node' mueve `nodeIds`; 'marquee' dibuja el marco. */
+  kind: 'pan' | 'node' | 'marquee';
+  nodeIds: readonly string[];
+  /** Selección al empezar (el marco con Ctrl se une a ella). */
+  base: Selection;
+  additive: boolean;
+}
+
 export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function DiagramCanvas(
   {
-    model, layout, layoutModel, docKey, selectedId = null, onSelect, onViewChange, onManualPositionsChange,
+    model, layout, layoutModel, docKey, selectedId = null, selectedIds = EMPTY_SELECTION, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
     labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename,
     focusKey = null, focusAnimate = true, hidden = null, menuContext, onMenuAction, analysis = null,
@@ -280,8 +301,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const autoFitRef = useRef(true);
   /** Hasta este instante, los cambios de tamaño reencuadran con vuelo (pantalla completa, #38). */
   const smoothResizeUntil = useRef(0);
-  // Arrastre: 'pan' mueve la vista; con nodeId mueve una tarjeta.
-  const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean; nodeId: string | null } | null>(null);
+  const dragRef = useRef<Drag | null>(null);
   /** Arrastre en el minimapa: (dx, dy) = centro de la vista − punto agarrado, en mundo. */
   const miniDragRef = useRef<{ id: number; dx: number; dy: number } | null>(null);
   const paintErrorRef = useRef<string | null>(null);
@@ -298,6 +318,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [paintError, setPaintError] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Overrides>(EMPTY_OVERRIDES);
   const [draggingNode, setDraggingNode] = useState(false);
+  /** Marco de selección en px del lienzo (solo mientras se arrastra). */
+  const [marquee, setMarquee] = useState<Rect | null>(null);
   const [hover, setHover] = useState<Hover>(null);
   const [edgeSel, setEdgeSel] = useState<EdgeSelection | null>(null);
   const [rename, setRename] = useState<RenameDraft | null>(null);
@@ -305,16 +327,14 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   /**
-   * Modo relaciones (Ctrl lo activa/desactiva): null = apagado. `edge` = relación elegida con Mayús + flechas
+   * Modo relaciones (Tab lo activa/desactiva): null = apagado. `edge` = relación elegida con Mayús + flechas
    * (índice en las aristas visibles; null = todas) y `step` = paso del flujo padre → comentario → hija.
    */
   const [relMode, setRelMode] = useState<{ edge: number | null; step: number } | null>(null);
   const relModeRef = useRef(relMode);
   relModeRef.current = relMode;
-  /** Ctrl pulsado sin otra tecla todavía (al soltarlo alterna el modo relaciones). */
-  const ctrlAloneRef = useRef(false);
-  /** Momento de la última apertura por teclado: el evento contextmenu que la sigue no abre otro. */
-  const keyMenuAt = useRef(-Infinity);
+  /** Espacio pulsado: el botón izquierdo desplaza la vista en vez de dibujar el marco. */
+  const spaceRef = useRef(false);
   const inFocus = focusKey !== null;
 
   const controlled = collapsedProp !== undefined;
@@ -396,8 +416,10 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const focus = useMemo(
     () => (routePath
       ? pathFocus(visibleLayout, routePath, routeDirected)
-      : focusOf(visibleLayout, selectedEdge === null ? selectedId : null, selectedEdge)),
-    [visibleLayout, selectedId, selectedEdge, routePath, routeDirected],
+      : selectedEdge !== null
+        ? focusOf(visibleLayout, null, selectedEdge)
+        : focusUnion(visibleLayout, selectedIds)),
+    [visibleLayout, selectedIds, selectedEdge, routePath, routeDirected],
   );
   // Un hover de arista de otro layout ya no apunta a la misma arista.
   const liveHover: Hover = hover?.kind === 'edge' && !visibleLayout.edges[hover.index] ? null : hover;
@@ -414,7 +436,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   // Siempre las últimas props para los callbacks estables.
   const snapshot = {
-    model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, onSelect, onViewChange,
+    model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, selectedIds, onSelect, onViewChange,
     collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename,
     inFocus, route, hidden, analysis,
   };
@@ -513,6 +535,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         viewH: size.h,
         dpr: window.devicePixelRatio || 1,
         selectedId: L.selectedId,
+        selectedIds: L.selectedIds,
         theme: themeRef.current,
         hoverId: h?.kind === 'node' ? h.id : null,
         hoverEdge: h?.kind === 'edge' ? h.index : null,
@@ -859,7 +882,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const skip = skipAnimRef.current;
     skipAnimRef.current = false;
     const sameDoc = docKey !== undefined ? prev.docKey === docKey : prev.modelKey === modelKey;
-    if (skip || !sameDoc || dragRef.current?.nodeId != null) {
+    if (skip || !sameDoc || dragRef.current?.kind === 'node') {
       animRef.current = null;
       frameRef.current = null;
       return;
@@ -895,7 +918,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // Cualquier cambio de lo que se dibuja ⇒ repintar.
   useEffect(() => {
     schedule();
-  }, [visibleLayout, selectedId, model, focus, liveHover, display, labels, packageCounts, analysis, schedule]);
+  }, [visibleLayout, selectedId, selectedIds, model, focus, liveHover, display, labels, packageCounts, analysis, schedule]);
 
   // skinparam distinto ⇒ el tema cacheado ya no vale (antes solo se invalidaba con el tema de la app).
   const skinK = skinKey(skin);
@@ -946,7 +969,6 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (!canvas) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
-      if (e.ctrlKey) ctrlAloneRef.current = false; // Ctrl+rueda es zoom: al soltar Ctrl no alterna el modo relaciones
       const rect = canvas.getBoundingClientRect();
       const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
       autoFitRef.current = false;
@@ -965,6 +987,12 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const tol = EDGE_TOL_PX / (viewRef.current.scale || 1);
     const edge = hitTestEdge(L.layout, p.x, p.y, tol, L.index);
     return edge !== null ? { kind: 'edge', index: edge } : null;
+  };
+
+  const selection = (): Selection => ({ id: latest.current.selectedId, ids: latest.current.selectedIds });
+  /** Notifica al host solo si cambia algo (el marco se recalcula en cada movimiento). */
+  const select = (s: Selection): void => {
+    if (!sameSelection(s, selection())) latest.current.onSelect?.(s.id, s.ids);
   };
 
   /** Coloca el tooltip junto al puntero sin salirse del lienzo (sin re-render: estilo directo). */
@@ -986,49 +1014,77 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
-    ctrlAloneRef.current = false; // Ctrl+clic no alterna el modo relaciones
-    if (e.button !== 0) return;
+    if (e.button === 1) e.preventDefault(); // sin autoscroll de Chromium con el botón central
+    if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    // Sobre una tarjeta (no un paquete plegado) se arrastra la tarjeta.
     const rect = e.currentTarget.getBoundingClientRect();
-    const p = screenToWorld(viewRef.current, e.clientX - rect.left, e.clientY - rect.top);
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const p = screenToWorld(viewRef.current, sx, sy);
     const L = latest.current;
-    const hit = hitTestNode(L.index, L.layout, p.x, p.y);
-    // En modo foco no se mueven tarjetas: las posiciones manuales son del diagrama completo.
-    const nodeId = hit !== null && !isPackageNode(hit) && !L.inFocus ? hit : null;
-    dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false, nodeId };
+    const additive = e.ctrlKey || e.metaKey;
+    // Sin Ctrl (o con Espacio) todo arrastra la vista. Con Ctrl: el izquierdo mueve tarjetas o dibuja
+    // el marco y el derecho dibuja el marco. Las posiciones manuales son del diagrama completo: en
+    // modo foco no se mueven tarjetas.
+    const selecting = additive && !spaceRef.current && e.button !== 1;
+    const hit = e.button === 0 && selecting ? hitTestNode(L.index, L.layout, p.x, p.y) : null;
+    const draggable = hit !== null && !isPackageNode(hit) && !L.inFocus;
+    const kind: Drag['kind'] = !selecting ? 'pan' : e.button === 0 && draggable ? 'node' : 'marquee';
+    // Una tarjeta ya seleccionada (o Ctrl) arrastra toda la selección; si no, solo ella.
+    const nodeIds = kind !== 'node' || hit === null
+      ? []
+      : L.selectedIds.has(hit) || additive
+        ? [...new Set([...L.selectedIds, hit])].filter((id) => !isPackageNode(id))
+        : [hit];
+    dragRef.current = { id: e.pointerId, button: e.button, x: e.clientX, y: e.clientY, x0: sx, y0: sy, moved: false, kind, nodeIds, base: selection(), additive };
   };
 
   const onPointerMove = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
     const rect = e.currentTarget.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
     const d = dragRef.current;
     if (!d || d.id !== e.pointerId) {
-      if (e.pointerType !== 'touch') updateHover(e.clientX - rect.left, e.clientY - rect.top);
+      if (e.pointerType !== 'touch') updateHover(sx, sy);
       return;
     }
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
     if (!d.moved) {
-      if (d.nodeId !== null) {
+      if (d.kind === 'node') {
         setDraggingNode(true);
-        // Manipulación directa: la tarjeta sigue al puntero, sin transición.
+        // Manipulación directa: las tarjetas siguen al puntero, sin transición.
         animRef.current = null;
         frameRef.current = null;
+        // Arrastrar una tarjeta fuera de la selección la selecciona (con Ctrl, la añade).
+        const first = d.nodeIds[0];
+        if (first !== undefined && !d.base.ids.has(first)) select(d.additive ? toggleIn(d.base, [first]) : single(first));
       }
       if (latest.current.hover !== null) setHover(null);
     }
     d.moved = true;
     d.x = e.clientX;
     d.y = e.clientY;
-    if (d.nodeId !== null) {
+    if (d.kind === 'node') {
       const s = viewRef.current.scale || 1;
-      const id = d.nodeId;
-      setOverrides((prev) => moveBy(prev, id, dx / s, dy / s));
+      const ids = d.nodeIds;
+      setOverrides((prev) => moveAll(prev, ids, dx / s, dy / s));
       return;
     }
-    autoFitRef.current = false;
-    setView(panBy(viewRef.current, dx, dy));
+    if (d.kind === 'pan') {
+      autoFitRef.current = false;
+      setView(panBy(viewRef.current, dx, dy));
+      return;
+    }
+    // Marco: se dibuja en pantalla y se selecciona en vivo lo que toca (como el explorador de Windows).
+    const r = rectBetween(d.x0, d.y0, sx, sy);
+    setMarquee(r);
+    const v = viewRef.current;
+    const a = screenToWorld(v, r.x, r.y);
+    const b = screenToWorld(v, r.x + r.w, r.y + r.h);
+    const L = latest.current;
+    select(marqueeSelection(d.base, nodesInRect(L.layout, L.index, { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y }), d.additive));
   };
 
   const onPointerUp = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
@@ -1036,15 +1092,37 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     if (!d || d.id !== e.pointerId) return;
     dragRef.current = null;
     setDraggingNode(false);
+    setMarquee(null);
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    if (d.moved) return;
+    if (d.moved) return; // con movimiento no hay clic ni menú
+    if (d.kind === 'pan') return; // Espacio, central o derecho sin mover: nada que hacer
     const rect = e.currentTarget.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
+    // Derecho sin arrastre: con Ctrl sobre una entidad alterna su selección (sin menú); si no, el menú
+    // se abre al soltar en todas las plataformas (en macOS saltaría al pulsar).
+    if (d.button === 2) {
+      const target = pick(sx, sy);
+      if (d.additive && target?.kind === 'node') {
+        select(toggleIn(selection(), [target.id]));
+        return;
+      }
+      if (d.additive) {
+        const pp = screenToWorld(viewRef.current, sx, sy);
+        const packageName = hitTestPackageHeader(latest.current.layout, pp.x, pp.y);
+        if (packageName) {
+          select(toggleIn(selection(), packageMemberIds(latest.current.layout, packageName)));
+          return;
+        }
+      }
+      openMenu(e.clientX, e.clientY, subjectOf(target));
+      return;
+    }
+    if (d.button !== 0) return;
     const p = screenToWorld(viewRef.current, sx, sy);
     const L = latest.current;
+    const ctrl = d.additive;
     // Mayús+clic en otra clase con una seleccionada, o clic tras "Ruta desde aquí": ruta más corta (T8).
-    // Un Mayús+clic que arrastra no llega aquí.
     const pendingFrom = L.route !== null && L.route.to === null ? L.route.from : null;
     if (pendingFrom !== null || (e.shiftKey && L.selectedId !== null)) {
       const target = pick(sx, sy);
@@ -1054,29 +1132,36 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         return;
       }
     }
-    // Cualquier otro clic (fondo, tarjeta, arista, paquete) quita la ruta.
     if (L.route !== null) setRouteReq(null);
     const packageName = hitTestPackageHeader(L.layout, p.x, p.y);
     if (packageName) {
-      togglePackage(packageName);
+      // Ctrl sobre la cabecera de un paquete: selecciona (o quita) todo su contenido visible.
+      if (ctrl) select(toggleIn(selection(), packageMemberIds(L.layout, packageName)));
+      else togglePackage(packageName);
       return;
     }
     const hit = pick(sx, sy);
     if (hit?.kind === 'node' && isPackageNode(hit.id)) {
-      togglePackage(packageNodeName(hit.id));
+      // Plegado: el nodo ya representa a todo el paquete.
+      if (ctrl) select(toggleIn(selection(), [hit.id]));
+      else togglePackage(packageNodeName(hit.id));
       return;
     }
     if (hit?.kind === 'edge') {
-      // Arista: se resalta con sus dos clases; la selección de clase del host se limpia.
+      // Arista: se resalta con sus dos clases; la selección de clases se conserva.
       setEdgeSel({ layout: L.sourceLayout, hidden: L.hidden, index: hit.index });
-      L.onSelect?.(null);
       const rel = L.layout.edges[hit.index]?.rel;
       L.onRelationSelect?.(rel !== undefined ? (L.model.relationships[rel]?.line ?? null) : null);
       return;
     }
     if (edgeSel !== null) L.onRelationSelect?.(null);
     setEdgeSel(null);
-    L.onSelect?.(hit?.kind === 'node' ? hit.id : null);
+    if (ctrl) {
+      if (hit?.kind === 'node') select(toggleIn(selection(), [hit.id]));
+      return; // Ctrl+clic en el fondo no deselecciona
+    }
+    // Clic simple en el fondo conserva la selección (solo el doble clic la limpia).
+    if (hit?.kind === 'node') select(single(hit.id));
   };
 
   /** Objetivo del menú para lo que hay bajo un punto (o el fondo). */
@@ -1100,15 +1185,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const openMenu = (x: number, y: number, subject: MenuSubject): void => {
     setHover(null);
     // Abrir el menú sobre una clase la selecciona (como en cualquier explorador).
-    if (subject.kind === 'node' && latest.current.selectedId !== subject.id) latest.current.onSelect?.(subject.id);
+    if (subject.kind === 'node' && latest.current.selectedId !== subject.id) select(single(subject.id));
     setMenu({ x, y, subject });
   };
 
+  /** El menú lo abre onPointerUp (derecho sin arrastre) o el teclado: el evento nativo solo se cancela. */
   const onContextMenu = (e: ReactMouseEvent<HTMLCanvasElement>): void => {
     e.preventDefault();
-    if (e.timeStamp - keyMenuAt.current < 500) return; // ya lo abrió el teclado
-    const rect = e.currentTarget.getBoundingClientRect();
-    openMenu(e.clientX, e.clientY, subjectOf(pick(e.clientX - rect.left, e.clientY - rect.top)));
   };
 
   /** Sale del modo relaciones y quita el resaltado de la relación elegida. */
@@ -1120,11 +1203,13 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     setRelMode(null);
   };
 
-  const onCanvasKeyUp = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
-    if (e.key !== 'Control' || !ctrlAloneRef.current) return;
-    ctrlAloneRef.current = false;
+  const toggleRelMode = (): void => {
     if (relModeRef.current !== null) exitRelMode();
     else setRelMode({ edge: null, step: 0 });
+  };
+
+  const onCanvasKeyUp = (e: ReactKeyboardEvent<HTMLCanvasElement>): void => {
+    if (e.key === ' ') spaceRef.current = false;
   };
 
   /** Teclado en el lienzo: tecla Menú o Mayús+F10 abren el menú de la clase seleccionada (o del fondo). */
@@ -1134,12 +1219,20 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       setHelpOpen(false);
       return;
     }
-    // Ctrl solo (pulsar y soltar sin otra tecla) alterna el modo relaciones: Ctrl+K, Ctrl+Shift+L... no.
-    if (e.key === 'Control') {
-      if (!e.repeat) ctrlAloneRef.current = true;
+    // Espacio mantenido: el izquierdo desplaza la vista (el marco ocupa ahora el arrastre normal).
+    if (e.key === ' ') {
+      e.preventDefault();
+      spaceRef.current = true;
       return;
     }
-    ctrlAloneRef.current = false;
+    // Tab plano alterna el modo relaciones. Shift+Tab (y Ctrl/Alt+Tab) no se tocan: deben seguir
+    // sacando el foco del lienzo (WCAG 2.1.2).
+    if (e.key === 'Tab') {
+      if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
+      e.preventDefault();
+      toggleRelMode();
+      return;
+    }
     if ((e.key === 'Backspace' || e.key === 'Escape') && relModeRef.current !== null) {
       e.preventDefault();
       exitRelMode();
@@ -1153,7 +1246,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
       else if (action === 'fit') fit(true);
       else if (action === 'help') setHelpOpen((open) => !open);
       else {
-        // Flechas: clase más cercana en esa dirección. En modo relaciones (Ctrl): Mayús + flechas elige la
+        // Flechas: clase más cercana en esa dirección. En modo relaciones (Tab): Mayús + flechas elige la
         // relación de la clase (queda resaltada) y las flechas recorren su flujo padre → comentario → hija;
         // sin relación elegida, solo por vecinas. Entre las visibles (en modo foco, el subgrafo enfocado).
         const L = latest.current;
@@ -1174,7 +1267,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           setEdgeSel({ layout: L.sourceLayout, hidden: L.hidden, index: edge });
           const rel = edges[edge].rel;
           L.onRelationSelect?.(rel !== undefined ? (L.model.relationships[rel]?.line ?? null) : null);
-          if (anchor !== L.selectedId) L.onSelect?.(anchor);
+          if (anchor !== L.selectedId) select(single(anchor));
           setHover(hoverAfterKeyNav(L.hover, anchor));
           return;
         }
@@ -1184,7 +1277,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           setRelMode({ edge: rm.edge, step });
           const st = flow[step];
           if (st.kind === 'node') {
-            L.onSelect?.(st.id);
+            select(single(st.id));
             setHover(hoverAfterKeyNav(L.hover, st.id));
             focusNodeInView(st.id, true);
           } else {
@@ -1203,7 +1296,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           ? relatedNext(L.layout.nodes, visibleLinks(L.layout.edges, L.hidden), L.selectedId, null, action)
           : spatialNext(L.layout.nodes, L.selectedId, action);
         if (next !== null && next !== L.selectedId) {
-          L.onSelect?.(next);
+          select(single(next));
           setHover(hoverAfterKeyNav(L.hover, next));
           focusNodeInView(next, true);
         }
@@ -1212,7 +1305,6 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     }
     if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
     e.preventDefault();
-    keyMenuAt.current = e.timeStamp;
     const L = latest.current;
     const rect = e.currentTarget.getBoundingClientRect();
     const v = viewRef.current;
@@ -1266,12 +1358,16 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const L = latest.current;
     const nodeId = hitTestNode(L.index, L.layout, p.x, p.y);
     if (nodeId === null && !hitTestPackageHeader(L.layout, p.x, p.y)) {
-      fit(true);
+      // Solo limpia la selección (sin encuadrar): es la forma de deseleccionar.
+      if (edgeSel !== null) L.onRelationSelect?.(null);
+      setEdgeSel(null);
+      select(single(null));
       return;
     }
     // Doble clic en una tarjeta (no en un paquete plegado): renombrar en línea, encima de su cabecera.
     const box = nodeId !== null && !isPackageNode(nodeId) ? L.layout.nodes.find((n) => n.id === nodeId) : undefined;
     if (!box || !L.onRename) return;
+    select(single(box.id));
     const v = viewRef.current;
     const name = L.model.types.find((t) => t.id === box.id)?.name ?? box.id;
     setHover(null);
@@ -1400,12 +1496,20 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}
         onContextMenu={onContextMenu}
+        onAuxClick={(e) => e.preventDefault()}
         onKeyDown={onCanvasKey}
         onKeyUp={onCanvasKeyUp}
-        onBlur={() => { ctrlAloneRef.current = false; }}
+        onBlur={() => { spaceRef.current = false; }}
         tabIndex={0}
-        aria-keyshortcuts="F Enter Escape Backspace Shift+F10 ArrowLeft ArrowRight ArrowUp ArrowDown Control Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
+        aria-keyshortcuts="F Enter Escape Backspace Shift+F10 Tab Space ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
       />
+      {marquee !== null ? (
+        <div
+          className="diagram-marquee"
+          aria-hidden="true"
+          style={{ transform: `translate(${Math.round(marquee.x)}px, ${Math.round(marquee.y)}px)`, width: Math.round(marquee.w), height: Math.round(marquee.h) }}
+        />
+      ) : null}
       <canvas
         ref={minimapRef}
         className="diagram-minimap"
@@ -1435,10 +1539,16 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
           <dl>
             <dt><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
             <dd>{labels.shortcutsNav}</dd>
-            <dt><kbd>Ctrl</kbd></dt>
+            <dt><kbd>Tab</kbd></dt>
             <dd>{labels.shortcutsNavLinked}</dd>
             <dt><kbd>Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd></dt>
             <dd>{labels.shortcutsNavRelation}</dd>
+            <dt><kbd>Ctrl</kbd> + clic</dt>
+            <dd>{labels.shortcutsSelect}</dd>
+            <dt>{labels.shortcutsDragKey}</dt>
+            <dd>{labels.shortcutsMarquee}</dd>
+            <dt><kbd>Space</kbd> + {labels.shortcutsDragKey}</dt>
+            <dd>{labels.shortcutsPan}</dd>
             <dt><kbd>F</kbd> / <kbd>Enter</kbd></dt>
             <dd>{labels.shortcutsFocus}</dd>
             <dt><kbd>Esc</kbd> / <kbd>⌫</kbd></dt>

@@ -13,7 +13,9 @@ interface Props {
   project: ProjectInfo | null;
   model: DiagramModel | null;
   selectedId: string | null;
-  onSelect: (id: string | null) => void;
+  /** Selección completa (Ctrl+clic, marco). Siempre contiene `selectedId` si no es null. */
+  selectedIds?: ReadonlySet<string>;
+  onSelect: (id: string | null, ids: ReadonlySet<string>) => void;
   canvasRef: RefObject<DiagramCanvasHandle | null>;
   /** Contenedor que pasa a pantalla completa (botón de ajustar del header). */
   areaRef?: RefObject<HTMLElement | null>;
@@ -55,6 +57,7 @@ export function RenderArea({
   project,
   model,
   selectedId,
+  selectedIds,
   onSelect,
   canvasRef,
   areaRef,
@@ -117,6 +120,7 @@ export function RenderArea({
       <PumlViewer
         model={model}
         selectedId={selectedId}
+        {...(selectedIds ? { selectedIds } : {})}
         onSelect={onSelect}
         canvasRef={canvasRef}
         onLayoutLoadingChange={onLayoutLoadingChange}

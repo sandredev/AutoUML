@@ -1,6 +1,6 @@
 // Tests puros de T4 en canvas/style/graph: migración de overrides, foco, minimapa, skin y medida con display.
 import { describe, expect, it } from 'vitest';
-import { focusOf } from '../../../../src/presentation/diagram/graph/focus';
+import { focusOf, focusUnion } from '../../../../src/presentation/diagram/graph/focus';
 import { cardContentOf, measureCardBox, moreText } from '../../../../src/presentation/diagram/layout/cardModel';
 import { applySkin, linetypeOf, skinKey, visibilityIconsOf } from '../../../../src/presentation/diagram/style/skin';
 import { DEFAULT_DETAIL, DEFAULT_DISPLAY } from '../../../../src/presentation/diagram/style/contract';
@@ -55,6 +55,20 @@ describe('focusOf (T4)', () => {
   it('sin selección o con un id que no está: sin foco', () => {
     expect(focusOf(layout, null, null)).toBeNull();
     expect(focusOf(layout, 'Nope', null)).toBeNull();
+  });
+});
+
+describe('focusUnion (multiselección)', () => {
+  it('une los vecindarios de cada id válido', () => {
+    const f = focusUnion(layout, ['A', 'C']);
+    expect([...(f?.nodes ?? [])].sort()).toEqual(['A', 'B', 'C']);
+    expect([...(f?.edges ?? [])]).toEqual([0, 1]);
+  });
+  it('los ids que no están se ignoran; vacía o sin válidos: sin foco', () => {
+    const f = focusUnion(layout, ['Nope', 'B']);
+    expect([...(f?.nodes ?? [])].sort()).toEqual(['A', 'B', 'C']);
+    expect(focusUnion(layout, [])).toBeNull();
+    expect(focusUnion(layout, ['Nope'])).toBeNull();
   });
 });
 
