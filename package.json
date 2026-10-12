@@ -43,5 +43,8 @@
     "@lezer/highlight": "^1.2.5",
     "electron-store": "8.2.0",
     "elkjs": "0.10.0"
+  },
+  "overrides": {
+    "yauzl": "^3.0.0"
   }
 }
