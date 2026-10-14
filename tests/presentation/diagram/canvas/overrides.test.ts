@@ -58,12 +58,19 @@ describe('applyOverrides con paquetes', () => {
     expect(after.x).toBeLessThanOrEqual(200 - 16);
   });
 
-  it('mover dentro agranda como antes y lo ajeno no cambia', () => {
+  it('mover dentro ciñe el paquete a sus miembros sin dejar aire residual', () => {
     const l = layout();
     const out = applyOverrides(l, setOverride(EMPTY_OVERRIDES, 'A', { dx: 5, dy: 5 }));
     const after = out.packages[0];
-    const before = l.packages[0];
-    expect(after).toEqual(before);
+    // A queda en (5,5) y B en (200,0): envolvente + PKG_PAD (16 izq, 30 arriba, 16 der, 16 abajo).
+    expect(after).toEqual({ name: 'p', x: -11, y: -30, w: 307, h: 91 });
+    // Sigue conteniendo a todos sus miembros.
+    for (const n of out.nodes) {
+      expect(n.x).toBeGreaterThanOrEqual(after!.x + 16);
+      expect(n.y).toBeGreaterThanOrEqual(after!.y + 30);
+      expect(n.x + n.w).toBeLessThanOrEqual(after!.x + after!.w - 16);
+      expect(n.y + n.h).toBeLessThanOrEqual(after!.y + after!.h - 16);
+    }
   });
 
   it('un paquete sin miembros visibles conserva la caja del layout', () => {

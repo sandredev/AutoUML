@@ -2,6 +2,7 @@
 import type { RelationshipModel } from '../../../domain/diagram/model';
 import { FONTS } from '../style/contract';
 import type { EdgeMark } from '../analysis/overlay';
+import type { EdgeLabelSpots } from '../edgeLabels';
 import type { EdgePath } from '../types';
 import { resolveColor } from './color';
 import {
@@ -71,6 +72,11 @@ export function drawEdgeFull(
     /** Capa de análisis (T9): la arista está en un ciclo o va hacia una capa superior. */
     mark?: EdgeMark | null;
     markColor?: string;
+    /**
+     * Textos ya colocados (placeEdgeLabels): etiqueta y multiplicidades. Sin ellos, la etiqueta va al centro
+     * del tramo más largo y las multiplicidades junto a su extremo.
+     */
+    labelAt?: EdgeLabelSpots | undefined;
   },
 ): void {
   const pts = simplify(e.points);
@@ -117,16 +123,16 @@ export function drawEdgeFull(
   if (!o.labels) return;
 
   if (rel?.sourceLabel && first) {
-    const p = endLabelPos(...first, 14 + sh.inset);
+    const p = o.labelAt?.source ?? endLabelPos(...first, 14 + sh.inset);
     labelBox(ctx, rel.sourceLabel, p.x, p.y, theme.bg, theme.fg);
   }
   if (rel?.targetLabel && last) {
-    const p = endLabelPos(...last, 14 + th.inset);
+    const p = o.labelAt?.target ?? endLabelPos(...last, 14 + th.inset);
     labelBox(ctx, rel.targetLabel, p.x, p.y, theme.bg, theme.fg);
   }
   const text = rel?.label ?? e.label;
   if (text) {
-    const a = labelAnchor(pts);
+    const a = o.labelAt?.label ?? labelAnchor(pts);
     if (a) {
       const t = rel?.labelArrow === 'forward' ? text + ' ▶' : rel?.labelArrow === 'backward' ? '◀ ' + text : text;
       labelBox(ctx, t, a.x, a.y, theme.bg, theme.fg);

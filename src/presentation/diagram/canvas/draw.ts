@@ -4,12 +4,15 @@ import { FALLBACK_HEAT, FALLBACK_MARK_CYCLE, FALLBACK_MARK_VIOLATION, markOfEdge
 import type { Focus } from '../graph/focus';
 import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
 import { isPackageNode, packageNodeName } from '../layout/aggregate';
+import { makeMeasurer } from '../layout/cardModel';
 import { blockAlpha, semanticOf, type SemanticAggregate } from '../semantic/aggregatePackages';
-import type { CardDisplay } from '../style/contract';
+import type { CardDisplay, TextMeasurer } from '../style/contract';
 import type { LayoutResult, NodeBox, ViewState } from '../types';
 import { drawCard } from './card';
 import type { FrameFx } from './tween';
 import { drawEdgeFull } from './edgeDraw';
+import { type EdgeLabelSpots, placeEdgeLabels } from '../edgeLabels';
+import { firstSegment, headGeometry, headsOf, lastSegment, simplify } from './edgePath';
 import { drawNotes } from './notes';
 import { queryEdges, queryNodes, type SpatialIndex } from './spatial';
 import { visibleWorldRect } from './viewport';
@@ -81,6 +84,45 @@ export interface DrawArgs {
    * fotograma (la memoización por identidad no valdría): se pasa el layout estable de destino.
    */
   semanticLayout?: LayoutResult | undefined;
+}
+
+/** Por encima de estas aristas las etiquetas van al centro de su tramo más largo (colocarlas cuesta O(n²)). */
+const LABEL_PLACE_MAX_EDGES = 150;
+const labelSpotCache = new WeakMap<LayoutResult, Map<number, EdgeLabelSpots>>();
+let labelMeasurer: TextMeasurer | null = null;
+
+/**
+ * Etiquetas de relación colocadas sin pisar tarjetas ni otras etiquetas (misma colocación que el SVG).
+ * Mide con un medidor propio (no con el contexto del dibujo): así el dibujo no cambia según haya caché o no.
+ */
+function edgeLabelSpots(layout: LayoutResult, model: DiagramModel): Map<number, EdgeLabelSpots> | null {
+  if (layout.edges.length > LABEL_PLACE_MAX_EDGES) return null;
+  const hit = labelSpotCache.get(layout);
+  if (hit) return hit;
+  labelMeasurer ??= makeMeasurer();
+  const measure = labelMeasurer;
+  const spots = placeEdgeLabels(
+    layout,
+    (e) => {
+      const rel = e.rel !== undefined ? model.relationships[e.rel] : undefined;
+      const text = rel?.label ?? e.label;
+      const pts = simplify(e.points);
+      const heads = headsOf(rel ?? { type: e.type });
+      const first = firstSegment(pts);
+      const last = lastSegment(pts);
+      return {
+        label: !text ? undefined : rel?.labelArrow === 'forward' ? text + ' ▶' : rel?.labelArrow === 'backward' ? '◀ ' + text : text,
+        source: rel?.sourceLabel,
+        target: rel?.targetLabel,
+        sourceInset: first ? headGeometry(heads.source, ...first).inset : 0,
+        targetInset: last ? headGeometry(heads.target, ...last).inset : 0,
+      };
+    },
+    (t) => measure(t, 'edge'),
+    (n) => measure(n, 'pkg'),
+  );
+  labelSpotCache.set(layout, spots);
+  return spots;
 }
 
 /** Tema claro fijo para exportar (mismos valores que los fallbacks de readTheme). */
@@ -443,6 +485,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     }
   } else {
     const hoverId = a.hoverId ?? null;
+    const spots = showDetail ? edgeLabelSpots(layout, a.model) : null;
     for (const i of edges) {
       const e = layout.edges[i];
       if (!e) continue;
@@ -464,6 +507,7 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
           lineWidth: hovered ? 2 * px : px,
           highlighted: hot,
           ...(mark ? { mark, markColor: markColor(mark) } : {}),
+          labelAt: spots?.get(i),
         },
       );
     }

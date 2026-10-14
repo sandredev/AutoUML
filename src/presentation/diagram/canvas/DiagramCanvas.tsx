@@ -388,7 +388,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     }
   }
 
-  const movedLayout = useMemo(() => (inFocus ? layout : applyOverrides(layout, overrides)), [inFocus, layout, overrides]);
+  // Mientras se arrastra, reruteo incremental (rápido); en reposo, ruteo completo de calidad (también lo exporta).
+  const movedLayout = useMemo(
+    () => (inFocus ? layout : applyOverrides(layout, overrides, { settled: !draggingNode })),
+    [inFocus, layout, overrides, draggingNode],
+  );
   const visibleLayout = useMemo(
     () => filterLayout(
       controlled ? movedLayout : collapsePackages(model, movedLayout, collapsedPackages, labels.collapsedSubtitle),
@@ -698,7 +702,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         const L = latest.current;
         const b = L.layout.bounds;
         if (b.w <= 0 || b.h <= 0) return null;
-        return diagramToSvg(L.layout, { cards: svgCardsOf(L.model) });
+        return diagramToSvg(L.layout, { cards: svgCardsOf(L.model), relationships: L.model.relationships });
       },
       // En modo foco se persiste la vista del diagrama completo, no la del foco.
       getSnapshot: () => ({ view: { ...(focusViewRef.current?.view ?? viewRef.current) }, overrides: overridesToRecord(latest.current.overrides) }),

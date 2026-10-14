@@ -1,8 +1,15 @@
-// src/presentation/diagram/layout/elkLayout.ts — layout con ELK (layered + ortogonal). Puro: sin timeout aquí.
+// src/presentation/diagram/layout/elkLayout.ts — layout con ELK (placement layered + router ortogonal propio). Puro: sin timeout aquí.
 // El límite de tiempo vive en el hilo principal (useLayout): ELK es síncrono y bloquea el Worker,
 // así que un setTimeout dentro del Worker no puede saltar a tiempo.
 import type { ElkExtendedEdge, ElkNode } from 'elkjs/lib/elk-api';
 import type { DiagramModel, RelationshipModel, RelType } from '../../../domain/diagram/model';
+import {
+  computeDiagramBounds,
+  openPackageChannels,
+  packageBoxesFromModel,
+  PKG_PADDING,
+  routeAllEdges,
+} from '../routing';
 import type { EdgePath, LayoutOptions, LayoutResult, NodeBox, PackageBox } from '../types';
 import { computeLayout, measureNode } from './layout';
 import ELK from 'elkjs/lib/elk.bundled.js';
@@ -12,15 +19,12 @@ import { anchorToHints, boundsOf, completeHints, hintsUsable, PKG_HINT_PREFIX as
 
 const DEFAULT_RANK_SEP = 80;
 const DEFAULT_NODE_SEP = 40;
-const PKG_PADDING = '[top=30,left=16,bottom=16,right=16]';
 /**
  * Separación que ELK aplica DENTRO de un paquete: su valor por defecto (20), no rankSep/nodeSep (medido).
  * El modo estable plano con paquetes usa la misma para que pasar del layout jerárquico al plano no estire
  * el diagrama. Si algún día se aplican rankSep/nodeSep dentro de los paquetes, cambiar también esto.
  */
 const PACKAGED_GAP = 20;
-/** Mismo margen que PKG_PADDING, en números: sirve para colocar paquetes nuevos a partir de sus tarjetas. */
-const PKG_PAD = { top: 30, left: 16, bottom: 16, right: 16 };
 /** Por encima de este número de nodos se baja la calidad de ELK para que termine a tiempo. */
 export const ELK_FAST_NODES = 300;
 
@@ -39,9 +43,7 @@ function isHierarchy(t: RelType): boolean {
  * - Herencia: padre antes que hijo (arriba en TB, izquierda en LR).
  * - hint en el eje del layout (down/up en TB, right/left en LR): se respeta invirtiendo la arista si
  *   hace falta y con prioridad alta (restricción suave: ELK puede romperla con ciclos).
- * - hint perpendicular (left/right en TB, up/down en LR): NO se aplica. ELK layered no tiene una
- *   restricción fiable de orden dentro de una capa (las posiciones interactivas de T6 solo sirven para
- *   estabilidad, no para ordenar a la fuerza); se ignora sin error.
+ * - hint perpendicular (left/right en TB, up/down en LR): NO se aplica.
  */
 export function layeringOf(r: RelationshipModel, dir: 'TB' | 'LR'): { reversed: boolean; strong: boolean } {
   const fwd = dir === 'LR' ? 'right' : 'down';
@@ -60,9 +62,6 @@ function edgeOptions(strong: boolean): Record<string, string> {
 
 /**
  * Modo estable (T6): ELK respeta las posiciones previas en vez de recalcular desde cero.
- * - layering / cycleBreaking / nodePlacement INTERACTIVE: capas, ciclos y coordenadas salen de las pistas
- *   (con solo layering + semiInteractive el colocador recalcula las X y todo lo de la derecha se desplaza).
- * - Sin separateConnectedComponents ni compactación entre componentes: reordenarían las tarjetas.
  * Requisito: que el layout anterior (la pista) no esté compactado; por eso postCompaction es NONE siempre.
  */
 const STABLE_OPTIONS: Record<string, string> = {
@@ -74,7 +73,6 @@ const STABLE_OPTIONS: Record<string, string> = {
   'elk.layered.compaction.connectedComponents': 'false',
 };
 
-/** Posición de partida de un nodo ELK: coordenadas y la opción `elk.position` que leen los modos interactivos. */
 function placeAt(n: ElkNode, p: Point): void {
   n.x = p.x;
   n.y = p.y;
@@ -103,8 +101,6 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
     leaf.set(t.id, { id: t.id, width: m.w, height: m.h });
   }
 
-  // Modo estable con paquetes: ELK solo respeta las pistas en grafos planos (en un grafo compuesto las
-  // ignora). Se coloca plano y los paquetes salen como caja envolvente de sus miembros.
   const ids = model.types.map((t) => t.id);
   const stable = hintsUsable(ids, opts?.hints);
   const flat = stable && hasPackages;
@@ -123,7 +119,7 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
   const layerEdges: { from: string; to: string }[] = [];
   model.relationships.forEach((r, i) => {
     if (!typeIds.has(r.source) || !typeIds.has(r.target)) return;
-    if (r.source === r.target) { selfRels.push(i); return; } // se añaden como bucle después de ELK
+    if (r.source === r.target) { selfRels.push(i); return; }
     const { reversed, strong } = layeringOf(r, dir);
     edges.push({
       id: 'e' + i,
@@ -135,7 +131,6 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
     layerEdges.push(reversed ? { from: r.target, to: r.source } : { from: r.source, to: r.target });
   });
 
-  // Modo estable: las tarjetas parten de su posición anterior; las nuevas, junto a sus vecinas.
   if (stable && opts?.hints) {
     const seeded = completeHints({
       ids, hints: opts.hints, edges: layerEdges, dir, rankSep, nodeSep,
@@ -168,9 +163,6 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
       'elk.layered.nodePlacement.strategy': big ? 'BRANDES_KOEPF' : 'NETWORK_SIMPLEX',
       'elk.layered.nodePlacement.favorStraightEdges': 'true',
       'elk.layered.thoroughness': big ? '3' : '10',
-      // NONE a propósito (T6): EDGE_LENGTH desplaza nodos a lo largo del eje de capas y rompe la cuadrícula
-      // de capas. Un layout compactado no sirve de pista al modo estable (medido: 76 % de nodos movidos al
-      // añadir una clase, frente a 5 % sin compactar) y el coste es ≈ 3 % de área y de longitud de aristas.
       'elk.layered.compaction.postCompaction.strategy': 'NONE',
       'elk.layered.compaction.connectedComponents': 'true',
       'elk.separateConnectedComponents': 'true',
@@ -187,13 +179,11 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
   try {
     out = await getElk().layout(graph);
   } catch (err) {
-    // Las pistas nunca deben impedir el layout: se reintenta desde cero antes de caer a dagre.
     if (!stable) throw err;
     return computeElkLayout(model, { ...opts, hints: undefined });
   }
 
-  const nodes: NodeBox[] = [];
-  const packages: PackageBox[] = [];
+  const rawNodes: NodeBox[] = [];
   const layerOf = new Map(model.packages.map((p) => [p.name, p.layer] as const));
   const typeById = new Map(model.types.map((t) => [t.id, t] as const));
 
@@ -204,11 +194,6 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
       const w = c.width ?? 0;
       const h = c.height ?? 0;
       if (c.id.startsWith(PKG_PREFIX)) {
-        const name = c.id.slice(PKG_PREFIX.length);
-        const box: PackageBox = { name, x, y, w, h };
-        const layer = layerOf.get(name);
-        if (layer !== undefined) box.layer = layer;
-        packages.push(box);
         walk(c, x, y);
       } else {
         const t = typeById.get(c.id);
@@ -216,13 +201,14 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
         if (t) nb.label = t.name;
         const pk = pkgOf.get(c.id);
         if (pk !== undefined) nb.packageName = pk;
-        nodes.push(nb);
+        rawNodes.push(nb);
       }
     }
   };
   walk(out, 0, 0);
 
-  const outEdges: EdgePath[] = [];
+  // Construir descriptores de aristas (para polyline conserva puntos de ELK; para orthogonal el router propio las calcula)
+  const pendingEdges: EdgePath[] = [];
   (out.edges ?? []).forEach((e) => {
     const m = meta.get(e.id);
     if (!m) return;
@@ -232,17 +218,20 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
       for (const b of s.bendPoints ?? []) pts.push(b.x, b.y);
       pts.push(s.endPoint.x, s.endPoint.y);
     }
-    if (pts.length < 4) return;
+    if (pts.length < 4 && routing === 'polyline') return;
     const ep: EdgePath = {
-      source: m.rel.source, target: m.rel.target, type: m.rel.type,
-      points: m.reversed ? reversePoints(pts) : pts, routing, rel: m.idx,
+      source: m.rel.source,
+      target: m.rel.target,
+      type: m.rel.type,
+      points: m.reversed ? reversePoints(pts) : pts,
+      routing,
+      rel: m.idx,
     };
     if (m.rel.label !== undefined) ep.label = m.rel.label;
-    outEdges.push(ep);
+    pendingEdges.push(ep);
   });
 
-  // Bucles de una clase consigo misma (ELK no los rutea): esquina superior derecha, separados.
-  const boxById = new Map(nodes.map((n) => [n.id, n] as const));
+  const boxById = new Map(rawNodes.map((n) => [n.id, n] as const));
   const loops = new Map<string, number>();
   for (const i of selfRels) {
     const r = model.relationships[i];
@@ -251,71 +240,80 @@ export async function computeElkLayout(model: DiagramModel, opts?: LayoutOptions
     const k = loops.get(b.id) ?? 0;
     loops.set(b.id, k + 1);
     const ep: EdgePath = {
-      source: r.source, target: r.target, type: r.type, points: selfLoopPoints(b, k),
-      routing: 'orthogonal', rel: i, self: true,
+      source: r.source,
+      target: r.target,
+      type: r.type,
+      points: selfLoopPoints(b, k),
+      routing: 'orthogonal',
+      rel: i,
+      self: true,
     };
     if (r.label !== undefined) ep.label = r.label;
-    outEdges.push(ep);
+    pendingEdges.push(ep);
   }
 
-  const result: LayoutResult = { nodes, edges: outEdges, packages, bounds: computeBounds(nodes, packages, outEdges) };
-  if (!stable) return result;
-  const anchored = anchorToHints(result, opts?.hints, dir);
-  if (!flat) return anchored;
-  // Las cajas de paquete se derivan DESPUÉS del anclaje, de las posiciones finales de las tarjetas: si se
-  // calcularan antes, devolver las capas a su sitio (deformación del eje de flujo) las estiraría.
-  const pkgBoxes = packageBoxesOf(model, anchored.nodes, layerOf);
-  return { ...anchored, packages: pkgBoxes, bounds: boundsOf(anchored.nodes, pkgBoxes, anchored.edges) };
-}
+  // Paquete = envelope(nodes) + PKG_PAD estricto (nunca inflado por las aristas internas de ELK)
+  let packages: PackageBox[] = packageBoxesFromModel(model, rawNodes, layerOf);
+  let nodes: NodeBox[] = rawNodes;
 
-/** Caja de cada paquete = envolvente de sus tarjetas + el mismo padding que ELK da a un nodo compuesto. */
-function packageBoxesOf(model: DiagramModel, nodes: NodeBox[], layerOf: ReadonlyMap<string, string | undefined>): PackageBox[] {
-  const byId = new Map(nodes.map((n) => [n.id, n] as const));
-  const out: PackageBox[] = [];
-  for (const p of model.packages) {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const id of p.typeIds) {
-      const b = byId.get(id);
-      if (!b || b.packageName !== p.name) continue;
-      x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y);
-      x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h);
-    }
-    if (!Number.isFinite(x0)) continue;
-    const box: PackageBox = {
-      name: p.name,
-      x: x0 - PKG_PAD.left, y: y0 - PKG_PAD.top,
-      w: x1 - x0 + PKG_PAD.left + PKG_PAD.right, h: y1 - y0 + PKG_PAD.top + PKG_PAD.bottom,
+  // ELK ya separa los paquetes; el router A* rodea los canales estrechos por sí solo. Solo se
+  // repara (desplazamiento rígido) cuando dos cajas se solapan de verdad: ensanchar canales por
+  // estética aquí lucharía contra el colocador y rompería la estabilidad T6 entre recálculos.
+  if (!stable && packages.length > 1 && anyPackageOverlap(packages)) {
+    const pushed = openPackageChannels(nodes, packages, pendingEdges);
+    nodes = pushed.nodes;
+    packages = pushed.packages;
+  }
+
+  if (!stable) {
+    const routedEdges =
+      routing === 'orthogonal' ? routeAllEdges(nodes, packages, pendingEdges) : pendingEdges;
+    return {
+      nodes,
+      edges: routedEdges,
+      packages,
+      bounds: computeDiagramBounds(nodes, packages, routedEdges),
     };
-    const layer = layerOf.get(p.name);
-    if (layer !== undefined) box.layer = layer;
-    out.push(box);
   }
-  return out;
+
+  // Modo estable (T6): anclar posiciones primero, derivar cajas de paquete después y rutear sobre la geometría final
+  const preAnchored: LayoutResult = {
+    nodes,
+    edges: pendingEdges,
+    packages,
+    bounds: computeDiagramBounds(nodes, packages, pendingEdges),
+  };
+  const anchored = anchorToHints(preAnchored, opts?.hints, dir);
+  const finalPackages = flat ? packageBoxesFromModel(model, anchored.nodes, layerOf) : anchored.packages;
+  const finalEdges =
+    routing === 'orthogonal'
+      ? routeAllEdges(anchored.nodes, finalPackages, anchored.edges, anchored.notes ?? [])
+      : anchored.edges;
+  return {
+    ...anchored,
+    packages: finalPackages,
+    edges: finalEdges,
+    bounds: boundsOf(anchored.nodes, finalPackages, finalEdges),
+  };
 }
 
 function reversePoints(p: number[]): number[] {
   const r: number[] = [];
-  for (let i = p.length - 2; i >= 0; i -= 2) r.push(p[i] as number, p[i + 1] as number);
+  for (let i = p.length - 2; i >= 0; i -= 2) r.push(p[i] ?? 0, p[i + 1] ?? 0);
   return r;
 }
 
-function computeBounds(nodes: NodeBox[], packages: PackageBox[], edges: EdgePath[]): LayoutResult['bounds'] {
-  const boxes = [...nodes, ...packages];
-  if (boxes.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const b of boxes) {
-    x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y);
-    x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h);
-  }
-  for (const e of edges) {
-    for (let i = 0; i + 1 < e.points.length; i += 2) {
-      const x = e.points[i] as number;
-      const y = e.points[i + 1] as number;
-      x0 = Math.min(x0, x); y0 = Math.min(y0, y);
-      x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+/** ¿Se solapa de verdad algún par de cajas de paquete? (Rozar el borde no cuenta.) */
+function anyPackageOverlap(packages: readonly PackageBox[]): boolean {
+  for (let i = 0; i < packages.length; i++) {
+    for (let j = i + 1; j < packages.length; j++) {
+      const a = packages[i];
+      const b = packages[j];
+      if (!a || !b) continue;
+      if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) return true;
     }
   }
-  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  return false;
 }
 
 // ---------- Orquestación ELK → dagre ante ERRORES (el timeout está en useLayout) ----------

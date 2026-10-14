@@ -3,6 +3,7 @@
 // - hintsOf: posiciones del layout anterior (la pista que se le da al motor).
 // - completeHints: da posición de partida a las tarjetas nuevas, junto a sus vecinas.
 // - anchorToHints: traslada el layout nuevo para que los supervivientes no se muevan en bloque.
+import { fitPackageBoxes, routeAllEdges } from '../routing';
 import type { EdgePath, LayoutResult, NodeBox, NoteBox, PackageBox } from '../types';
 
 export interface Point { x: number; y: number }
@@ -63,7 +64,6 @@ export function completeHints(a: SeedArgs): Record<string, Point> {
   const pending = a.ids.filter((id) => !out[id]);
   if (pending.length === 0) return out;
 
-  // Límites de lo ya colocado: sirven para los nodos sin vecinas.
   let minFlow = Infinity, maxCross = -Infinity;
   for (const id of a.ids) {
     const p = out[id];
@@ -85,8 +85,6 @@ export function completeHints(a: SeedArgs): Record<string, Point> {
     push(preds, e.to, e.from);
   }
 
-  // Capas del layout anterior (intervalos de flujo que se solapan) y hueco típico entre ellas: la tarjeta
-  // nueva se coloca en la capa contigua a sus vecinas, no a una distancia fija (que cae en la capa equivocada).
   const flowLo = (id: string): number => { const p = out[id] as Point; return tb ? p.y : p.x; };
   const flowLen = (id: string): number => (tb ? a.size(id).h : a.size(id).w);
   const bands: { lo: number; hi: number }[] = [];
@@ -99,7 +97,7 @@ export function completeHints(a: SeedArgs): Record<string, Point> {
   let layerGap = a.rankSep;
   if (bands.length > 1) {
     layerGap = Infinity;
-    for (let i = 1; i < bands.length; i++) layerGap = Math.min(layerGap, (bands[i] as { lo: number }).lo - (bands[i - 1] as { hi: number }).hi);
+    for (let i = 1; i < bands.length; i++) layerGap = Math.min(layerGap, (bands[i]?.lo ?? 0) - (bands[i - 1]?.hi ?? 0));
     if (!fin(layerGap) || layerGap < 0) layerGap = a.rankSep;
   }
   const bandOf = (id: string): number => {
@@ -107,7 +105,6 @@ export function completeHints(a: SeedArgs): Record<string, Point> {
     return bands.findIndex((b) => lo < b.hi && hi > b.lo);
   };
 
-  // Rango transversal que ocupan los miembros ya colocados de cada paquete.
   const ranges = new Map<string, { lo: number; hi: number }>();
   if (a.groupOf) {
     for (const id of a.ids) {
@@ -122,44 +119,6 @@ export function completeHints(a: SeedArgs): Record<string, Point> {
     }
   }
 
-  const placeFrom = (id: string): boolean => {
-    const s = a.size(id);
-    const flowSize = tb ? s.h : s.w;
-    const before = (preds.get(id) ?? []).map((n) => ({ n, p: out[n] })).filter((v): v is { n: string; p: Point } => !!v.p);
-    const after = (succs.get(id) ?? []).map((n) => ({ n, p: out[n] })).filter((v): v is { n: string; p: Point } => !!v.p);
-    if (before.length === 0 && after.length === 0) return false;
-    const crossOf = (p: Point): number => (tb ? p.x : p.y);
-    let cross = [...before, ...after].reduce((acc, v) => acc + crossOf(v.p), 0) / (before.length + after.length);
-    const g = a.groupOf?.(id);
-    const range = g !== undefined ? ranges.get(g) : undefined;
-    if (range) {
-      // Dentro del paquete: así su caja no se estira hasta las vecinas de otro paquete.
-      const crossSize = tb ? s.w : s.h;
-      cross = Math.min(Math.max(cross, range.lo), Math.max(range.lo, range.hi - crossSize));
-    }
-    let flow: number;
-    if (before.length > 0) {
-      // En la capa siguiente a la de la última predecesora (o una nueva detrás, si ya es la última).
-      const k = Math.max(...before.map((v) => bandOf(v.n)));
-      const bottom = Math.max(...before.map((v) => (tb ? v.p.y + a.size(v.n).h : v.p.x + a.size(v.n).w)));
-      const next = k >= 0 ? bands[k + 1] : undefined;
-      flow = next ? next.lo : bottom + layerGap;
-    } else {
-      // En la capa anterior a la de la primera sucesora (o una nueva delante, si ya es la primera).
-      const k = Math.min(...after.map((v) => bandOf(v.n)));
-      const top = Math.min(...after.map((v) => (tb ? v.p.y : v.p.x)));
-      const prev = k >= 1 ? bands[k - 1] : undefined;
-      flow = prev ? prev.lo : top - layerGap - flowSize;
-    }
-    cross = freeSlot(id, cross, flow, flowSize);
-    out[id] = tb ? { x: cross, y: flow } : { x: flow, y: cross };
-    return true;
-  };
-
-  /**
-   * Posición transversal libre más cercana a `want` en la fila (capa) donde cae la tarjeta: así el
-   * colocador no tiene que empujar a las tarjetas que ya estaban.
-   */
   const freeSlot = (id: string, want: number, flow: number, flowSize: number): number => {
     const size = tb ? a.size(id).w : a.size(id).h;
     const taken: { lo: number; hi: number }[] = [];
@@ -169,7 +128,7 @@ export function completeHints(a: SeedArgs): Record<string, Point> {
       const o = a.size(other);
       const f0 = tb ? p.y : p.x;
       const fLen = tb ? o.h : o.w;
-      if (f0 >= flow + flowSize || f0 + fLen <= flow) continue; // otra capa
+      if (f0 >= flow + flowSize || f0 + fLen <= flow) continue;
       const lo = tb ? p.x : p.y;
       taken.push({ lo: lo - a.nodeSep, hi: lo + (tb ? o.w : o.h) + a.nodeSep });
     }
@@ -184,7 +143,37 @@ export function completeHints(a: SeedArgs): Record<string, Point> {
     return fin(best) ? best : want;
   };
 
-  // Varias pasadas: una nueva puede colgar de otra nueva.
+  const placeFrom = (id: string): boolean => {
+    const s = a.size(id);
+    const flowSize = tb ? s.h : s.w;
+    const before = (preds.get(id) ?? []).map((n) => ({ n, p: out[n] })).filter((v): v is { n: string; p: Point } => !!v.p);
+    const after = (succs.get(id) ?? []).map((n) => ({ n, p: out[n] })).filter((v): v is { n: string; p: Point } => !!v.p);
+    if (before.length === 0 && after.length === 0) return false;
+    const crossOf = (p: Point): number => (tb ? p.x : p.y);
+    let cross = [...before, ...after].reduce((acc, v) => acc + crossOf(v.p), 0) / (before.length + after.length);
+    const g = a.groupOf?.(id);
+    const range = g !== undefined ? ranges.get(g) : undefined;
+    if (range) {
+      const crossSize = tb ? s.w : s.h;
+      cross = Math.min(Math.max(cross, range.lo), Math.max(range.lo, range.hi - crossSize));
+    }
+    let flow: number;
+    if (before.length > 0) {
+      const k = Math.max(...before.map((v) => bandOf(v.n)));
+      const bottom = Math.max(...before.map((v) => (tb ? v.p.y + a.size(v.n).h : v.p.x + a.size(v.n).w)));
+      const next = k >= 0 ? bands[k + 1] : undefined;
+      flow = next ? next.lo : bottom + layerGap;
+    } else {
+      const k = Math.min(...after.map((v) => bandOf(v.n)));
+      const top = Math.min(...after.map((v) => (tb ? v.p.y : v.p.x)));
+      const prev = k >= 1 ? bands[k - 1] : undefined;
+      flow = prev ? prev.lo : top - layerGap - flowSize;
+    }
+    cross = freeSlot(id, cross, flow, flowSize);
+    out[id] = tb ? { x: cross, y: flow } : { x: flow, y: cross };
+    return true;
+  };
+
   let left = pending;
   for (let pass = 0; pass < 4 && left.length > 0; pass++) {
     const next: string[] = [];
@@ -192,7 +181,6 @@ export function completeHints(a: SeedArgs): Record<string, Point> {
     if (next.length === left.length) break;
     left = next;
   }
-  // Sin vecinas colocadas: al final de la primera capa, una tras otra.
   let cursor = maxCross + a.nodeSep;
   for (const id of left) {
     const s = a.size(id);
@@ -206,7 +194,7 @@ function median(values: number[]): number {
   if (values.length === 0) return 0;
   const s = [...values].sort((p, q) => p - q);
   const m = s.length >> 1;
-  return s.length % 2 === 1 ? (s[m] as number) : ((s[m - 1] as number) + (s[m] as number)) / 2;
+  return s.length % 2 === 1 ? (s[m] ?? 0) : ((s[m - 1] ?? 0) + (s[m] ?? 0)) / 2;
 }
 
 /** Desplazamiento mediano de las tarjetas que están en las pistas y en el layout nuevo. */
@@ -240,17 +228,14 @@ export function translateLayout(layout: LayoutResult, dx: number, dy: number): L
   return out;
 }
 
-/** Separación mínima que se conserva entre dos capas al devolverlas a su posición anterior. */
 const MIN_LAYER_GAP = 8;
 
 interface Band { lo: number; hi: number; members: NodeBox[]; shift: number }
 
 /**
  * Devuelve cada capa a la posición que tenía en el eje de flujo (Y en TB, X en LR).
- * ELK separa las capas según cuántas aristas pasan entre ellas, y eso cambia entre el layout jerárquico
- * (con paquetes) y el plano, aunque el diagrama sea el mismo: sin esto todo se estira.
- * Las tarjetas se desplazan rígidas (cada capa un desplazamiento constante); el hueco entre dos capas
- * interpola entre sus desplazamientos, y aristas y paquetes se deforman con la misma función.
+ * Las tarjetas se desplazan rígidas por capa; los paquetes se ciñen a sus miembros (o interpolan si no
+ * hay miembros etiquetados) y las aristas ortogonales se rerutean limpias en lugar de deformarse linealmente.
  */
 export function warpFlowToHints(layout: LayoutResult, hints: LayoutHints, dir: 'TB' | 'LR'): LayoutResult {
   const tb = dir === 'TB';
@@ -273,28 +258,30 @@ export function warpFlowToHints(layout: LayoutResult, hints: LayoutHints, dir: '
     }
     if (d.length > 0) b.shift = median(d);
   }
-  // Capas sin ninguna tarjeta conocida: heredan el desplazamiento de la vecina.
   let carry = NaN;
   for (const b of bands) { if (fin(b.shift)) carry = b.shift; else b.shift = carry; }
   carry = NaN;
   for (let i = bands.length - 1; i >= 0; i--) {
-    const b = bands[i] as Band;
+    const b = bands[i];
+    if (!b) continue;
     if (fin(b.shift)) carry = b.shift; else b.shift = carry;
   }
   if (bands.length === 0 || !bands.every((b) => fin(b.shift))) return layout;
-  // Las capas no pueden solaparse tras moverlas (p. ej. si una capa creció con una tarjeta nueva).
   for (let i = 1; i < bands.length; i++) {
-    const a = bands[i - 1] as Band;
-    const b = bands[i] as Band;
+    const a = bands[i - 1];
+    const b = bands[i];
+    if (!a || !b) continue;
     const gap = b.lo - a.hi;
     b.shift = Math.max(b.shift, a.shift + MIN_LAYER_GAP - gap);
   }
 
   const warp = (v: number): number => {
-    const first = bands[0] as Band;
+    const first = bands[0];
+    if (!first) return v;
     if (v <= first.lo) return v + first.shift;
     for (let i = 0; i < bands.length; i++) {
-      const b = bands[i] as Band;
+      const b = bands[i];
+      if (!b) continue;
       if (v <= b.hi) return v + b.shift;
       const next = bands[i + 1];
       if (!next) return v + b.shift;
@@ -307,15 +294,23 @@ export function warpFlowToHints(layout: LayoutResult, hints: LayoutHints, dir: '
   };
 
   const nodes: NodeBox[] = layout.nodes.map((n) => (tb ? { ...n, y: warp(n.y) } : { ...n, x: warp(n.x) }));
-  const packages: PackageBox[] = layout.packages.map((p) => {
+  const warpedPackages: PackageBox[] = layout.packages.map((p) => {
     const a = warp(tb ? p.y : p.x);
-    const z = warp((tb ? p.y + p.h : p.x + p.w));
+    const z = warp(tb ? p.y + p.h : p.x + p.w);
     return tb ? { ...p, y: a, h: z - a } : { ...p, x: a, w: z - a };
   });
-  const edges: EdgePath[] = layout.edges.map((e) => ({
-    ...e,
-    points: e.points.map((v, i) => ((i % 2 === 1) === tb ? warp(v) : v)),
-  }));
+  const packages = fitPackageBoxes(warpedPackages, nodes);
+
+  // Para aristas polyline (dagre) aplicamos el warp; para aristas ortogonales reruteamos limpiamente sin deformar
+  const preEdges: EdgePath[] = layout.edges.map((e) =>
+    e.routing === 'orthogonal'
+      ? e
+      : { ...e, points: e.points.map((v, i) => ((i % 2 === 1) === tb ? warp(v) : v)) },
+  );
+  const edges = preEdges.some((e) => e.routing === 'orthogonal')
+    ? routeAllEdges(nodes, packages, preEdges, layout.notes ?? [])
+    : preEdges;
+
   const out: LayoutResult = { nodes, edges, packages, bounds: boundsOf(nodes, packages, edges) };
   if (layout.notes) out.notes = layout.notes;
   return out;
@@ -330,8 +325,8 @@ export function boundsOf(nodes: readonly NodeBox[], packages: readonly PackageBo
   }
   for (const e of edges) {
     for (let i = 0; i + 1 < e.points.length; i += 2) {
-      const x = e.points[i] as number;
-      const y = e.points[i + 1] as number;
+      const x = e.points[i] ?? 0;
+      const y = e.points[i + 1] ?? 0;
       x0 = Math.min(x0, x); y0 = Math.min(y0, y);
       x1 = Math.max(x1, x); y1 = Math.max(y1, y);
     }
@@ -341,8 +336,7 @@ export function boundsOf(nodes: readonly NodeBox[], packages: readonly PackageBo
 
 /**
  * Ancla el layout nuevo al anterior: devuelve cada capa a su posición (warpFlowToHints) y traslada el
- * conjunto para que el desplazamiento mediano de las tarjetas supervivientes sea cero (ELK añade márgenes
- * y puede mover el origen). Sin supervivientes no hace nada.
+ * conjunto para que el desplazamiento mediano de las tarjetas supervivientes sea cero.
  */
 export function anchorToHints(layout: LayoutResult, hints: LayoutHints | undefined, dir: 'TB' | 'LR' = 'TB'): LayoutResult {
   if (!hints) return layout;
