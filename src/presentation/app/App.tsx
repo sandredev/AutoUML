@@ -29,7 +29,7 @@ import { hiddenByPuml } from '../diagram/viewerInfo';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import { EMPTY_SELECTION } from '../diagram/canvas/selection';
 import { isPackageNode } from '../diagram/layout/aggregate';
-import type { CodeTarget, ViewerToolbarHost } from '../diagram/PumlViewer';
+import type { CodeTarget, SourceEdit, ViewerToolbarHost } from '../diagram/PumlViewer';
 import { hasActiveFilters } from '../diagram/graph/filters';
 import { serializeViews } from '../diagram/presentation/views';
 import { SettingsDialog } from '../components/SettingsDialog';
@@ -872,6 +872,19 @@ export default function App() {
     return null;
   }, []);
 
+  /** Edición de relaciones y paquetes en el lienzo: reescribe el texto del editor (Ctrl+Z lo deshace). */
+  const handleSourceEdit = useCallback((edit: SourceEdit): void => {
+    if (!editorRef.current) return;
+    if (syncRef.current?.hasIncludes) {
+      setStatus({ kind: 'info', text: tRef.current('rename.includes') });
+      return;
+    }
+    const text = editorRef.current.getText();
+    const next = edit(text);
+    if (next === text) return;
+    editorRef.current.applyText(next);
+  }, []);
+
   /** Menú contextual "Ir al código" (T8): abre el editor y salta al tipo o a la relación. */
   const handleGoToCode = useCallback((target: CodeTarget) => {
     setEditorVisible(true);
@@ -1306,6 +1319,7 @@ export default function App() {
             highlightLine={highlightLine}
             onRelationSelect={handleRelationSelect}
             onRename={handleRename}
+            onSourceEdit={handleSourceEdit}
             {...(source !== null ? { onGoToCode: handleGoToCode } : {})}
             onCopyText={handleCopyText}
             onAppAction={(a) => actionRef.current(a)}

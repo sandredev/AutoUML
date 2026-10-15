@@ -9,7 +9,7 @@ import { FullscreenIcon, MinusIcon, PlusIcon, ScanIcon, SearchIcon } from '../co
 import { MenuButton } from '../components/MenuButton';
 import { AnalysisPanel } from './AnalysisPanel';
 import { buildOverlay, type HeatMetric } from './analysis/overlay';
-import { DiagramCanvas, type DiagramCanvasHandle } from './canvas/DiagramCanvas';
+import { DiagramCanvas, type DiagramCanvasHandle, type SourceEdit } from './canvas/DiagramCanvas';
 import { EMPTY_SELECTION } from './canvas/selection';
 import type { MenuAction, MenuSubject } from './contextMenu';
 import { FiltersPanel, withListItem } from './FiltersPanel';
@@ -24,6 +24,7 @@ import { addView, moveView, removeView, renameView, type DeckView } from './pres
 import { ViewsPanel, type SaveViewOptions } from './ViewsPanel';
 import { useDiagramLayout } from './layout/useDiagramLayout';
 import type { LayoutOptions, ViewState } from './types';
+export type { SourceEdit } from './canvas/DiagramCanvas';
 import { initialViewOptions, resetViewOptions, type ViewOptionsState } from './viewOptions';
 import { hiddenByPuml, outOfViewOf, shownRelationsOf, type ViewerControl, type ViewerInfo } from './viewerInfo';
 
@@ -76,6 +77,8 @@ export interface PumlViewerProps {
   onRelationSelect?: (line: number | null) => void;
   /** Renombrado en línea con doble clic (T7): mensaje de error o null si se aplicó. */
   onRename?: (id: string, next: string) => string | null;
+  /** Reescribe el texto fuente (relaciones y paquetes editados en el lienzo). */
+  onSourceEdit?: (edit: SourceEdit) => void;
   /** Menú contextual "Ir al código" (T8): un tipo o la línea de una relación. Sin él, la entrada sale deshabilitada. */
   onGoToCode?: (target: CodeTarget) => void;
   /** Menú contextual "Copiar nombre" (T8). */
@@ -123,6 +126,7 @@ export function PumlViewer({
   highlightLine = null,
   onRelationSelect,
   onRename,
+  onSourceEdit,
   onGoToCode,
   onCopyText,
   paletteHost,
@@ -831,6 +835,7 @@ export function PumlViewer({
         highlightLine={highlightLine}
         {...(onRelationSelect ? { onRelationSelect } : {})}
         {...(onRename ? { onRename } : {})}
+        {...(onSourceEdit ? { onSourceEdit } : {})}
         focusKey={activeFocus !== null ? focusKey(activeFocus) : null}
         focusAnimate={focusAnimate}
         hidden={drawHidden}

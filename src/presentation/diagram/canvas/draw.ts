@@ -1,4 +1,3 @@
-// src/presentation/diagram/canvas/draw.ts — dibujo del diagrama en Canvas 2D (sin React).
 import type { Category, DiagramModel, TypeNode } from '../../../domain/diagram/model';
 import { FALLBACK_HEAT, FALLBACK_MARK_CYCLE, FALLBACK_MARK_VIOLATION, markOfEdge, type AnalysisOverlay } from '../analysis/overlay';
 import type { Focus } from '../graph/focus';
@@ -7,7 +6,7 @@ import { isPackageNode, packageNodeName } from '../layout/aggregate';
 import { makeMeasurer } from '../layout/cardModel';
 import { blockAlpha, semanticOf, type SemanticAggregate } from '../semantic/aggregatePackages';
 import type { CardDisplay, TextMeasurer } from '../style/contract';
-import type { LayoutResult, NodeBox, ViewState } from '../types';
+import type { LayoutResult, NodeBox, ViewState, DiagramLayoutModel, Point2D } from '../types';
 import { drawCard } from './card';
 import type { FrameFx } from './tween';
 import { drawEdgeFull } from './edgeDraw';
@@ -625,4 +624,174 @@ export function drawDiagram(ctx: CanvasRenderingContext2D, a: DrawArgs): void {
     }
     ctx.globalAlpha = 1;
   }
+}
+
+export interface CanvasViewport {
+  x: number;
+  y: number;
+  zoom: number;
+  width: number;
+  height: number;
+}
+
+export interface InteractionOverlayState {
+  selectedEdgeId: string | null;
+  dropTargetPkgPath: string | null;
+  knifeLine: { start: Point2D; end: Point2D } | null;
+}
+
+export function renderDiagramCanvasFrame(
+  ctx: CanvasRenderingContext2D,
+  model: DiagramLayoutModel,
+  vp: CanvasViewport,
+  overlay: InteractionOverlayState
+) {
+  const margin = 80;
+  const minX = -vp.x / vp.zoom - margin;
+  const minY = -vp.y / vp.zoom - margin;
+  const maxX = (vp.width - vp.x) / vp.zoom + margin;
+  const maxY = (vp.height - vp.y) / vp.zoom + margin;
+
+  const isVisible = (x: number, y: number, w: number, h: number) =>
+    x + w >= minX && x <= maxX && y + h >= minY && y <= maxY;
+
+  ctx.save();
+  ctx.clearRect(0, 0, vp.width, vp.height);
+  ctx.translate(vp.x, vp.y);
+  ctx.scale(vp.zoom, vp.zoom);
+
+  // 1. Paquetes visibles
+  for (const pkg of model.packages) {
+    if (!isVisible(pkg.x, pkg.y, pkg.width, pkg.height)) continue;
+    const isDropTarget = overlay.dropTargetPkgPath === pkg.fullPath;
+
+    ctx.fillStyle = isDropTarget ? 'rgba(59, 130, 246, 0.14)' : 'rgba(248, 250, 252, 0.8)';
+    ctx.strokeStyle = isDropTarget ? '#2563EB' : '#94A3B8';
+    ctx.lineWidth = isDropTarget ? 2.5 : 1.5;
+    ctx.fillRect(pkg.x, pkg.y, pkg.width, pkg.height);
+    ctx.strokeRect(pkg.x, pkg.y, pkg.width, pkg.height);
+
+    if (vp.zoom >= 0.15) {
+      ctx.fillStyle = '#334155';
+      ctx.font = 'bold 13px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(pkg.name, pkg.x + 12, pkg.y + 24);
+    }
+  }
+
+  // 2. Batching de Aristas con Path2D (2 llamadas a GPU en lugar de 1,500)
+  if (typeof Path2D !== 'undefined') {
+    const solidBatch = new Path2D();
+    const dashedBatch = new Path2D();
+
+    for (const edge of model.edges) {
+      const pts = edge.points;
+      if (pts.length < 2) continue;
+
+      let ex0 = Infinity, ey0 = Infinity, ex1 = -Infinity, ey1 = -Infinity;
+      for (const p of pts) {
+        if (p.x < ex0) ex0 = p.x;
+        if (p.y < ey0) ey0 = p.y;
+        if (p.x > ex1) ex1 = p.x;
+        if (p.y > ey1) ey1 = p.y;
+      }
+      if (!isVisible(ex0, ey0, ex1 - ex0, ey1 - ey0)) continue;
+
+      const batch =
+        edge.kind === 'dependency' || edge.kind === 'implementation' ? dashedBatch : solidBatch;
+      batch.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) {
+        batch.lineTo(pts[i].x, pts[i].y);
+      }
+    }
+
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = '#334155';
+    ctx.setLineDash([]);
+    ctx.stroke(solidBatch);
+
+    ctx.setLineDash([6, 4]);
+    ctx.stroke(dashedBatch);
+    ctx.setLineDash([]);
+  } else {
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = '#334155';
+    for (const edge of model.edges) {
+      const pts = edge.points;
+      if (pts.length < 2) continue;
+      const isDashed = edge.kind === 'dependency' || edge.kind === 'implementation';
+      ctx.setLineDash(isDashed ? [6, 4] : []);
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
+  // 3. Nodos visibles con LOD por nivel de zoom (sin shadowBlur en zoom bajo)
+  const showTitles = vp.zoom >= 0.22;
+  for (const node of model.nodes.values()) {
+    if (!isVisible(node.x, node.y, node.width, node.height)) continue;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeStyle = '#475569';
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(node.x, node.y, node.width, node.height);
+    ctx.strokeRect(node.x, node.y, node.width, node.height);
+
+    if (showTitles) {
+      ctx.fillStyle = '#0F172A';
+      ctx.font = 'bold 13px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(node.name, node.x + node.width / 2, node.y + 22, node.width - 12);
+    }
+  }
+
+  // 4. Manejadores de la relación seleccionada
+  if (overlay.selectedEdgeId) {
+    const sel = model.edges.find((e) => e.id === overlay.selectedEdgeId);
+    if (sel && sel.points.length >= 2) {
+      ctx.strokeStyle = '#2563EB';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(sel.points[0].x, sel.points[0].y);
+      for (let i = 1; i < sel.points.length; i++) ctx.lineTo(sel.points[i].x, sel.points[i].y);
+      ctx.stroke();
+
+      // Handles circulares en los extremos para reconectar o romper
+      for (const ep of [sel.points[0], sel.points[sel.points.length - 1]]) {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = '#1D4ED8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(ep.x, ep.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Handles en los puntos medios de cada segmento para mover o partir
+      ctx.fillStyle = '#3B82F6';
+      for (let i = 0; i < sel.points.length - 1; i++) {
+        const mx = (sel.points[i].x + sel.points[i + 1].x) / 2;
+        const my = (sel.points[i].y + sel.points[i + 1].y) / 2;
+        ctx.beginPath();
+        ctx.arc(mx, my, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // 5. Trazo de Cuchilla (Shift + Alt + Arrastrar)
+  if (overlay.knifeLine) {
+    ctx.strokeStyle = '#EF4444';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(overlay.knifeLine.start.x, overlay.knifeLine.start.y);
+    ctx.lineTo(overlay.knifeLine.end.x, overlay.knifeLine.end.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.restore();
 }

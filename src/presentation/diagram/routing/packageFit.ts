@@ -1,6 +1,6 @@
 // src/presentation/diagram/routing/packageFit.ts — ajuste estricto de paquetes y apertura rígida de canales (puro, sin DOM/React).
 import type { DiagramModel } from '../../../domain/diagram/model';
-import type { EdgePath, NodeBox, NoteBox, PackageBox } from '../types';
+import type { EdgePath, NodeBox, NoteBox, PackageBox, DiagramLayoutModel } from '../types';
 import { CHANNEL_STEP, EDGE_GAP, EPS, PKG_PAD } from './constants';
 
 const DEFAULT_PACKAGE = '(default package)';
@@ -241,4 +241,50 @@ export function openPackageChannels(
     pushedNodeIds,
   };
   return nextNotes ? { ...out, notes: nextNotes } : out;
+}
+
+export const PACKAGE_HEADER_HEIGHT = 40;
+export const PACKAGE_PADDING = 24;
+
+/**
+ * Recalcula los contenedores de paquetes de abajo hacia arriba (Bottom-Up)
+ * para garantizar que ningún paquete hijo o nodo se salga de su paquete padre.
+ */
+export function fitPackagesBottomUp(model: DiagramLayoutModel): void {
+  const byDepthDesc = [...model.packages].sort((a, b) => b.depth - a.depth);
+
+  for (const pkg of byDepthDesc) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let hasChildren = false;
+
+    for (const node of model.nodes.values()) {
+      if (node.packagePath === pkg.fullPath) {
+        hasChildren = true;
+        minX = Math.min(minX, node.x);
+        minY = Math.min(minY, node.y);
+        maxX = Math.max(maxX, node.x + node.width);
+        maxY = Math.max(maxY, node.y + node.height);
+      }
+    }
+
+    for (const subPkg of model.packages) {
+      if (subPkg.parentPath === pkg.fullPath) {
+        hasChildren = true;
+        minX = Math.min(minX, subPkg.x);
+        minY = Math.min(minY, subPkg.y);
+        maxX = Math.max(maxX, subPkg.x + subPkg.width);
+        maxY = Math.max(maxY, subPkg.y + subPkg.height);
+      }
+    }
+
+    if (hasChildren) {
+      pkg.x = minX - PACKAGE_PADDING;
+      pkg.y = minY - PACKAGE_HEADER_HEIGHT;
+      pkg.width = maxX - minX + PACKAGE_PADDING * 2;
+      pkg.height = maxY - minY + PACKAGE_HEADER_HEIGHT + PACKAGE_PADDING;
+    }
+  }
 }

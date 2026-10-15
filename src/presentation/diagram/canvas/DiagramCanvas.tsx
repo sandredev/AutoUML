@@ -14,13 +14,17 @@ import { DEFAULT_LABELS, fill, type ViewerLabels } from '../labels';
 import { collapsedOwner, isPackageNode, packageNodeName } from '../layout/aggregate';
 import { applySkin, skinKey } from '../style/skin';
 import type { CardDisplay } from '../style/contract';
-import type { LayoutResult, ViewState } from '../types';
+import type { DiagramEdgeLayout, EdgePath, LayoutResult, PackageBox, Point2D, ViewState } from '../types';
 import { diagramToSvg, type SvgCardContent } from '../svg';
 import { recenterView } from '../presentation/views';
 import { drawDiagram, LIGHT_THEME, type Theme } from './draw';
 import { collapsePackages, hitTestPackageHeader } from './collapse';
 import { labelAnchor } from './edgePath';
-import { hitTestEdge } from './edgeHit';
+import {
+  deleteEdgeWaypoint, getEdgesIntersectedByKnife, hitTestDiagramEdges, hitTestEdge,
+  moveOrthogonalSegment, splitEdgeSegmentAt, type EdgeHitResult,
+} from './edgeHit';
+import { syncBrokenRelationsInPuml, syncNestedPackageInPuml, syncReconnectedRelationInPuml } from '../../../application/puml/sourceSync';
 import { centerViewOn, drawMinimap, minimapToWorld, minimapTransform } from './minimap';
 import { applyOverrides, EMPTY_OVERRIDES, hasOverrides, moveAll, overridesFromRecord, overridesToRecord, retainOverrides, type Overrides } from './overrides';
 import { EMPTY_SELECTION, marqueeSelection, nodesInRect, packageMemberIds, rectBetween, sameSelection, single, toggleIn, type Selection } from './selection';
@@ -129,6 +133,8 @@ interface Props {
    * (el campo sigue abierto) o null si se aplicó. Sin esta prop el doble clic no renombra.
    */
   onRename?: (id: string, next: string) => string | null;
+  /** Reescribe el texto fuente (relaciones cortadas, reconectadas o paquetes anidados). */
+  onSourceEdit?: (edit: SourceEdit) => void;
   /**
    * Modo foco (T8): clave del foco aplicado (null = diagrama completo). Al entrar se guarda la vista y se
    * encuadra el layout enfocado cuando llegue; al salir se recupera la vista guardada. Mientras dura, las
@@ -264,18 +270,76 @@ interface Drag {
   y0: number;
   moved: boolean;
   /** 'pan' mueve la vista; 'node' mueve `nodeIds`; 'marquee' dibuja el marco. */
-  kind: 'pan' | 'node' | 'marquee';
+  kind: 'pan' | 'node' | 'marquee' | 'knife' | 'segment' | 'handle' | 'package';
   nodeIds: readonly string[];
   /** Selección al empezar (el marco con Ctrl se une a ella). */
   base: Selection;
   additive: boolean;
+  /** Tramo o extremo de una relación agarrados. */
+  edge?: EdgeGrab;
+  /** Cabecera de paquete arrastrada y paquete bajo el puntero al soltar. */
+  pkg?: string;
+  dropPkg?: string | null;
+  alt?: boolean;
+}
+
+/** Relación agarrada: `index` en layout.edges, `startPts` = puntos al empezar el arrastre (mundo). */
+interface EdgeGrab {
+  index: number;
+  key: string;
+  startPts: Point2D[];
+  segment?: number;
+  handle?: 'source' | 'target';
+}
+
+/** Trazo de la cuchilla en px de pantalla. */
+interface KnifeLine { x0: number; y0: number; x1: number; y1: number }
+
+/** Edición de texto fuente: recibe el PUML actual y devuelve el nuevo (igual si no hay cambio). */
+export type SourceEdit = (text: string) => string;
+
+/** Clave estable de una relación para guardar su geometría manual. */
+const edgeKeyOf = (e: EdgePath, i: number): string => `${e.source}>${e.target}#${e.rel ?? i}`;
+
+/** Polilínea plana [x0,y0,x1,y1,…] → puntos. */
+function toPoints(flat: readonly number[]): Point2D[] {
+  const out: Point2D[] = [];
+  for (let i = 0; i + 1 < flat.length; i += 2) out.push({ x: flat[i] ?? 0, y: flat[i + 1] ?? 0 });
+  return out;
+}
+
+function toFlat(pts: readonly Point2D[]): number[] {
+  return pts.flatMap((p) => [p.x, p.y]);
+}
+
+/** Aplica la geometría manual guardada por relación; el resto del layout queda intacto. */
+function withEdgeGeom(layout: LayoutResult, geom: ReadonlyMap<string, Point2D[]>): LayoutResult {
+  if (geom.size === 0) return layout;
+  return {
+    ...layout,
+    edges: layout.edges.map((e, i) => {
+      const pts = geom.get(edgeKeyOf(e, i));
+      return pts ? { ...e, points: toFlat(pts) } : e;
+    }),
+  };
+}
+
+/** Paquete más interno bajo el punto, sin el arrastrado ni sus descendientes. */
+function packageUnder(packages: readonly PackageBox[], x: number, y: number, dragged: string): string | null {
+  let best: PackageBox | null = null;
+  for (const pkg of packages) {
+    if (pkg.name === dragged || pkg.name.startsWith(`${dragged}.`)) continue;
+    if (x < pkg.x || x > pkg.x + pkg.w || y < pkg.y || y > pkg.y + pkg.h) continue;
+    if (best === null || pkg.w * pkg.h < best.w * best.h) best = pkg;
+  }
+  return best?.name ?? null;
 }
 
 export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function DiagramCanvas(
   {
     model, layout, layoutModel, docKey, selectedId = null, selectedIds = EMPTY_SELECTION, onSelect, onViewChange, onManualPositionsChange,
     collapsedPackages: collapsedProp, onCollapsedPackagesChange, sourceModel, packageCounts = EMPTY_COUNTS, skin, display,
-    labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename,
+    labels = DEFAULT_LABELS, initialOverrides, initialView, highlightLine = null, onRelationSelect, onRename, onSourceEdit,
     focusKey = null, focusAnimate = true, hidden = null, menuContext, onMenuAction, analysis = null,
   },
   ref,
@@ -322,6 +386,9 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [hover, setHover] = useState<Hover>(null);
   const [edgeSel, setEdgeSel] = useState<EdgeSelection | null>(null);
+  /** Geometría manual de relaciones (tramos movidos, codos añadidos), por clave. Solo vive en el lienzo. */
+  const [edgeGeom, setEdgeGeom] = useState<ReadonlyMap<string, Point2D[]>>(() => new Map());
+  const [knifeLine, setKnifeLine] = useState<KnifeLine | null>(null);
   const [rename, setRename] = useState<RenameDraft | null>(null);
   const [routeReq, setRouteReq] = useState<RouteRequest | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -390,8 +457,8 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
 
   // Mientras se arrastra, reruteo incremental (rápido); en reposo, ruteo completo de calidad (también lo exporta).
   const movedLayout = useMemo(
-    () => (inFocus ? layout : applyOverrides(layout, overrides, { settled: !draggingNode })),
-    [inFocus, layout, overrides, draggingNode],
+    () => withEdgeGeom(inFocus ? layout : applyOverrides(layout, overrides, { settled: !draggingNode }), edgeGeom),
+    [inFocus, layout, overrides, draggingNode, edgeGeom],
   );
   const visibleLayout = useMemo(
     () => filterLayout(
@@ -441,7 +508,7 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
   // Siempre las últimas props para los callbacks estables.
   const snapshot = {
     model, sourceModel, layout: visibleLayout, sourceLayout: layout, index, selectedId, selectedIds, onSelect, onViewChange,
-    collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename,
+    collapsedPackages, overrides, focus, hover: liveHover, display, labels, packageCounts, onRelationSelect, onRename, onSourceEdit,
     inFocus, route, hidden, analysis,
   };
   const latest = useRef(snapshot);
@@ -1017,6 +1084,23 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     placeTip(sx, sy);
   };
 
+  /** Relación bajo el punto de mundo p (extremos, codos y tramos), sobre el layout visible. */
+  const edgeHitAt = (L: typeof latest.current, p: Point2D): EdgeHitResult | null => {
+    // El tipo de relación no interviene en el hit test: se pasa un valor fijo.
+    const edges: DiagramEdgeLayout[] = L.layout.edges.map((e, i) => ({
+      id: String(i), source: e.source, target: e.target, kind: 'association', points: toPoints(e.points),
+    }));
+    return hitTestDiagramEdges(p.x, p.y, edges, viewRef.current.scale || 1);
+  };
+
+  /** Divide un tramo en el punto p (Alt+clic o doble clic) y guarda la nueva geometría. */
+  const splitEdgeAt = (L: typeof latest.current, hit: Extract<EdgeHitResult, { kind: 'segment' }>, p: Point2D): void => {
+    const e = L.layout.edges[Number(hit.edgeId)];
+    if (!e) return;
+    const { points } = splitEdgeSegmentAt(toPoints(e.points), hit.segmentIndex, p.x, p.y);
+    setEdgeGeom((prev) => new Map(prev).set(edgeKeyOf(e, Number(hit.edgeId)), points));
+  };
+
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>): void => {
     if (e.button === 1) e.preventDefault(); // sin autoscroll de Chromium con el botón central
     if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
@@ -1027,6 +1111,35 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const p = screenToWorld(viewRef.current, sx, sy);
     const L = latest.current;
     const additive = e.ctrlKey || e.metaKey;
+    // Gestos sobre relaciones y cabeceras de paquete (sin Ctrl, fuera de tarjetas y de modo foco).
+    if (e.button === 0 && !additive && !spaceRef.current && !L.inFocus && hitTestNode(L.index, L.layout, p.x, p.y) === null) {
+      const knife = e.shiftKey && e.altKey;
+      const pkgName = knife ? null : hitTestPackageHeader(L.layout, p.x, p.y);
+      const hit = knife || pkgName !== null ? null : edgeHitAt(L, p);
+      const base = { id: e.pointerId, button: e.button, x: e.clientX, y: e.clientY, x0: sx, y0: sy, moved: false, nodeIds: [], base: selection(), additive: false, alt: e.altKey };
+      if (knife) {
+        dragRef.current = { ...base, kind: 'knife' };
+        return;
+      }
+      if (pkgName !== null) {
+        dragRef.current = { ...base, kind: 'package', pkg: pkgName, dropPkg: null };
+        return;
+      }
+      if (hit !== null && (hit.kind === 'source-handle' || hit.kind === 'target-handle' || hit.kind === 'segment')) {
+        const index = Number(hit.edgeId);
+        const e0 = L.layout.edges[index];
+        if (e0) {
+          const edge: EdgeGrab = {
+            index,
+            key: edgeKeyOf(e0, index),
+            startPts: toPoints(e0.points),
+            ...(hit.kind === 'segment' ? { segment: hit.segmentIndex } : { handle: hit.kind === 'source-handle' ? 'source' : 'target' }),
+          };
+          dragRef.current = { ...base, kind: hit.kind === 'segment' ? 'segment' : 'handle', edge };
+          return;
+        }
+      }
+    }
     // Sin Ctrl (o con Espacio) todo arrastra la vista. Con Ctrl: el izquierdo mueve tarjetas o dibuja
     // el marco y el derecho dibuja el marco. Las posiciones manuales son del diagrama completo: en
     // modo foco no se mueven tarjetas.
@@ -1070,6 +1183,23 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     d.moved = true;
     d.x = e.clientX;
     d.y = e.clientY;
+    if (d.kind === 'knife') {
+      setKnifeLine({ x0: d.x0, y0: d.y0, x1: sx, y1: sy });
+      return;
+    }
+    if (d.kind === 'segment' && d.edge?.segment !== undefined) {
+      const p = screenToWorld(viewRef.current, sx, sy);
+      const next = moveOrthogonalSegment(d.edge.startPts, d.edge.segment, p.x, p.y).points;
+      const key = d.edge.key;
+      setEdgeGeom((prev) => new Map(prev).set(key, next));
+      return;
+    }
+    if (d.kind === 'package') {
+      const p = screenToWorld(viewRef.current, sx, sy);
+      d.dropPkg = packageUnder(latest.current.layout.packages, p.x, p.y, d.pkg ?? '');
+      return;
+    }
+    if (d.kind === 'handle') return;
     if (d.kind === 'node') {
       const s = viewRef.current.scale || 1;
       const ids = d.nodeIds;
@@ -1098,11 +1228,21 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     setDraggingNode(false);
     setMarquee(null);
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
-    if (d.moved) return; // con movimiento no hay clic ni menú
-    if (d.kind === 'pan') return; // Espacio, central o derecho sin mover: nada que hacer
+    setKnifeLine(null);
     const rect = e.currentTarget.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
+    if (d.moved && (d.kind === 'knife' || d.kind === 'handle' || d.kind === 'package')) {
+      commitEdgeGesture(d, screenToWorld(viewRef.current, sx, sy));
+      return;
+    }
+    if (d.kind === 'segment' && d.alt && !d.moved && d.edge) {
+      const hit = edgeHitAt(latest.current, screenToWorld(viewRef.current, sx, sy));
+      if (hit?.kind === 'segment') splitEdgeAt(latest.current, hit, screenToWorld(viewRef.current, sx, sy));
+      return;
+    }
+    if (d.moved) return; // con movimiento no hay clic ni menú
+    if (d.kind === 'pan') return; // Espacio, central o derecho sin mover: nada que hacer
     // Derecho sin arrastre: con Ctrl sobre una entidad alterna su selección (sin menú); si no, el menú
     // se abre al soltar en todas las plataformas (en macOS saltaría al pulsar).
     if (d.button === 2) {
@@ -1166,6 +1306,55 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     }
     // Clic simple en el fondo conserva la selección (solo el doble clic la limpia).
     if (hit?.kind === 'node') select(single(hit.id));
+  };
+
+  /** Confirma un gesto sobre relaciones o paquetes: reescribe el PUML (la geometría manual queda en el lienzo). */
+  const commitEdgeGesture = (d: Drag, p: Point2D): void => {
+    const L = latest.current;
+    const onSource = L.onSourceEdit;
+    if (!onSource) return;
+    if (d.kind === 'knife') {
+      const a = screenToWorld(viewRef.current, d.x0, d.y0);
+      const edges: DiagramEdgeLayout[] = L.layout.edges.map((e, i) => ({
+        id: String(i), source: e.source, target: e.target, kind: 'association', points: toPoints(e.points),
+      }));
+      const cut = getEdgesIntersectedByKnife(a, p, edges).map((id) => L.layout.edges[Number(id)]).filter((e) => e !== undefined);
+      if (cut.length > 0) {
+        const pairs = cut.map((e) => ({ source: e.source, target: e.target }));
+        onSource((text) => syncBrokenRelationsInPuml(text, pairs));
+      }
+      return;
+    }
+    if (d.kind === 'handle' && d.edge?.handle !== undefined) {
+      const e = L.layout.edges[d.edge.index];
+      if (!e) return;
+      const node = hitTestNode(L.index, L.layout, p.x, p.y);
+      const endNode = node !== null && !isPackageNode(node) ? node : null;
+      if (endNode === null) {
+        // Soltado en vacío: la relación queda desconectada y se elimina del código.
+        onSource((text) => syncBrokenRelationsInPuml(text, [{ source: e.source, target: e.target }]));
+        return;
+      }
+      const current = d.edge.handle === 'source' ? e.source : e.target;
+      if (endNode === current) return;
+      const newSource = d.edge.handle === 'source' ? endNode : e.source;
+      const newTarget = d.edge.handle === 'target' ? endNode : e.target;
+      // Se descarta la geometría manual: la relación se re-enruta desde el código reescrito.
+      const key = d.edge.key;
+      setEdgeGeom((prev) => {
+        const next = new Map(prev);
+        next.delete(key);
+        return next;
+      });
+      onSource((text) => syncReconnectedRelationInPuml(text, e.source, e.target, newSource, newTarget));
+      return;
+    }
+    if (d.kind === 'package' && d.pkg !== undefined && d.dropPkg) {
+      const short = d.pkg.split('.').pop() ?? d.pkg;
+      const newPath = `${d.dropPkg}.${short}`;
+      if (newPath === d.pkg) return;
+      onSource((text) => syncNestedPackageInPuml(text, d.pkg ?? '', newPath));
+    }
   };
 
   /** Objetivo del menú para lo que hay bajo un punto (o el fondo). */
@@ -1362,6 +1551,18 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
     const L = latest.current;
     const nodeId = hitTestNode(L.index, L.layout, p.x, p.y);
     if (nodeId === null && !hitTestPackageHeader(L.layout, p.x, p.y)) {
+      // Doble clic en un codo lo elimina; en un tramo, lo parte.
+      const hit = edgeHitAt(L, p);
+      if (hit?.kind === 'waypoint') {
+        const i = Number(hit.edgeId);
+        const e = L.layout.edges[i];
+        if (e) setEdgeGeom((prev) => new Map(prev).set(edgeKeyOf(e, i), deleteEdgeWaypoint(toPoints(e.points), hit.waypointIndex)));
+        return;
+      }
+      if (hit?.kind === 'segment') {
+        splitEdgeAt(L, hit, p);
+        return;
+      }
       // Solo limpia la selección (sin encuadrar): es la forma de deseleccionar.
       if (edgeSel !== null) L.onRelationSelect?.(null);
       setEdgeSel(null);
@@ -1507,6 +1708,11 @@ export const DiagramCanvas = forwardRef<DiagramCanvasHandle, Props>(function Dia
         tabIndex={0}
         aria-keyshortcuts="F Enter Escape Backspace Shift+F10 Tab Space ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown + - 0 ?"
       />
+      {knifeLine !== null ? (
+        <svg className="diagram-knife" aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+          <line x1={knifeLine.x0} y1={knifeLine.y0} x2={knifeLine.x1} y2={knifeLine.y1} stroke="#d33" strokeWidth={1.5} strokeDasharray="6 4" />
+        </svg>
+      ) : null}
       {marquee !== null ? (
         <div
           className="diagram-marquee"

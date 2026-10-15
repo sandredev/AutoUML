@@ -11,7 +11,9 @@ import {
   rerouteAffectedEdges,
   routeAllEdges,
 } from '../routing';
-import type { EdgePath, LayoutResult, NodeBox, NoteBox, PackageBox } from '../types';
+import type { EdgePath, LayoutResult, NodeBox, NoteBox, PackageBox, DiagramLayoutModel, DiagramPackageLayout, DiagramNodeLayout, Point2D } from '../types';
+import { clampEndpointToNode } from './edgeHit';
+import { fitPackagesBottomUp } from '../routing/packageFit';
 
 export interface Offset {
   dx: number;
@@ -282,4 +284,196 @@ export function overridesToRecord(overrides: Overrides): Record<string, { dx: nu
   const out: Record<string, { dx: number; dy: number }> = {};
   for (const [id, o] of overrides) out[id] = { dx: o.dx, dy: o.dy };
   return out;
+}
+
+/**
+ * Encuentra el paquete receptor bajo el cursor durante un Drag & Drop,
+ * impidiendo soltar un paquete dentro de sí mismo o de sus descendientes.
+ */
+export function findTargetPackageUnderPointer(
+  worldX: number,
+  worldY: number,
+  packages: DiagramPackageLayout[],
+  draggedPkgFullPath?: string
+): DiagramPackageLayout | null {
+  let deepestMatch: DiagramPackageLayout | null = null;
+
+  for (const pkg of packages) {
+    if (draggedPkgFullPath) {
+      if (
+        pkg.fullPath === draggedPkgFullPath ||
+        pkg.fullPath.startsWith(`${draggedPkgFullPath}.`)
+      ) {
+        continue;
+      }
+    }
+
+    const inside =
+      worldX >= pkg.x &&
+      worldX <= pkg.x + pkg.width &&
+      worldY >= pkg.y &&
+      worldY <= pkg.y + pkg.height;
+
+    if (inside && (!deepestMatch || pkg.depth >= deepestMatch.depth)) {
+      deepestMatch = pkg;
+    }
+  }
+
+  return deepestMatch;
+}
+
+/**
+ * Traslada en vivo un paquete junto con sus subpaquetes, entidades y aristas internas en O(K).
+ */
+export function movePackageSubtreeInModel(
+  model: DiagramLayoutModel,
+  pkgFullPath: string,
+  dx: number,
+  dy: number
+): void {
+  const movedNodes = new Set<string>();
+
+  for (const pkg of model.packages) {
+    if (pkg.fullPath === pkgFullPath || pkg.fullPath.startsWith(`${pkgFullPath}.`)) {
+      pkg.x += dx;
+      pkg.y += dy;
+    }
+  }
+
+  for (const node of model.nodes.values()) {
+    if (node.packagePath === pkgFullPath || node.packagePath?.startsWith(`${pkgFullPath}.`)) {
+      node.x += dx;
+      node.y += dy;
+      movedNodes.add(node.id);
+    }
+  }
+
+  for (const edge of model.edges) {
+    const srcInside = movedNodes.has(edge.source);
+    const tgtInside = movedNodes.has(edge.target);
+
+    if (srcInside && tgtInside) {
+      for (const pt of edge.points) {
+        pt.x += dx;
+        pt.y += dy;
+      }
+    } else if (srcInside) {
+      const srcNode = model.nodes.get(edge.source);
+      if (srcNode && edge.points.length >= 2) {
+        edge.points[0].x += dx;
+        edge.points[0].y += dy;
+        adjustAttachedCorner(edge.points, true, srcNode);
+      }
+    } else if (tgtInside) {
+      const tgtNode = model.nodes.get(edge.target);
+      if (tgtNode && edge.points.length >= 2) {
+        const last = edge.points.length - 1;
+        edge.points[last].x += dx;
+        edge.points[last].y += dy;
+        adjustAttachedCorner(edge.points, false, tgtNode);
+      }
+    }
+  }
+}
+
+/**
+ * Traslada una única entidad en vivo manteniendo la ortogonalidad de sus aristas.
+ */
+export function moveSingleNodeInModel(
+  model: DiagramLayoutModel,
+  nodeId: string,
+  dx: number,
+  dy: number
+): void {
+  const node = model.nodes.get(nodeId);
+  if (!node) return;
+  node.x += dx;
+  node.y += dy;
+
+  for (const edge of model.edges) {
+    if (edge.source === nodeId && edge.points.length >= 2) {
+      edge.points[0].x += dx;
+      edge.points[0].y += dy;
+      adjustAttachedCorner(edge.points, true, node);
+    }
+    if (edge.target === nodeId && edge.points.length >= 2) {
+      const last = edge.points.length - 1;
+      edge.points[last].x += dx;
+      edge.points[last].y += dy;
+      adjustAttachedCorner(edge.points, false, node);
+    }
+  }
+}
+
+/**
+ * Anida `draggedPkgPath` dentro de `targetParentPkgPath` (o lo extrae a la raíz si es null).
+ * Recalcula las rutas jerárquicas y expande automáticamente el paquete padre.
+ */
+export function nestPackageInModel(
+  model: DiagramLayoutModel,
+  draggedPkgPath: string,
+  targetParentPkgPath: string | null
+): { oldPath: string; newPath: string } | null {
+  const sourcePkg = model.packages.find((p) => p.fullPath === draggedPkgPath);
+  if (!sourcePkg) return null;
+
+  if (
+    targetParentPkgPath &&
+    (targetParentPkgPath === draggedPkgPath ||
+      targetParentPkgPath.startsWith(`${draggedPkgPath}.`))
+  ) {
+    return null;
+  }
+
+  const newPath = targetParentPkgPath
+    ? `${targetParentPkgPath}.${sourcePkg.name}`
+    : sourcePkg.name;
+
+  if (newPath === draggedPkgPath) return null;
+
+  for (const pkg of model.packages) {
+    if (pkg.fullPath === draggedPkgPath) {
+      pkg.fullPath = newPath;
+      pkg.id = `pkg:${newPath}`;
+      pkg.parentPath = targetParentPkgPath ?? undefined;
+      pkg.depth = newPath.split('.').length - 1;
+    } else if (pkg.fullPath.startsWith(`${draggedPkgPath}.`)) {
+      const rest = pkg.fullPath.slice(draggedPkgPath.length);
+      const updatedFull = `${newPath}${rest}`;
+      const parts = updatedFull.split('.');
+      pkg.fullPath = updatedFull;
+      pkg.id = `pkg:${updatedFull}`;
+      pkg.parentPath = parts.slice(0, -1).join('.') || undefined;
+      pkg.depth = parts.length - 1;
+    }
+  }
+
+  for (const node of model.nodes.values()) {
+    if (node.packagePath === draggedPkgPath) {
+      node.packagePath = newPath;
+    } else if (node.packagePath?.startsWith(`${draggedPkgPath}.`)) {
+      const rest = node.packagePath.slice(draggedPkgPath.length);
+      node.packagePath = `${newPath}${rest}`;
+    }
+  }
+
+  model.packages.sort((a, b) => a.depth - b.depth);
+  fitPackagesBottomUp(model);
+
+  return { oldPath: draggedPkgPath, newPath };
+}
+
+function adjustAttachedCorner(pts: Point2D[], isSource: boolean, node: DiagramNodeLayout) {
+  if (pts.length === 2) {
+    const midY = (pts[0].y + pts[1].y) / 2;
+    pts.splice(1, 0, { x: pts[0].x, y: midY }, { x: pts[1].x, y: midY });
+  }
+  if (isSource) {
+    pts[0] = clampEndpointToNode(node, pts[1]);
+    pts[1].x = pts[0].x;
+  } else {
+    const last = pts.length - 1;
+    pts[last] = clampEndpointToNode(node, pts[last - 1]);
+    pts[last - 1].x = pts[last].x;
+  }
 }

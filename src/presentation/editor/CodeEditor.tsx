@@ -43,6 +43,8 @@ export interface CodeEditorHandle {
   revealLines(line: number, endLine?: number): void;
   /** Renombra un tipo y sus referencias en el texto como UN paso del historial (Ctrl+Z lo deshace entero). */
   renameType(oldId: string, newId: string): void;
+  /** Sustituye el texto completo como UN paso del historial (Ctrl+Z lo deshace). Solo cambia lo que difiere. */
+  applyText(next: string): void;
   focus(): void;
 }
 
@@ -253,6 +255,23 @@ export const CodeEditor = forwardRef<CodeEditorHandle, Props>(function CodeEdito
           });
         // Una sola transacción del usuario: entra en el historial y Ctrl+Z la deshace de una vez.
         view.dispatch({ changes, userEvent: 'input.rename' });
+      },
+      applyText: (next) => {
+        const view = viewRef.current;
+        if (!view) return;
+        const current = view.state.doc.toString();
+        if (current === next) return;
+        // Recorta prefijo y sufijo comunes para que el historial guarde solo la diferencia.
+        let from = 0;
+        const max = Math.min(current.length, next.length);
+        while (from < max && current[from] === next[from]) from++;
+        let tailA = current.length;
+        let tailB = next.length;
+        while (tailA > from && tailB > from && current[tailA - 1] === next[tailB - 1]) {
+          tailA--;
+          tailB--;
+        }
+        view.dispatch({ changes: { from, to: tailA, insert: next.slice(from, tailB) }, userEvent: 'input.diagram' });
       },
       focus: () => viewRef.current?.focus(),
     }),

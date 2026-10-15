@@ -76,3 +76,91 @@ export function lineMapping(lineMap: readonly PumlLineRef[] | null, entryPath: s
     toCombined: (line) => toCombined.get(line) ?? null,
   };
 }
+
+/**
+ * Actualiza la ruta del paquete en el documento PlantUML tras hacer Drag & Drop
+ * de un paquete dentro de otro paquete.
+ */
+export function syncNestedPackageInPuml(
+  pumlContent: string,
+  oldPackagePath: string,
+  newPackagePath: string
+): string {
+  const escapedOld = oldPackagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const qualifiedRegex = new RegExp(
+    `(\\b(?:package|namespace)\\s+"?)${escapedOld}(\\.[^"\\s{]+)?("?\\s*(?:as\\s+\\w+\\s*)?\\{?)`,
+    'g'
+  );
+
+  let updated = pumlContent.replace(qualifiedRegex, (_m, prefix, sub = '', suffix) => {
+    return `${prefix}${newPackagePath}${sub}${suffix}`;
+  });
+
+  if (updated === pumlContent) {
+    const shortName = oldPackagePath.split('.').pop()!;
+    const simpleRegex = new RegExp(
+      `(\\b(?:package|namespace)\\s+"?)${shortName}("?\\s*(?:as\\s+\\w+\\s*)?\\{)`,
+      'g'
+    );
+    updated = pumlContent.replace(simpleRegex, `$1${newPackagePath}$2`);
+  }
+
+  return updated;
+}
+
+/**
+ * Actualiza el extremo origen o destino de una relación en el código PlantUML.
+ */
+export function syncReconnectedRelationInPuml(
+  pumlContent: string,
+  oldSource: string,
+  oldTarget: string,
+  newSource: string,
+  newTarget: string
+): string {
+  const lines = pumlContent.split(/\r?\n/);
+  const escSrc = oldSource.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escTgt = oldTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const relRegex = new RegExp(
+    `^(\\s*"?${escSrc}"?\\s+)([<|*o#x+^-]*[-.~]+.*[>|*o#x+^-]*)(\\s+"?${escTgt}"?.*)$`
+  );
+
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().startsWith("'")) continue;
+    const match = lines[i].match(relRegex);
+    if (match) {
+      lines[i] = `${match[1].replace(oldSource, newSource)}${match[2]}${match[3].replace(
+        oldTarget,
+        newTarget
+      )}`;
+      break;
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Elimina del código PlantUML las relaciones cortadas con la cuchilla o desconectadas.
+ */
+export function syncBrokenRelationsInPuml(
+  pumlContent: string,
+  brokenEdges: Array<{ source: string; target: string }>
+): string {
+  if (brokenEdges.length === 0) return pumlContent;
+  const lines = pumlContent.split(/\r?\n/);
+
+  return lines
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("'")) return true;
+      for (const rel of brokenEdges) {
+        const s = rel.source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const t = rel.target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const fwd = new RegExp(`^"?${s}"?\\s+[<|*o#x+^-]*[-.~]+.*[>|*o#x+^-]*\\s+"?${t}"?(?:\\s*:.*)?$`);
+        const rev = new RegExp(`^"?${t}"?\\s+[<|*o#x+^-]*[-.~]+.*[>|*o#x+^-]*\\s+"?${s}"?(?:\\s*:.*)?$`);
+        if (fwd.test(trimmed) || rev.test(trimmed)) return false;
+      }
+      return true;
+    })
+    .join('\n');
+}

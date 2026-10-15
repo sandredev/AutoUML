@@ -2,7 +2,7 @@ import { useMemo, type JSX, type ReactNode, type RefObject } from 'react';
 import type { ViewerControl, ViewerInfo } from '../diagram/viewerInfo';
 import type { DiagramModel } from '../../domain/diagram/model';
 import type { ProjectInfo, SidecarFilters, SidecarState, SidecarView } from '../../application/ports/ipc';
-import { PumlViewer, type CodeTarget, type PaletteHost, type ViewerToolbarHost } from '../diagram/PumlViewer';
+import { PumlViewer, type CodeTarget, type PaletteHost, type SourceEdit, type ViewerToolbarHost } from '../diagram/PumlViewer';
 import type { DiagramCanvasHandle } from '../diagram/canvas/DiagramCanvas';
 import { useLocalization } from '../localization/LocalizationProvider';
 import { viewerLabels } from '../localization/viewerLabels';
@@ -32,6 +32,8 @@ interface Props {
   highlightLine?: number | null;
   onRelationSelect?: (line: number | null) => void;
   onRename?: (id: string, next: string) => string | null;
+  /** Reescribe el código al editar relaciones o paquetes en el lienzo. */
+  onSourceEdit?: (edit: SourceEdit) => void;
   /** Menú contextual (T8): ir al código y copiar nombre. */
   onGoToCode?: (target: CodeTarget) => void;
   onCopyText?: (text: string) => void;
@@ -69,6 +71,7 @@ export function RenderArea({
   highlightLine = null,
   onRelationSelect,
   onRename,
+  onSourceEdit,
   onGoToCode,
   onCopyText,
   onAppAction,
@@ -132,6 +135,7 @@ export function RenderArea({
         highlightLine={highlightLine}
         {...(onRelationSelect ? { onRelationSelect } : {})}
         {...(onRename ? { onRename } : {})}
+        {...(onSourceEdit ? { onSourceEdit } : {})}
         {...(onGoToCode ? { onGoToCode } : {})}
         {...(onCopyText ? { onCopyText } : {})}
         {...(paletteHost ? { paletteHost } : {})}

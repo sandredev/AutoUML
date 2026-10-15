@@ -35,10 +35,13 @@ export {
   fitPackageBoxes,
   openPackageChannels,
   packageBoxesFromModel,
+  fitPackagesBottomUp,
+  PACKAGE_HEADER_HEIGHT,
+  PACKAGE_PADDING,
 } from './packageFit';
 export { assignEdgeLanes, type LaneAssignment, SegmentOccupancy } from './channels';
 export { buildHananGrid, collectObstaclesForEdge, type HananGrid, type ObstacleBox, ObstacleIndex, segmentHitsObstacle } from './graph';
-export { nudgeEdges } from './nudge';
+export { nudgeEdges, nudgeRoutedEdges, enforceOrthogonal } from './nudge';
 export {
   computeDiagramBounds,
   normalizeOrthoPolyline,

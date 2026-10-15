@@ -9,7 +9,7 @@
 //   (así no se crean cruces entre ellos).
 // Los tramos de puerto (primero y último) también se deslizan, moviendo el puerto a lo largo de su cara
 // sin acercarse a las esquinas. Cada movimiento se valida contra los obstáculos antes de aplicarlo.
-import type { EdgePath, NodeBox, NoteBox, PackageBox } from '../types';
+import type { EdgePath, NodeBox, NoteBox, PackageBox, DiagramEdgeLayout, DiagramNodeLayout, Point2D } from '../types';
 import { EPS } from './constants';
 import type { RectBox } from './ports';
 
@@ -378,4 +378,226 @@ export function nudgeEdges(
     const p = pts[k];
     return p ? { ...e, points: p } : e;
   });
+}
+
+const BUCKET_TOLERANCE = 6;
+const LANE_SPACING = 8;
+
+interface SegmentEntry {
+  edgeIdx: number;
+  segIdx: number;
+  isHorizontal: boolean;
+  min: number;
+  max: number;
+}
+
+export function nudgeRoutedEdges(
+  edges: DiagramEdgeLayout[],
+  nodes: Map<string, DiagramNodeLayout>
+): DiagramEdgeLayout[] {
+  const cloned = edges.map((e) => ({
+    ...e,
+    points: (e.manualPoints ?? e.points).map((p) => ({ x: p.x, y: p.y })),
+  }));
+
+  // 1. Forzar ortogonalidad estricta en cualquier tramo oblicuo
+  for (const edge of cloned) {
+    edge.points = enforceOrthogonal(edge.points);
+  }
+
+  // 2. Indexar segmentos interiores en buckets lineales
+  const hBuckets = new Map<number, SegmentEntry[]>();
+  const vBuckets = new Map<number, SegmentEntry[]>();
+
+  for (let eIdx = 0; eIdx < cloned.length; eIdx++) {
+    if (cloned[eIdx].manualPoints) continue; // No alterar tramos fijados manualmente
+    const pts = cloned[eIdx].points;
+    if (pts.length < 4) continue;
+
+    for (let sIdx = 1; sIdx < pts.length - 2; sIdx++) {
+      const a = pts[sIdx];
+      const b = pts[sIdx + 1];
+      const dx = Math.abs(b.x - a.x);
+      const dy = Math.abs(b.y - a.y);
+
+      if (dy < 1 && dx > 10) {
+        const key = Math.round(a.y / BUCKET_TOLERANCE);
+        const bucket = hBuckets.get(key) ?? [];
+        bucket.push({
+          edgeIdx: eIdx,
+          segIdx: sIdx,
+          isHorizontal: true,
+          min: Math.min(a.x, b.x),
+          max: Math.max(a.x, b.x),
+        });
+        hBuckets.set(key, bucket);
+      } else if (dx < 1 && dy > 10) {
+        const key = Math.round(a.x / BUCKET_TOLERANCE);
+        const bucket = vBuckets.get(key) ?? [];
+        bucket.push({
+          edgeIdx: eIdx,
+          segIdx: sIdx,
+          isHorizontal: false,
+          min: Math.min(a.y, b.y),
+          max: Math.max(a.y, b.y),
+        });
+        vBuckets.set(key, bucket);
+      }
+    }
+  }
+
+  // 3. Asignación de carriles mediante barrido de intervalos O(K log K)
+  const applyBucketNudge = (buckets: Map<number, SegmentEntry[]>) => {
+    for (const entries of buckets.values()) {
+      if (entries.length <= 1) continue;
+      entries.sort((a, b) => a.min - b.min || a.max - b.max);
+
+      const laneEnds: number[] = [];
+      const assignedLane: number[] = new Array(entries.length).fill(0);
+
+      for (let i = 0; i < entries.length; i++) {
+        const item = entries[i];
+        let lane = -1;
+        for (let l = 0; l < laneEnds.length; l++) {
+          if (laneEnds[l] + 4 < item.min) {
+            lane = l;
+            laneEnds[l] = item.max;
+            break;
+          }
+        }
+        if (lane === -1) {
+          lane = laneEnds.length;
+          laneEnds.push(item.max);
+        }
+        assignedLane[i] = lane;
+      }
+
+      if (laneEnds.length <= 1) continue;
+
+      for (let i = 0; i < entries.length; i++) {
+        const item = entries[i];
+        const offset = (assignedLane[i] - (laneEnds.length - 1) / 2) * LANE_SPACING;
+        const pts = cloned[item.edgeIdx].points;
+        if (item.isHorizontal) {
+          pts[item.segIdx].y += offset;
+          pts[item.segIdx + 1].y += offset;
+        } else {
+          pts[item.segIdx].x += offset;
+          pts[item.segIdx + 1].x += offset;
+        }
+      }
+    }
+  };
+
+  applyBucketNudge(hBuckets);
+  applyBucketNudge(vBuckets);
+
+  // 4. Distribuir puertos en los bordes de cada tarjeta para evitar colisiones al llegar
+  distributePortsOnNodes(cloned, nodes);
+
+  return cloned;
+}
+
+export function enforceOrthogonal(pts: Point2D[]): Point2D[] {
+  if (pts.length < 2) return pts;
+  const out: Point2D[] = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const prev = out[out.length - 1];
+    const curr = pts[i];
+    if (Math.abs(curr.x - prev.x) > 1.5 && Math.abs(curr.y - prev.y) > 1.5) {
+      const midY = (prev.y + curr.y) / 2;
+      out.push({ x: prev.x, y: midY }, { x: curr.x, y: midY });
+    }
+    out.push(curr);
+  }
+  return out;
+}
+
+function distributePortsOnNodes(
+  edges: DiagramEdgeLayout[],
+  nodes: Map<string, DiagramNodeLayout>
+) {
+  type Side = 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
+  interface PortSlot {
+    edge: DiagramEdgeLayout;
+    isSource: boolean;
+    side: Side;
+    refCoord: number;
+  }
+
+  const slotsByNodeSide = new Map<string, PortSlot[]>();
+
+  for (const edge of edges) {
+    if (edge.points.length < 2) continue;
+    for (const isSource of [true, false]) {
+      const nodeId = isSource ? edge.source : edge.target;
+      const node = nodes.get(nodeId);
+      if (!node) continue;
+
+      const endpoint = isSource ? edge.points[0] : edge.points[edge.points.length - 1];
+      const neighbor = isSource ? edge.points[1] : edge.points[edge.points.length - 2];
+
+      const dTop = Math.abs(endpoint.y - node.y);
+      const dBottom = Math.abs(endpoint.y - (node.y + node.height));
+      const dLeft = Math.abs(endpoint.x - node.x);
+      const dRight = Math.abs(endpoint.x - (node.x + node.width));
+      const minD = Math.min(dTop, dBottom, dLeft, dRight);
+
+      const side: Side =
+        minD === dTop ? 'TOP' : minD === dBottom ? 'BOTTOM' : minD === dLeft ? 'LEFT' : 'RIGHT';
+
+      const key = `${nodeId}:${side}`;
+      const list = slotsByNodeSide.get(key) ?? [];
+      list.push({
+        edge,
+        isSource,
+        side,
+        refCoord: side === 'TOP' || side === 'BOTTOM' ? neighbor.x : neighbor.y,
+      });
+      slotsByNodeSide.set(key, list);
+    }
+  }
+
+  for (const [key, list] of slotsByNodeSide.entries()) {
+    if (list.length <= 1) continue;
+    const [nodeId, side] = key.split(':') as [string, Side];
+    const node = nodes.get(nodeId)!;
+    list.sort((a, b) => a.refCoord - b.refCoord);
+
+    const pad = 14;
+    const span =
+      side === 'TOP' || side === 'BOTTOM'
+        ? Math.max(16, node.width - pad * 2)
+        : Math.max(16, node.height - pad * 2);
+
+    for (let i = 0; i < list.length; i++) {
+      const slot = list[i];
+      const pts = slot.edge.points;
+      const ratio = (i + 1) / (list.length + 1);
+
+      if (side === 'TOP' || side === 'BOTTOM') {
+        const x = node.x + pad + span * ratio;
+        if (slot.isSource) {
+          pts[0].x = x;
+          if (pts.length >= 3 && Math.abs(pts[1].y - pts[2].y) < 1) pts[1].x = x;
+        } else {
+          pts[pts.length - 1].x = x;
+          if (pts.length >= 3 && Math.abs(pts[pts.length - 2].y - pts[pts.length - 3].y) < 1) {
+            pts[pts.length - 2].x = x;
+          }
+        }
+      } else {
+        const y = node.y + pad + span * ratio;
+        if (slot.isSource) {
+          pts[0].y = y;
+          if (pts.length >= 3 && Math.abs(pts[1].x - pts[2].x) < 1) pts[1].y = y;
+        } else {
+          pts[pts.length - 1].y = y;
+          if (pts.length >= 3 && Math.abs(pts[pts.length - 2].x - pts[pts.length - 3].x) < 1) {
+            pts[pts.length - 2].y = y;
+          }
+        }
+      }
+    }
+  }
 }

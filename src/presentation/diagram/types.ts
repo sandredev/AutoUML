@@ -83,3 +83,65 @@ export interface ViewState {
   /** Desplazamiento en píxeles de pantalla del origen del mundo. */
   tx: number; ty: number;
 }
+
+export interface Point2D {
+  x: number;
+  y: number;
+}
+
+export type RelationKind =
+  | 'inheritance'
+  | 'implementation'
+  | 'composition'
+  | 'aggregation'
+  | 'dependency'
+  | 'association';
+
+export interface DiagramNodeLayout {
+  id: string;
+  name: string;
+  packagePath?: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DiagramPackageLayout {
+  id: string;
+  name: string;
+  fullPath: string;
+  parentPath?: string;
+  depth: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DiagramEdgeLayout {
+  id: string;
+  source: string;
+  target: string;
+  kind: RelationKind;
+  label?: string;
+  sourceLabel?: string;
+  targetLabel?: string;
+  points: Point2D[];
+  /** Si el usuario movió o partió segmentos manualmente, se preservan aquí */
+  manualPoints?: Point2D[];
+}
+
+export interface DiagramLayoutModel {
+  nodes: Map<string, DiagramNodeLayout>;
+  packages: DiagramPackageLayout[];
+  edges: DiagramEdgeLayout[];
+  width: number;
+  height: number;
+}
+
+export interface DiagramOverridesState {
+  nodePositions: Map<string, Point2D>;
+  edgeWaypoints: Map<string, Point2D[]>;
+  packageNestingOverrides: Map<string, string | null>; // pkgFullPath -> newParentFullPath
+}

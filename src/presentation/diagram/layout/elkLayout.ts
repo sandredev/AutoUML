@@ -10,7 +10,18 @@ import {
   PKG_PADDING,
   routeAllEdges,
 } from '../routing';
-import type { EdgePath, LayoutOptions, LayoutResult, NodeBox, PackageBox } from '../types';
+import type {
+  DiagramLayoutModel,
+  DiagramNodeLayout,
+  DiagramPackageLayout,
+  DiagramEdgeLayout,
+  RelationKind,
+  EdgePath,
+  LayoutOptions,
+  LayoutResult,
+  NodeBox,
+  PackageBox,
+} from '../types';
 import { computeLayout, measureNode } from './layout';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { withElkEnv } from './elkEnv';
@@ -342,4 +353,217 @@ export async function runLayoutWithFallback(
     const result = d.dagre(model, opts);
     return { result, engine: 'dagre', fallback: 'ELK falló, usando dagre: ' + (reason || 'error desconocido'), ms: Math.round(performance.now() - t0) };
   }
+}
+
+export interface ElkInputNode {
+  id: string;
+  name: string;
+  packagePath?: string;
+  width: number;
+  height: number;
+}
+
+export interface ElkInputEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: RelationKind;
+  label?: string;
+}
+
+export async function runHierarchicalElkLayout(
+  inputNodes: ElkInputNode[],
+  inputEdges: ElkInputEdge[]
+): Promise<DiagramLayoutModel> {
+  const isLargeGraph = inputNodes.length >= 200;
+
+  const rootOptions: Record<string, string> = {
+    'elk.algorithm': 'layered',
+    'elk.direction': 'DOWN',
+    'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+    'elk.edgeRouting': 'ORTHOGONAL',
+    'elk.separateConnectedComponents': 'true',
+    'elk.spacing.nodeNode': isLargeGraph ? '44' : '34',
+    'elk.layered.spacing.nodeNodeBetweenLayers': isLargeGraph ? '64' : '50',
+    'elk.spacing.edgeNode': '20',
+    'elk.spacing.edgeEdge': '12',
+    'elk.spacing.componentComponent': '64',
+    'elk.layered.thoroughness': isLargeGraph ? '3' : '7',
+    'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+    'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+    'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+    'elk.layered.cycleBreaking.strategy': 'GREEDY',
+  };
+
+  const root: ElkNode = {
+    id: 'root',
+    layoutOptions: rootOptions,
+    children: [],
+    edges: [],
+  };
+
+  const pkgNodeMap = new Map<string, ElkNode>();
+  const pkgMetaMap = new Map<
+    string,
+    { name: string; fullPath: string; parentPath?: string; depth: number }
+  >();
+
+  function ensurePackageHierarchy(packagePath: string): ElkNode {
+    const parts = packagePath.split('.').filter(Boolean);
+    let currentPath = '';
+    let parentPath: string | undefined = undefined;
+    let currentContainer = root;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      currentPath = currentPath ? `${currentPath}.${part}` : part;
+      const pkgId = `pkg:${currentPath}`;
+
+      let elkPkg = pkgNodeMap.get(pkgId);
+      if (!elkPkg) {
+        elkPkg = {
+          id: pkgId,
+          layoutOptions: {
+            'elk.algorithm': 'layered',
+            'elk.direction': 'DOWN',
+            'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+            'elk.edgeRouting': 'ORTHOGONAL',
+            'elk.padding': '[top=42,left=24,bottom=24,right=24]',
+            'elk.spacing.nodeNode': '32',
+            'elk.layered.spacing.nodeNodeBetweenLayers': '48',
+          },
+          children: [],
+        };
+        pkgNodeMap.set(pkgId, elkPkg);
+        pkgMetaMap.set(pkgId, {
+          name: part,
+          fullPath: currentPath,
+          parentPath,
+          depth: i,
+        });
+        currentContainer.children!.push(elkPkg);
+      }
+      parentPath = currentPath;
+      currentContainer = elkPkg;
+    }
+
+    return currentContainer;
+  }
+
+  const validIds = new Set<string>();
+  const inputNodeById = new Map<string, ElkInputNode>();
+
+  for (const item of inputNodes) {
+    validIds.add(item.id);
+    inputNodeById.set(item.id, item);
+
+    const elkLeaf: ElkNode = {
+      id: item.id,
+      width: Math.max(120, item.width),
+      height: Math.max(56, item.height),
+      layoutOptions: { 'elk.portConstraints': 'FREE' },
+    };
+
+    if (item.packagePath && item.packagePath.trim().length > 0) {
+      const container = ensurePackageHierarchy(item.packagePath.trim());
+      container.children!.push(elkLeaf);
+    } else {
+      root.children!.push(elkLeaf);
+    }
+  }
+
+  const elkEdges: ElkExtendedEdge[] = [];
+  for (const edge of inputEdges) {
+    if (!validIds.has(edge.source) || !validIds.has(edge.target)) continue;
+    elkEdges.push({
+      id: edge.id,
+      sources: [edge.source],
+      targets: [edge.target],
+    });
+  }
+  root.edges = elkEdges;
+
+  const laidOut = await getElk().layout(root);
+
+  const nodes = new Map<string, DiagramNodeLayout>();
+  const packages: DiagramPackageLayout[] = [];
+  const containerAbsOffsets = new Map<string, { x: number; y: number }>();
+
+  function flattenGraph(node: ElkNode, offsetX: number, offsetY: number) {
+    const absX = offsetX + (node.x ?? 0);
+    const absY = offsetY + (node.y ?? 0);
+    containerAbsOffsets.set(node.id, { x: absX, y: absY });
+
+    if (node.id !== 'root') {
+      if (node.id.startsWith('pkg:')) {
+        const meta = pkgMetaMap.get(node.id)!;
+        packages.push({
+          id: node.id,
+          name: meta.name,
+          fullPath: meta.fullPath,
+          parentPath: meta.parentPath,
+          depth: meta.depth,
+          x: absX,
+          y: absY,
+          width: node.width ?? 0,
+          height: node.height ?? 0,
+        });
+      } else {
+        const orig = inputNodeById.get(node.id)!;
+        nodes.set(node.id, {
+          id: node.id,
+          name: orig.name,
+          packagePath: orig.packagePath,
+          x: absX,
+          y: absY,
+          width: node.width ?? orig.width,
+          height: node.height ?? orig.height,
+        });
+      }
+    }
+
+    for (const child of node.children ?? []) {
+      flattenGraph(child, absX, absY);
+    }
+  }
+
+  flattenGraph(laidOut, 0, 0);
+  packages.sort((a, b) => a.depth - b.depth);
+
+  const edgeMeta = new Map(inputEdges.map((e) => [e.id, e]));
+  const edges: DiagramEdgeLayout[] = [];
+
+  for (const elkEdge of laidOut.edges ?? []) {
+    const meta = edgeMeta.get(elkEdge.id);
+    if (!meta) continue;
+    const containerId = (elkEdge as { container?: string }).container ?? 'root';
+    const offset = containerAbsOffsets.get(containerId) ?? { x: 0, y: 0 };
+    const points: Array<{ x: number; y: number }> = [];
+
+    const sec = elkEdge.sections?.[0];
+    if (sec) {
+      points.push({ x: offset.x + sec.startPoint.x, y: offset.y + sec.startPoint.y });
+      for (const bp of sec.bendPoints ?? []) {
+        points.push({ x: offset.x + bp.x, y: offset.y + bp.y });
+      }
+      points.push({ x: offset.x + sec.endPoint.x, y: offset.y + sec.endPoint.y });
+    }
+
+    edges.push({
+      id: elkEdge.id,
+      source: meta.source,
+      target: meta.target,
+      kind: meta.kind,
+      label: meta.label,
+      points,
+    });
+  }
+
+  return {
+    nodes,
+    packages,
+    edges,
+    width: laidOut.width ?? 1200,
+    height: laidOut.height ?? 900,
+  };
 }
